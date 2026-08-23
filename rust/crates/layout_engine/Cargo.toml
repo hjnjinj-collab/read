@@ -1,0 +1,19 @@
+[package]
+name = "layout_engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+unicode-segmentation = "1.11"
+ab_glyph = "0.2"           # 字体加载和字形测量
+lru = "0.12"               # LRU 缓存
+rayon = "1.8"              # 并行排版
+
+[dev-dependencies]
+criterion = "0.5"          # 性能基准测试
+
+[[bench]]
+name = "layout_bench"
+harness = false

@@ -1,0 +1,5 @@
+rust_input: crate::api
+rust_root: rust/crates/bridge
+dart_output: lib/core/ffi/rust_bridge.dart
+c_output: windows/runner/bridge_generated.h
+dart_format_line_length: 120

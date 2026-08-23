@@ -1,0 +1,36 @@
+[package]
+name = "reader_core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+regex = "1.10"
+lru = "0.12"
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+layout_engine = { path = "../layout_engine" }
+book_parser = { path = "../book_parser" }
+uuid = { version = "1.6", features = ["v4"] }
+
+# 第二阶段新增
+rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel"], optional = true }
+memmap2 = "0.9"
+async-trait = "0.1"
+
+# 第三阶段新增
+strsim = "0.11"
+
+[features]
+default = []
+js-engine = ["rquickjs", "book_parser/js-engine"]
+
+[dev-dependencies]
+tokio = { version = "1.35", features = ["full", "test-util"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+] }

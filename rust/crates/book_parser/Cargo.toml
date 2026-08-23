@@ -1,0 +1,29 @@
+[package]
+name = "book_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chardetng = { workspace = true }
+encoding_rs = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zip = "0.6"                   # EPUB (ZIP) 解压
+roxmltree = "0.20"            # EPUB 结构 XML 解析 (container/OPF/NCX/nav)
+scraper = "0.20"              # 正文 XHTML→文本提取（HTML 语义解析）
+memmap2 = "0.9"               # 内存映射（大文件支持）
+lru = "0.12"                  # LRU 缓存
+rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel"], optional = true }  # JS 引擎（可选）
+tokio = { workspace = true }     # 异步运行时
+log = { workspace = true }       # 日志
+zhconv = "0.4.1"
+
+[features]
+default = ["js-engine"]
+js-engine = ["rquickjs"]
+
+[dev-dependencies]
+tempfile = "3"

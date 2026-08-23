@@ -1,0 +1,10 @@
+[package]
+name = "test_large_file"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+book_parser = { path = "../crates/book_parser" }
+anyhow = "1.0"

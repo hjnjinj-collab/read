@@ -1,0 +1,487 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import '../models/simple_models.dart';
+import 'rust_bridge.dart/api.dart' as rust_api;
+import 'rust_bridge.dart/frb_generated.dart';
+import 'rust_bridge.dart/lib.dart' as rust_types;
+
+/// Service to interact with Rust book parser and layout engine
+class BookService {
+  // Initialize FFI
+  static Future<void> init() async {
+    await RustLib.init();
+  }
+
+  /// Parse a TXT file and return book ID
+  Future<String> parseTxtFile(String filePath, String? bookName) async {
+    return await rust_api.parseTxtFile(filePath: filePath, bookName: bookName);
+  }
+
+  /// Parse a TXT file asynchronously（解析在线程池执行，不阻塞 UI）
+  ///
+  /// 大文件导入请优先使用此方法。
+  /// [cleaningOptions] 非空时在导入阶段启用结构净化（去HTML/广告/智能分段等），
+  /// 章节识别在净化后文本上完成。
+  Future<String> parseTxtFileAsync(
+    String filePath,
+    String? bookName, {
+    rust_api.ContentCleaningOptions? cleaningOptions,
+  }) async {
+    return await rust_api.parseTxtFileAsync(
+      filePath: filePath,
+      bookName: bookName,
+      cleaningOptions: cleaningOptions,
+    );
+  }
+
+  /// 运行中更新已打开书籍的净化设置（即时生效，自动失效相关缓存）
+  Future<void> updateBookCleaning(
+    String bookId, {
+    required bool removeHtmlTags,
+    required bool removeAds,
+    required bool smartParagraph,
+    required bool traditionalized,
+    required bool simplified,
+  }) async {
+    final options = buildCleaningOptions(
+      removeHtmlTags: removeHtmlTags,
+      removeAds: removeAds,
+      smartParagraph: smartParagraph,
+      traditionalized: traditionalized,
+      simplified: simplified,
+    );
+    await rust_api.updateBookCleaning(bookId: bookId, options: options);
+  }
+
+  /// 构建净化选项对象
+  rust_api.ContentCleaningOptions buildCleaningOptions({
+    required bool removeHtmlTags,
+    required bool removeAds,
+    required bool smartParagraph,
+    required bool traditionalized,
+    required bool simplified,
+  }) {
+    String convertMode = 'none';
+    if (traditionalized) {
+      convertMode = 's2t';
+    } else if (simplified) {
+      convertMode = 't2s';
+    }
+    String paragraphMode = smartParagraph ? 'smart' : 'none';
+
+    return rust_api.ContentCleaningOptions(
+      convertMode: convertMode,
+      paragraphMode: paragraphMode,
+      cleanHtml: removeHtmlTags,
+      removeAds: removeAds,
+    );
+  }
+
+  /// Get book title
+  Future<String> getBookTitle(String bookId) async {
+    return await rust_api.getBookTitle(bookId: bookId);
+  }
+
+  /// Get chapter list
+  Future<List<Chapter>> getChapters(String bookId) async {
+    final rustChapters = await rust_api.getChapters(bookId: bookId);
+    return rustChapters.map((ch) => Chapter(
+      title: ch.title,
+      startPos: ch.startPos.toInt(),
+      endPos: ch.endPos.toInt(),
+      level: ch.level,
+      parentIndex: ch.parentIndex?.toInt(),
+    )).toList();
+  }
+
+  /// Get chapter content
+  Future<String> getChapterContent(String bookId, int chapterIndex) async {
+    return await rust_api.getChapterContent(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+    );
+  }
+
+  /// Layout chapter into pages
+  Future<List<PageInfo>> layoutChapter(
+    String bookId,
+    int chapterIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+  }) async {
+    final rustPages = await rust_api.layoutChapter(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+    );
+
+    return rustPages.map(_mapPage).toList();
+  }
+
+  /// Get specific page
+  Future<PageInfo> getPage(
+    String bookId,
+    int chapterIndex,
+    int pageIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+  }) async {
+    final rustPage = await rust_api.getPage(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      pageIndex: BigInt.from(pageIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+    );
+
+    return _mapPage(rustPage);
+  }
+
+  /// Get page count for a chapter
+  Future<int> getPageCount(
+    String bookId,
+    int chapterIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+  }) async {
+    final count = await rust_api.getPageCount(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+    );
+
+    return count.toInt();
+  }
+
+  /// Get specific page with content preprocessing (带内容预处理)
+  ///
+  /// [replaceRules] 用户自定义替换规则，随请求传入（即时生效）。
+  /// [anchorCharOffset] 进度锚点：提供时返回包含该章内字符偏移的页，
+  /// 用于设置变更后停留在原阅读位置。
+  Future<PageInfo> getPageProcessed(
+    String bookId,
+    int chapterIndex,
+    int pageIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+    required bool removeDuplicateTitle,
+    required bool reSegment,
+    required int chineseConvert, // 0=none, 1=s2t, 2=t2s
+    List<ReplaceRuleItem> replaceRules = const [],
+    int? anchorCharOffset,
+  }) async {
+    final rustPage = await rust_api.getPageProcessed(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      pageIndex: BigInt.from(pageIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+      removeDuplicateTitle: removeDuplicateTitle,
+      reSegment: reSegment,
+      chineseConvert: chineseConvert,
+      replaceRules: replaceRules.map((r) => rust_api.FfiReplaceRule(
+        pattern: r.pattern,
+        replacement: r.replacement,
+        ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
+        enabled: r.enabled,
+      )).toList(),
+      anchorCharOffset: anchorCharOffset == null
+          ? null
+          : BigInt.from(anchorCharOffset),
+    );
+
+    return _mapPage(rustPage);
+  }
+
+  /// Get page count with content preprocessing (带内容预处理的分页计数)
+  Future<int> getPageCountProcessed(
+    String bookId,
+    int chapterIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+    required bool removeDuplicateTitle,
+    required bool reSegment,
+    required int chineseConvert, // 0=none, 1=s2t, 2=t2s
+    List<ReplaceRuleItem> replaceRules = const [],
+  }) async {
+    final count = await rust_api.getPageCountProcessed(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+      removeDuplicateTitle: removeDuplicateTitle,
+      reSegment: reSegment,
+      chineseConvert: chineseConvert,
+      replaceRules: replaceRules.map((r) => rust_api.FfiReplaceRule(
+        pattern: r.pattern,
+        replacement: r.replacement,
+        ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
+        enabled: r.enabled,
+      )).toList(),
+    );
+
+    return count.toInt();
+  }
+
+  /// Release book from memory
+  Future<void> releaseBook(String bookId) async {
+    await rust_api.releaseBook(bookId: bookId);
+  }
+
+  // ===== 结构化阅读路径（EPUB 路线2） =====
+
+  /// 书籍格式标记（"epub" | "txt"），Dart 据此分流分页 API
+  Future<String> getBookFormat(String bookId) async {
+    return await rust_api.getBookFormat(bookId: bookId);
+  }
+
+  /// rust PageInfo → Dart PageInfo 的统一映射（文本/图片项 + 背景）
+  PageInfo _mapPage(rust_types.PageInfo page) {
+    return PageInfo(
+      pageIndex: page.pageIndex.toInt(),
+      entries: page.entries
+          .map((e) => PageEntry(
+                text: e.text,
+                resourceHref: e.resourceHref,
+                x: e.x,
+                y: e.y,
+                width: e.width,
+                height: e.height,
+                color: e.color,
+                fontScale: e.fontScale,
+                segments: e.segments
+                    .map((s) => EntrySegment(
+                          start: s.start.toInt(),
+                          end: s.end.toInt(),
+                          color: s.color,
+                          fontScale: s.fontScale,
+                        ))
+                    .toList(),
+              ))
+          .toList(),
+      backgroundHref: page.backgroundHref,
+      backgroundSize: page.backgroundSize,
+      backgroundPosition: page.backgroundPosition,
+      startCharIndex: page.startCharIndex.toInt(),
+      endCharIndex: page.endCharIndex.toInt(),
+    );
+  }
+
+  /// 结构化分页获取（EPUB）
+  ///
+  /// [anchorCharOffset] 进度锚点：章内文本字符偏移，图片项不消耗锚点；
+  /// 提供时返回包含该偏移的页（自动跳过纯图装饰页）。
+  Future<PageInfo> getPageStructured(
+    String bookId,
+    int chapterIndex,
+    int pageIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+    int? anchorCharOffset,
+  }) async {
+    final rustPage = await rust_api.getPageStructured(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      pageIndex: BigInt.from(pageIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+      anchorCharOffset:
+          anchorCharOffset == null ? null : BigInt.from(anchorCharOffset),
+    );
+    return _mapPage(rustPage);
+  }
+
+  /// 结构化分页计数（EPUB）
+  Future<int> getPageCountStructured(
+    String bookId,
+    int chapterIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+  }) async {
+    final count = await rust_api.getPageCountStructured(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+    );
+    return count.toInt();
+  }
+
+  /// 读取书内资源字节（EPUB 图片；ZIP 全路径与 IR resourceHref 同基准）
+  Future<Uint8List> getBookResource(String bookId, String resourceHref) async {
+    return await rust_api.getBookResource(
+      bookId: bookId,
+      resourceHref: resourceHref,
+    );
+  }
+
+  /// 读取书封面字节（空返回=无封面）
+  Future<Uint8List> getBookCover(String bookId) async {
+    return await rust_api.getBookCover(bookId: bookId);
+  }
+
+  /// Set content cleaning options (设置内容净化选项，供非 parser 路径使用)
+  Future<void> setContentCleaningOptions({
+    required bool removeHtmlTags,
+    required bool removeAds,
+    required bool smartParagraph,
+    required bool traditionalized,
+    required bool simplified,
+  }) async {
+    final options = buildCleaningOptions(
+      removeHtmlTags: removeHtmlTags,
+      removeAds: removeAds,
+      smartParagraph: smartParagraph,
+      traditionalized: traditionalized,
+      simplified: simplified,
+    );
+    await rust_api.setContentCleaningOptions(options: options);
+  }
+
+  /// Clear content cleaning options (清除内容净化选项)
+  Future<void> clearContentCleaningOptions() async {
+    await rust_api.clearContentCleaningOptions();
+  }
+
+  /// Get default content cleaning options (获取默认净化选项)
+  Future<rust_api.ContentCleaningOptions> getDefaultCleaningOptions() async {
+    return await rust_api.ContentCleaningOptions.default_();
+  }
+}
+
+/// 源路径 → 封面缓存文件（FNV-1a 命名，跨启动稳定；无缓存返回 null）
+File? cachedCoverFor(String sourcePath) {
+  final file = coverCacheFile(sourcePath);
+  return file.existsSync() ? file : null;
+}
+
+/// 封面缓存文件路径（{temp}/legado_covers/{fnv1a}.img）
+File coverCacheFile(String sourcePath) {
+  var hash = 0x811c9dc5;
+  for (final unit in sourcePath.codeUnits) {
+    hash ^= unit & 0xff;
+    hash = (hash * 0x01000193) & 0xffffffff;
+    hash ^= (unit >> 8) & 0xff;
+    hash = (hash * 0x01000193) & 0xffffffff;
+  }
+  return File('${Directory.systemTemp.path}/legado_covers/${hash.toRadixString(16)}.img');
+}
+
+/// 打开 EPUB 书时提取封面并落盘（书架跨启动显示；失败静默）
+Future<void> persistBookCover(
+  BookService service,
+  String bookId,
+  String sourcePath,
+) async {
+  try {
+    final bytes = await service.getBookCover(bookId);
+    if (bytes.isEmpty) return;
+    final file = coverCacheFile(sourcePath);
+    if (file.existsSync()) return;
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(bytes);
+  } catch (_) {
+    // 封面持久化失败不影响阅读
+  }
+}
