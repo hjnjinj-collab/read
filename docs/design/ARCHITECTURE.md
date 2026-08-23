@@ -60,19 +60,16 @@ string/regex 过渡态（A1 激活 JS 主路径）、广告净化硬编码正则
 | ③ 章节识别 | ✅ **JS 引擎**内置优先级规则链，正则仅降级兜底 | ✅ **TOC 提取**：OPF 声明优先（properties="nav"/media-type），NCX navMap / EPUB3 nav 标题映射到 spine |
 | ④ 内容净化（导入级） | ✅ **JS 规则集主路径**（clean_rules，正则兜底）；净化缓存落盘 | ✅ EpubCleanedBook 逐章清洗 + 偏移重算，同构落盘 {temp}/legado_cleaned/ |
 | ④' 内容预处理（阅读级） | ✅ 六阶段流水线；替换规则 **JS 主路径**（池化引擎），串/正则兜底 | ✅ 与 TXT 共用同一预处理 |
-| ⑤ 排版分页 | ✅ 智能断页 + 字形缓存（两线共用） | ✅ 共用；图文混排等深度能力待技术选型 |
+| ⑤ 排版分页 | ✅ 智能断页 + 字形缓存（两线共用） | ✅ TXT 共用 layout_text；富内容线独立 layout_items（样式化文本/图片/表格原子排版，见 A8/A9） |
 | 跨启动持久化 | ✅ 书架/进度/书签落库（drift），字符锚点恢复 | ✅ 同一机制（filePath 身份键） |
 
-> **里程碑（2026-08-22，A4+A5 交付后）**：TXT 与 EPUB 双线在**净化（④）、
-> 预处理（④'）、排版（⑤）、持久化**四层已完全统一——同一 `ContentCleaner`
-> （JS 规则主路径）、同一 `ContentPreprocessor`、同一 `LayoutEngine`、
-> 同一落库机制；EPUB 侧仅剩**深度加载解析**（图文混排、资源渲染、样式映射）
-> 维持过渡物化线，待新线路技术选型后整体替换。
-
-> EPUB 决策：现有「物化为同构 Book」为过渡方案；EPUB 处理流程将**另行技术选型**
-> （图文混排、资源渲染、样式映射等按新线路整体设计，不在现线路深投）。
-> 物化线内已完成**地基修正与净化对齐**（A5）：结构解析走 roxmltree、
-> 净化缓存与 TXT 同构落盘——深度选型仍另行。
+> EPUB 决策（已定案）：富内容线路选型完成——**路线2：结构化 IR + CSS 物化 +
+> 原生绘制**（否决 webview 路线：失去分页/锚点/设置统一且有性能代价）。
+> 管线：XHTML→JSON DOM（html5ever 容错解析）→ JS 规则层语义提取（D9 镜像）
+> → ContentBlock IR 标准化（css_lite 确定性物化）→ layout_items 排版
+> → PagePainter 原生绘制。权威规则文档 `docs/design/EPUB_RENDER_RULES.md`。
+> 里程碑 M0 目录 / M1 IR 地基 / M2 图片全链路 / M3 文字样式·行内富文本·表格
+> 全部落地，见 §9.3 A6–A9。
 
 ## 2. 阶段一：加载解析工厂
 
@@ -88,7 +85,8 @@ string/regex 过渡态（A1 激活 JS 主路径）、广告净化硬编码正则
 | ✅ 主导入已收敛工厂判定（A3，2026-08-22） | `parse_txt_file_inner` 经 `BookSourceLoader::detect_format` 判定后走具体解析器（保留净化缓存能力）；非 TXT 明确报错；带 parser:None 缺陷的死入口 open_book_sync/async/unified 已删除 |
 | ✅ EPUB 链路已打通（2026-08-22） | 导入经工厂分发 EpubParser，逐章提取物化为同构 Book（偏移与内容同源）；Dart 选择器已放行 .epub。三连阻塞 bug（NCX 无限递归、OPF 自闭合嵌套漏配、TOC 标题时序）已随 **A5 roxmltree 迁移根因消除**（scraper 仅留正文 XHTML 提取） |
 | ✅ EPUB 结构解析迁移 roxmltree（A5，2026-08-22） | container/OPF/NCX/nav 全部走正规 XML 解析器：自闭合按规范闭合、nav 识别改由 OPF `properties="nav"` / media-type 声明驱动（文件名猜测仅兜底）、NCX 单遍文档序扫描替代递归；命名空间按本地名匹配 |
-| 📌 决策 | **EPUB 处理流程将另行技术选型**（有别于 TXT 的独立线路）：现有物化方案为过渡实现，深度问题（图文混排、资源渲染、样式映射等）不在现线路投入，待选型后整体替换 |
+| ✅ 路线2 富内容线路落地（M0–M3，2026-08-23） | 导入轻句柄化（不再物化全文 Book）；嵌套目录 TocEntry 文档序 Vec + level/parent_index（Dart 相对缩进）；结构化阅读主路径 `get_page_structured`（IR→css_lite 物化→layout_items→PagePainter），支持图片/整页背景/文字样式/行内富文本/表格排版；SVG 包裹封面图提取（svg>image 同 img）+ duokan-page-fullscreen 全屏页转整页背景（与装饰页同通道）；权威规则见 `docs/design/EPUB_RENDER_RULES.md` |
+| 📌 决策（更新） | 原「EPUB 另行技术选型」已由**路线2 定案**并实现（A6–A9）；现线路的物化过渡方案保留为兜底链（结构化提取任一环节失败回落纯文本） |
 
 → 收敛方案见 §9.3 任务 A3。
 
@@ -302,6 +300,10 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 | A3 | **收敛统一加载工厂** | `parse_txt_file_inner` 经工厂格式判定（非 TXT 明确报错）；删除三个带 parser:None 缺陷的死入口 open_book_sync/async/unified | ✅ 完成（2026-08-22） |
 | A4 | **净化规则 JS 化** | 内置 JS 广告规则集主路径（`clean_rules.rs` 持久 Context + 中断句柄真超时），原 5 条正则转兜底；`ruleset_hash()` 并入 config_hash，TXT/EPUB 双线受益 | ✅ 完成（2026-08-22） |
 | A5 | **EPUB 净化链路对齐 TXT** | 结构解析迁移 roxmltree（根除 html5ever 解析 XML 的自闭合嵌套/递归溢出类 bug）；`EpubCleanedBook` 逐章清洗+偏移重算+同构落盘；废除逐读重复净化；EPUB 强制 clean_html=false | ✅ 完成（2026-08-22） |
+| A6 | **EPUB 嵌套目录（M0）** | TocEntry{href_full,title,level} 文档序 Vec 取代 HashMap（首条胜出）；TOC 键按目录文件所在目录解析；spine 序 parent 用「每层最后索引栈」推最近严格更浅者；Chapter/ChapterInfo 全链携带 level+parent_index，Dart 相对缩进展示 | ✅ 完成（2026-08-22） |
+| A7 | **结构化 IR 地基（M1）** | dom_json.rs（html5ever 容错→JSON DOM，深度帽 512/尺寸帽 8MB）+ extract_rules.rs 独立 JS 执行器（持久 Context/中断超时/warn_once，不与净化执行器共享）；ContentBlock IR 七类元素 internally-tagged serde；块携带 anc 祖先链供 Rust 物化后剥离；`get_chapter_content_structured` 兜底链完整；图片 src 由 Rust 按内容文件目录解析 | ✅ 完成（2026-08-22） |
+| A8 | **图片/富元素全链路渲染（M2）** | css_lite.rs CSS 子集解析器（tag/.class/tag.class/后代/specificity）；image_size.rs 手写 PNG/JPEG/GIF/WEBP 头探测；IR v2（Image width%/align/intrinsic/bleed/hidden + PageBackground 整页背景严格 CSS 语义 cover/contain/stretch+position 锚点）；layout_items 混合分页（图片原子块/出血图整窗宽/锚点只随文本累加）；FFI get_book_resource 字节通道 + Rust LRU(50) + Flutter ui.Image 缓存；EPUB 导入轻句柄化分流；书架封面提取落盘 | ✅ 完成（2026-08-23，真书《剑来》验收：416 章头出血图 + ~19 整页背景） |
+| A9 | **文字样式·行内富文本·表格排版（M3）** | IR 增加 color/font_scale/StyledRun（PUA 哨兵在空白折叠+去广告完成后回收边界，免疫偏移漂移）；css_lite color/font-size 继承链回溯 + 盒模型简写展开（margin:20% 0 0 auto → margin-top% + margin-left:auto 右置）；layout_styled_paragraph 逐字符倍率测量换行、runs 跨行切段、表格原子多列排版（1.2em 窄列逐字竖排还原卷首标题）；FFI 扁平字段透传；Dart TextSpan 分段绘制。明确不做：内嵌字体加载/px 字号/粗斜体字形 | ✅ 完成（2026-08-23，真书验收：42 卷首页全命中、832 样式化标题、42 段行内 runs） |
 
 ## 10. 附录
 
@@ -309,10 +311,10 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 
 | Crate | 关键组件 | 一句话职责 |
 |-------|----------|-----------|
-| book_parser | loader / txt_parser / epub_parser / chapter_extractor / chapter_recognizer / content_cleaner / clean_rules / epub_clean_cache / chinese_convert / encoding | 加载工厂、TXT 主解析、EPUB 解析(roxmltree 结构解析)、JS 章节规则、置信度识别器(未接线)、导入级净化(JS 规则主路径)、EPUB 净化缓存、zhconv 简繁权威实现、编码检测 |
-| layout_engine | LayoutEngine / SmartPaginator(未接线) / GlyphCache / parallel(未接线) / AdvancedGlyphCache(未接线) | 排版分页、智能分页、字形测宽缓存、多章并行、GB2312 预热 |
+| book_parser | loader / txt_parser / epub_parser / chapter_extractor / chapter_recognizer / content_cleaner / clean_rules / epub_clean_cache / chinese_convert / encoding / dom_json / extract_rules / css_lite / image_size / content_ir | 加载工厂、TXT 主解析、EPUB 解析(roxmltree 结构解析+结构化提取主路径)、JS 章节规则、置信度识别器(未接线)、导入级净化(JS 规则主路径)、EPUB 净化缓存、zhconv 简繁权威实现、编码检测、XHTML→JSON DOM、结构化提取 JS 规则集、CSS 子集解析物化、图片头尺寸探测、内容 IR v2 定义 |
+| layout_engine | LayoutEngine(layout_text/layout_items) / SmartPaginator(未接线) / GlyphCache / parallel(未接线) / AdvancedGlyphCache(未接线) | 排版分页（layout_text=TXT 承重路径逐字节不动；layout_items=结构化富内容路径：样式化文本/图片原子/表格多列）、智能分页、字形测宽缓存、多章并行、GB2312 预热 |
 | reader_core | ContentPreprocessor / processing/(休眠) / ReadSessionManager / position_tracker / PaginationCache | 阅读级六阶段预处理、富流水线+JS池(待激活)、阅读会话、偏移定位、LRU 分页缓存 |
-| bridge | api.rs（BOOKS/PAGINATION_CACHE/RULES_PREPROCESSORS/FONT_MANAGER） | 全部 FFI 入口；process_and_layout_chapter 统一「处理+排版」实现 |
+| bridge | api.rs（BOOKS/PAGINATION_CACHE/STRUCTURED_PAGINATION_CACHE/RULES_PREPROCESSORS/FONT_MANAGER）+ lib.rs（BookHandle.structured/PageEntryInfo 扁平模型） | 全部 FFI 入口；process_and_layout_chapter 统一「处理+排版」；结构化路径 get_page_structured/get_page_count_structured/get_book_resource/get_book_cover/get_book_format |
 | book_source_engine | CSS/JSONPath/Regex 分析器 | 书源规则（无 JS，与章节识别 JS 是两回事） |
 
 ### 10.2 关键决策记录（ADR）
@@ -328,6 +330,15 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 - **D8** 处理选项进 `CacheKey.options_hash`：设置变更新 key 自然重算 + 锚点二分定位保进度
 - **D9** **JS 引擎主链路原则**：提炼/识别/替换以 QuickJS 执行 JS 规则为主，
   正则仅降级兜底与极简构建两种存在形式（§0）
+- **D10** **结构化路径 IR→布局零文本变换契约**：process_structured_chapter
+  不做简繁/替换规则改写——行内富文本 StyledRun 字符区间锚定依赖此契约，
+  任何在该链路引入文本变换的功能必须同步重算 runs 区间
+- **D11** **双分页核心有意分离**：layout_text（TXT 进度锚点字符偏移逐字节
+  精确依赖）与 layout_items（EPUB 富内容）禁止合并重构；后者镜像前者的
+  锚点约定（图片项不消耗锚点、每段落 +1 分隔）
+- **D12** **FFI 复杂返回类型用扁平 struct**：FRB 枚举变体强制 freezed 依赖，
+  项目不引入——PageEntryInfo 以 Option 字段判别文本/图片项，样式走
+  color/font_scale/segments 扁平字段
 
 ### 10.3 工程硬约束（违反即出 Bug）
 

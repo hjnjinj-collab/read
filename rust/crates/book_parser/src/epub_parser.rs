@@ -1,6 +1,6 @@
 use crate::traits::{BookFormat, BookMetadata, BookParser, ChapterInfo, ResourceType};
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,9 @@ struct OpfData {
     /// 封面图 href（EPUB3 properties="cover-image" 或 EPUB2 meta[name=cover]，
     /// 相对 OPF 目录）
     cover_href: Option<String>,
+    /// duokan-page-fullscreen 全屏页（itemref properties 声明，
+    /// 已合并 OPF 目录；如《剑来》封面页）
+    fullscreen_hrefs: HashSet<String>,
 }
 
 /// TOC 条目（文档序；键已在插入时解析为 ZIP 内完整路径）
@@ -156,6 +159,8 @@ pub struct EpubParser {
     ncx_href: Option<String>,
     /// 已解析样式表缓存（键=ZIP 内路径；parser 生命周期=书会话）
     css_cache: HashMap<String, std::sync::Arc<crate::css_lite::CssStylesheet>>,
+    /// duokan-page-fullscreen 全屏页集合（ZIP 内完整路径）
+    fullscreen_hrefs: HashSet<String>,
 }
 
 impl EpubParser {
@@ -178,6 +183,7 @@ impl EpubParser {
             nav_href: None,
             ncx_href: None,
             css_cache: HashMap::new(),
+            fullscreen_hrefs: HashSet::new(),
         })
     }
 
@@ -337,8 +343,10 @@ impl EpubParser {
             epub2_cover_id.and_then(|id| id_to_href.get(&id).cloned())
         });
 
-        // spine：itemref 的 idref 顺序即阅读顺序
+        // spine：itemref 的 idref 顺序即阅读顺序；顺带收集全屏页标记
+        // （duokan-page-fullscreen：整页背景语义，如封面页）
         let mut spine_hrefs = Vec::new();
+        let mut fullscreen_hrefs = HashSet::new();
         if let Some(spine_el) = root.descendants().find(|n| tag_is(*n, "spine")) {
             for child in spine_el.children().filter(|c| c.is_element()) {
                 if !tag_is(child, "itemref") {
@@ -352,6 +360,14 @@ impl EpubParser {
                         } else {
                             format!("{}/{}", opf_dir.trim_end_matches('/'), href)
                         };
+                        if attr_local(child, "properties")
+                            .map(|p| {
+                                p.split_whitespace().any(|t| t == "duokan-page-fullscreen")
+                            })
+                            .unwrap_or(false)
+                        {
+                            fullscreen_hrefs.insert(full_path.clone());
+                        }
                         spine_hrefs.push(full_path);
                     }
                 }
@@ -364,6 +380,7 @@ impl EpubParser {
             nav_href,
             ncx_href,
             cover_href,
+            fullscreen_hrefs,
         })
     }
 
@@ -793,6 +810,27 @@ impl EpubParser {
             .map(|b| Self::apply_css_to_block(b, &merged_sheet))
             .filter(|b| !matches!(b, crate::content_ir::ContentBlock::Image { hidden: true, .. }))
             .collect();
+
+        // duokan-page-fullscreen 全屏页：唯一图片块转为整页背景
+        // （cover 裁切铺满，与装饰页同一渲染通道；《剑来》封面页形态）
+        let is_fullscreen = self
+            .chapters
+            .get(chapter_index)
+            .and_then(|c| c.resource_href.as_deref())
+            .map(|h| self.fullscreen_hrefs.contains(h))
+            .unwrap_or(false);
+        if is_fullscreen {
+            if let [crate::content_ir::ContentBlock::Image { resource_href, .. }] =
+                blocks.as_slice()
+            {
+                background = Some(PageBackground {
+                    image_href: resource_href.clone(),
+                    size: BgSize::Cover,
+                    position: None,
+                });
+                blocks.clear();
+            }
+        }
 
         // 原始像素尺寸探测（分页在布局引擎，必须 Rust 侧先知道高度）
         self.fill_intrinsic_sizes(&mut blocks);
@@ -1551,6 +1589,7 @@ impl BookParser for EpubParser {
         self.opf_base_path = opf_dir.to_string();
         self.nav_href = opf_data.nav_href;
         self.ncx_href = opf_data.ncx_href;
+        self.fullscreen_hrefs = opf_data.fullscreen_hrefs;
 
         // 章节列表先落位：后续 TOC 标题更新直接作用其上。
         // （此前赋值发生在标题更新之后，更新循环遍历的是空的 self.chapters，
@@ -1671,6 +1710,7 @@ impl BookParser for EpubParser {
         self.nav_href = None;
         self.ncx_href = None;
         self.css_cache.clear();
+        self.fullscreen_hrefs.clear();
         self.clear_resource_cache();
     }
 }
@@ -1764,6 +1804,30 @@ mod tests {
         assert_eq!(data.nav_href.as_deref(), Some("nav.xhtml"), "properties=\"nav\" 应被发现");
         assert_eq!(data.ncx_href, None);
         assert_eq!(data.spine_hrefs, vec!["OEBPS/text/ch1.xhtml".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_opf_fullscreen_pages() {
+        // duokan-page-fullscreen（如《剑来》封面页）应被收集为全屏页
+        let opf = r#"<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></metadata>
+  <manifest>
+    <item id="cover" href="Text/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="cover" properties="duokan-page-fullscreen"/>
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#;
+
+        let data = EpubParser::parse_opf(opf, "OEBPS").unwrap();
+        assert!(
+            data.fullscreen_hrefs.contains("OEBPS/Text/cover.xhtml"),
+            "全屏页应按 OPF 目录合并为完整路径"
+        );
+        assert_eq!(data.fullscreen_hrefs.len(), 1);
     }
 
     #[test]

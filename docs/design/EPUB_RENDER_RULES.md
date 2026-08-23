@@ -48,6 +48,7 @@ Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
 | `<p>` | 段落；行内子元素累积文本；`<br>`→软换行 `\n`；样式行内元素产出 runs | Paragraph{align,color,font_scale,runs} | 逐行断行绘制；颜色/字号缩放/对齐生效（见 §5） | ✅ |
 | `<h1>`–`<h6>` | 标题，level=1..6；空标题丢弃 | Heading{align,color,font_scale} | CSS 颜色/字号倍率/对齐生效；**标题独立字号体系未做**（仅 CSS 倍率） | ◐ |
 | `<img src alt>` | 独立图块；src 由 Rust 按内容目录解析为 ZIP 全路径 | Image | 见 §3 图片规则 | ✅ |
+| `<svg><image xlink:href></svg>` | SVG 包裹图片（《剑来》封面页形态）：svg 容器透明下沉，image 同 img 提取（href 读 src→xlink:href→href）；配合 duokan-page-fullscreen 转整页背景（见 §3.1） | Image | 同 img 规则；全屏页转背景铺满裁切 | ✅ |
 | `div.logo>img`（包裹容器） | anc 链携带祖先 class | Image | CSS 物化 width%/align/bleed 后绘制 | ✅ |
 | `<ul>`/`<ol>`/`<li>` | 列表；li 内嵌套 ul/ol 递归；li 内 p/img 混排 | List{ordered,items} | 前序展平为段/图序列；**项目符号/编号不渲染** | ◐ |
 | `<blockquote>` | 引用块递归提取 | Quote | 展平为普通段落（**无缩进/竖线样式**） | ◐ |
@@ -142,6 +143,17 @@ Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
 | Flutter 缓存 | BookImageStore 键 `$bookId\|$href`，ui.Image 解码一次；未命中画灰底占位并异步解码重绘；换书 clear() |
 | 兜底 | 纯文本兜底路径中 img 变 `[图片: alt]` 占位文本 |
 
+### 3.1 全屏页（duokan-page-fullscreen → 整页背景）
+
+- OPF spine itemref `properties` 含 `duokan-page-fullscreen` 的文档（Duokan
+  全屏页语义，《剑来》封面页形态：SVG 100%×100% 包裹封面图）在解析期收集为
+  全屏页集合
+- 结构化提取后，若全屏页**恰好产出唯一 Image 块**（href 已解析为 ZIP 全路径），
+  转为 `PageBackground{size: Cover}` + 清空 blocks——与 body class 装饰页
+  （§2.5）走同一整页背景渲染通道，等比铺满、溢出裁切
+- 防御约束：非单图全屏页不转换（防丢文本）；body CSS 背景与全屏图并存时
+  全屏图胜出（它是页面的内容本体）
+
 ## 4. 分页与进度锚点
 
 - 输入：LayoutItem[]（Text(TextItem{align,color,font_scale,runs}) |
@@ -219,7 +231,8 @@ Table{rows, margin_top_percent} → LayoutItem::Table(TableInput)
 3. ruby 注音的小字上标形态（现混入正文）；a 链接下划线与跳转
 4. 表格线框绘制；colspan·rowspan 跨列跨行（按文档序对齐、参差行错位）
 5. 行内元素**字形**差异（粗体/斜体/上下标）；行内嵌套样式的最外层胜出语义
-6. 正文内联 svg；列表项目符号与编号
+6. 正文内联 svg 矢量图形（仅支持 `svg>image` 纯图片包裹形态，见 §1/§3.1）；
+   列表项目符号与编号
 7. px/em/pt 绝对尺寸的图片宽度与字号换算；rgb()/命名色
 8. 脚注（ol.duokan-footnote）交互
 9. 表格 margin 的非 top 方向（右对齐 auto 忽略，表格整体左置）

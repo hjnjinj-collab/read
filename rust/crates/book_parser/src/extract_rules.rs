@@ -14,7 +14,7 @@ use crate::clean_rules::AD_PATTERNS_JS_ARRAY;
 
 /// 内置结构化提取规则（单一合并脚本）
 ///
-/// 元素覆盖：p / h1-h6 / img / ul·ol·li（含嵌套列表）/ blockquote /
+/// 元素覆盖：p / h1-h6 / img·svg image / ul·ol·li（含嵌套列表）/ blockquote /
 /// hr / table（caption·tr·th·td，thead/tbody/tfoot 透明；
 /// colspan/rowspan v1 忽略、按文档序扁平化，单元格携带 td 链路与
 /// 完整内容提取）；div 及未知块级标签为透明容器；行内标签文本并入
@@ -66,7 +66,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             const child = kids[i];
             if (typeof child === "string") { out += child; continue; }
             if (child.t === "br") { out += "\n"; continue; }
-            if (child.t === "img") { continue; }
+            if (child.t === "img" || child.t === "image") { continue; }
             out += inlineText(child);
         }
         return out;
@@ -76,7 +76,8 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
         const a = node.a || {};
         return {
             type: "image",
-            resource_href: a.src || "",
+            // HTML img 用 src；SVG image 用 xlink:href（SVG1.1）或 href（SVG2）
+            resource_href: a.src || a["xlink:href"] || a.href || "",
             alt: a.alt || null,
             anc: chain.concat([selfEntry(node)]),
         };
@@ -184,7 +185,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             if (hiddenByStyle(child)) { f.flush(); continue; }
             const tag = child.t;
             if (tag === "br") { f.push("\n"); continue; }
-            if (tag === "img") { f.flush(); out.push(imgBlock(child, chain)); continue; }
+            if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
             if (INLINE.has(tag)) {
                 f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
                 continue;
@@ -212,7 +213,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                     chain.concat([selfEntry(child)])));
                 continue;
             }
-            if (tag === "img") { f.flush(); out.push(imgBlock(child, chain)); continue; }
+            if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
             if (INLINE.has(tag)) {
                 f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
                 continue;
@@ -259,7 +260,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 if (hiddenByStyle(child)) { f.flush(); continue; }
                 const tag = child.t;
                 if (tag === "br") { f.push("\n"); continue; }
-                if (tag === "img") { f.flush(); out.push(imgBlock(child, cellChain)); continue; }
+                if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, cellChain)); continue; }
                 if (INLINE.has(tag)) {
                     f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]));
                     continue;
@@ -340,7 +341,8 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 }
             } else if (tag === "p") {
                 paraBlocks(child, depth + 1, out, childChain);
-            } else if (tag === "img") {
+            } else if (tag === "img" || tag === "image") {
+                // HTML img 与 SVG image（svg 容器走下方透明分支递归到 image）
                 out.push(imgBlock(child, chain));
             } else if (tag === "ul" || tag === "ol") {
                 out.push(listBlocks(child, tag === "ol", depth + 1, childChain));
@@ -568,6 +570,42 @@ mod tests {
         };
         assert_eq!(text, "第一段");
         assert_eq!(*align, None);
+    }
+
+    #[cfg(feature = "js-engine")]
+    #[test]
+    fn svg_wrapped_cover_image() {
+        // 《剑来》封面页形态：svg 包裹的 image（xlink:href）+ 隐藏标题
+        let html = r#"<html><head><title>Cover</title></head><body>
+            <h2 style="display:none">封面</h2>
+            <div style="text-align: center;">
+              <svg xmlns="http://www.w3.org/2000/svg" height="100%" width="100%" xmlns:xlink="http://www.w3.org/1999/xlink">
+                <image width="1000" height="1333" xlink:href="../Images/cover.jpg"/>
+              </svg>
+            </div>
+        </body></html>"#;
+        let content = extract_html(html);
+
+        // 隐藏 h2 不产出块；svg 容器透明下沉，image 产出图块
+        assert_eq!(content.blocks.len(), 1, "应恰好产出封面图一个块");
+        assert_eq!(
+            content.blocks[0],
+            ContentBlock::Image {
+                resource_href: "../Images/cover.jpg".to_string(),
+                alt: None,
+                width_percent: None,
+                align: None,
+                intrinsic: None,
+                bleed: false,
+                hidden: false,
+                anc: Some(vec![
+                    vec!["body".to_string()],
+                    vec!["div".to_string()],
+                    vec!["svg".to_string()],
+                    vec!["image".to_string()],
+                ]),
+            }
+        );
     }
 
     #[cfg(feature = "js-engine")]
