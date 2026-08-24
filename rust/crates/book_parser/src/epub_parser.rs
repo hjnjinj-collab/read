@@ -698,14 +698,23 @@ impl EpubParser {
 
     /// 提取章节的结构化内容 IR v2（路线2 主路径；纯文本为兜底）
     ///
-    /// 管线：读取 spine 条目 → JSON DOM → 内置 JS 规则提取（块携带 anc
-    /// 祖先链）→ css_lite 物化样式（图片宽度/对齐、body 背景）→ 图片
-    /// href 按内容目录解析为 ZIP 全路径 → 原始尺寸探测 → 剥离 anc。
-    /// JS 失败/超时/无引擎时回落 `html_to_text_structured`
-    /// 纯文本（D9 兜底位）；空块 + 有背景是合法输出（整页背景装饰页形态）。
+    /// 不做阅读级文本转换（诊断/探针语义：原始 IR）；
+    /// 阅读路径用 [`Self::get_chapter_content_structured_ex`]。
     pub fn get_chapter_content_structured(
         &mut self,
         chapter_index: usize,
+    ) -> Result<crate::content_ir::StructuredContent> {
+        self.get_chapter_content_structured_ex(chapter_index, crate::content_cleaner::ConvertMode::None)
+    }
+
+    /// 带阅读级简繁转换的结构化提取。
+    ///
+    /// 转换发生在 DOM 文本节点层（JS 提取/哨兵回收之前）——runs 字符区间
+    /// 在转换后文本上计算，天然对齐，不破坏 D10 契约（IR→布局零文本变换）。
+    pub fn get_chapter_content_structured_ex(
+        &mut self,
+        chapter_index: usize,
+        convert_mode: crate::content_cleaner::ConvertMode,
     ) -> Result<crate::content_ir::StructuredContent> {
         use crate::content_ir::{BgSize, PageBackground, StructuredContent, CONTENT_IR_VERSION};
         use crate::css_lite::DeclValue;
@@ -726,31 +735,58 @@ impl EpubParser {
         // 主路径：DOM JSON + JS 规则；任一环节失败走兜底。
         // 注意：blocks 为空不再视为异常——装饰页正文即空（隐藏标题+空段落）。
         const DOM_MAX_BYTES: usize = 8 * 1024 * 1024;
-        let extracted = match crate::dom_json::xhtml_to_dom_json(&html_content, DOM_MAX_BYTES) {
+        let extracted = match crate::dom_json::xhtml_to_dom_json_value(&html_content) {
             Err(e) => {
                 log::warn!("章节 {} DOM 构建失败，回落纯文本: {}", chapter_index, e);
                 None
             }
-            Ok(dom) => match crate::extract_rules::extract_structured(&dom) {
-                None => None, // 无 JS 引擎构建
-                Some(Err(e)) => {
-                    log::warn!("章节 {} JS 提取失败，回落纯文本: {}", chapter_index, e);
-                    None
+            Ok(mut dom) => {
+                // 阅读级简繁：只转文本节点（属性/标签名不动），哨兵回收
+                // 在转换后文本上进行，runs 区间天然正确
+                crate::dom_json::convert_text_nodes(&mut dom, convert_mode);
+                match crate::dom_json::serialize_dom_json(&dom, DOM_MAX_BYTES) {
+                    Err(e) => {
+                        log::warn!("章节 {} DOM 序列化失败，回落纯文本: {}", chapter_index, e);
+                        None
+                    }
+                    Ok(dom) => match crate::extract_rules::extract_structured(&dom) {
+                        None => None, // 无 JS 引擎构建
+                        Some(Err(e)) => {
+                            log::warn!("章节 {} JS 提取失败，回落纯文本: {}", chapter_index, e);
+                            None
+                        }
+                        Some(Ok(content)) if content.blocks.len() > 20_000 => {
+                            log::warn!(
+                                "章节 {} IR 输出异常（{} 块），回落纯文本",
+                                chapter_index,
+                                content.blocks.len()
+                            );
+                            None
+                        }
+                        Some(Ok(content)) => Some(content),
+                    },
                 }
-                Some(Ok(content)) if content.blocks.len() > 20_000 => {
-                    log::warn!(
-                        "章节 {} IR 输出异常（{} 块），回落纯文本",
-                        chapter_index,
-                        content.blocks.len()
-                    );
-                    None
-                }
-                Some(Ok(content)) => Some(content),
-            },
+            }
         };
 
         let Some(mut content) = extracted else {
-            return Ok(Self::structured_fallback(&html_content));
+            let mut fallback = Self::structured_fallback(&html_content);
+            if !matches!(convert_mode, crate::content_cleaner::ConvertMode::None) {
+                for block in &mut fallback.blocks {
+                    if let crate::content_ir::ContentBlock::Paragraph { text, .. } = block {
+                        *text = match convert_mode {
+                            crate::content_cleaner::ConvertMode::SimplifiedToTraditional => {
+                                crate::chinese_convert::convert_s2t(text)
+                            }
+                            crate::content_cleaner::ConvertMode::TraditionalToSimplified => {
+                                crate::chinese_convert::convert_t2s(text)
+                            }
+                            crate::content_cleaner::ConvertMode::None => unreachable!(),
+                        };
+                    }
+                }
+            }
+            return Ok(fallback);
         };
 
         // 样式表收集与合并（文档序合并后，declarations() 的规则序优先级

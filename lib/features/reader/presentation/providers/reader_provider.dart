@@ -103,8 +103,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
     if (state.bookId == null) return;
 
-    // EPUB：净化选项不作用于结构化路径（去广告在 JS 提取层恒开），
-    // 仅重载页面（字号等排版参数经缓存键隔离自然生效）
+    // EPUB：净化选项经 getPageStructured 的 chineseConvert 参数随调用
+    // 下发（缓存键含转换位，切换即换键重算）；去广告在 JS 提取层恒开，
+    // 不调 updateBookCleaning（无导入级净化缓存）
     if (_isEpub) {
       await _loadCurrentPage(
         anchorCharOffset: state.currentPage?.startCharIndex,
@@ -206,6 +207,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 分流：EPUB 结构化分页 / TXT 文本分页
       final PageInfo page;
       if (_isEpub) {
+        // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
+        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
+            : _chineseConvert == ChineseConvertType.t2s ? 2
+            : 0;
         page = await _bookService.getPageStructured(
           state.bookId!,
           state.currentChapterIndex,
@@ -219,6 +224,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
           anchorCharOffset: anchorCharOffset,
+          chineseConvert: chineseConvertCode,
         );
       } else {
         // 转换简繁设置为数字代码
@@ -339,6 +345,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       padV: _paddingVertical,
     );
     if (_isEpub) {
+      // 简繁编码与 TXT 同口径；页数与页内容必须同参（否则错位）
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
+          : _chineseConvert == ChineseConvertType.t2s ? 2
+          : 0;
       return _bookService.getPageCountStructured(
         state.bookId!,
         chapterIndex,
@@ -350,6 +360,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingTop: common.padV,
         paddingRight: common.padH,
         paddingBottom: common.padV,
+        chineseConvert: chineseConvertCode,
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1

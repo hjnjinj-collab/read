@@ -264,6 +264,7 @@ abstract class RustLibApi extends BaseApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required int chineseConvert,
   });
 
   Future<PageInfo> crateApiGetPageProcessed({
@@ -300,6 +301,7 @@ abstract class RustLibApi extends BaseApi {
     required double paddingBottom,
     required String fontName,
     BigInt? anchorCharOffset,
+    required int chineseConvert,
   });
 
   Future<String> crateApiGetPaginationCacheStats();
@@ -1580,6 +1582,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required int chineseConvert,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1596,6 +1599,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingRight, serializer);
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
+          sse_encode_u_8(chineseConvert, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1612,6 +1616,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingRight,
           paddingBottom,
           fontName,
+          chineseConvert,
         ],
         apiImpl: this,
       ),
@@ -1632,6 +1637,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingRight",
       "paddingBottom",
       "fontName",
+      "chineseConvert",
     ],
   );
 
@@ -1742,6 +1748,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingBottom,
     required String fontName,
     BigInt? anchorCharOffset,
+    required int chineseConvert,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1760,6 +1767,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
           sse_encode_opt_box_autoadd_usize(anchorCharOffset, serializer);
+          sse_encode_u_8(chineseConvert, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 44, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1778,6 +1786,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingBottom,
           fontName,
           anchorCharOffset,
+          chineseConvert,
         ],
         apiImpl: this,
       ),
@@ -1800,6 +1809,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingBottom",
       "fontName",
       "anchorCharOffset",
+      "chineseConvert",
     ],
   );
 

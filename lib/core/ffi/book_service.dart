@@ -344,6 +344,7 @@ class BookService {
   ///
   /// [anchorCharOffset] 进度锚点：章内文本字符偏移，图片项不消耗锚点；
   /// 提供时返回包含该偏移的页（自动跳过纯图装饰页）。
+  /// [chineseConvert] 阅读级简繁转换：0=无 1=简→繁 2=繁→简（与 TXT 同编码）
   Future<PageInfo> getPageStructured(
     String bookId,
     int chapterIndex,
@@ -358,6 +359,7 @@ class BookService {
     required double paddingBottom,
     String fontName = 'default',
     int? anchorCharOffset,
+    int chineseConvert = 0,
   }) async {
     final rustPage = await rust_api.getPageStructured(
       bookId: bookId,
@@ -374,6 +376,7 @@ class BookService {
       fontName: fontName,
       anchorCharOffset:
           anchorCharOffset == null ? null : BigInt.from(anchorCharOffset),
+      chineseConvert: chineseConvert,
     );
     return _mapPage(rustPage);
   }
@@ -391,6 +394,7 @@ class BookService {
     required double paddingRight,
     required double paddingBottom,
     String fontName = 'default',
+    int chineseConvert = 0,
   }) async {
     final count = await rust_api.getPageCountStructured(
       bookId: bookId,
@@ -404,6 +408,7 @@ class BookService {
       paddingRight: paddingRight,
       paddingBottom: paddingBottom,
       fontName: fontName,
+      chineseConvert: chineseConvert,
     );
     return count.toInt();
   }

@@ -105,10 +105,13 @@ string/regex 过渡态（A1 激活 JS 主路径）、广告净化硬编码正则
 
 ## 4. 阶段三：JS 章节规则识别 ✅ 符合 D9
 
-**执行引擎**：rquickjs 0.6（chapter_extractor.rs `execute_js_sync` L98：
+**执行引擎**：rquickjs 0.6（chapter_extractor.rs `execute_js_sync`：
 新建 Runtime+Context，注入全局 `content`，脚本返回 JSON 化的
-`Vec<JsChapterInfo>{title, lineNumber}`）。整体包裹
-tokio timeout **5s**（L66）+ spawn_blocking；单章长度约束 500B–100KB（L67–68）。
+`Vec<JsChapterInfo>{title, lineNumber}`）。spawn_blocking 孤儿线程场景用
+**共享 AtomicBool 置位型中断**（A10）：eval 前安装 `set_interrupt_handler`
+轮询标志，另设内存帽 32MB / 栈帽 1MB；外层 tokio timeout **5s** 仅作延迟
+兜底，Elapsed 时置位标志令 JS 引擎在下一检查点立即退出（死循环规则不再
+挂满超时时长）。单章长度约束 500B–100KB。
 
 **内置规则优先级链**（`build_default_rules` L380，`extract_with_default` L132，
 首个非空结果胜出）：
@@ -304,6 +307,7 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 | A7 | **结构化 IR 地基（M1）** | dom_json.rs（html5ever 容错→JSON DOM，深度帽 512/尺寸帽 8MB）+ extract_rules.rs 独立 JS 执行器（持久 Context/中断超时/warn_once，不与净化执行器共享）；ContentBlock IR 七类元素 internally-tagged serde；块携带 anc 祖先链供 Rust 物化后剥离；`get_chapter_content_structured` 兜底链完整；图片 src 由 Rust 按内容文件目录解析 | ✅ 完成（2026-08-22） |
 | A8 | **图片/富元素全链路渲染（M2）** | css_lite.rs CSS 子集解析器（tag/.class/tag.class/后代/specificity）；image_size.rs 手写 PNG/JPEG/GIF/WEBP 头探测；IR v2（Image width%/align/intrinsic/bleed/hidden + PageBackground 整页背景严格 CSS 语义 cover/contain/stretch+position 锚点）；layout_items 混合分页（图片原子块/出血图整窗宽/锚点只随文本累加）；FFI get_book_resource 字节通道 + Rust LRU(50) + Flutter ui.Image 缓存；EPUB 导入轻句柄化分流；书架封面提取落盘 | ✅ 完成（2026-08-23，真书《剑来》验收：416 章头出血图 + ~19 整页背景） |
 | A9 | **文字样式·行内富文本·表格排版（M3）** | IR 增加 color/font_scale/StyledRun（PUA 哨兵在空白折叠+去广告完成后回收边界，免疫偏移漂移）；css_lite color/font-size 继承链回溯 + 盒模型简写展开（margin:20% 0 0 auto → margin-top% + margin-left:auto 右置）；layout_styled_paragraph 逐字符倍率测量换行、runs 跨行切段、表格原子多列排版（1.2em 窄列逐字竖排还原卷首标题）；FFI 扁平字段透传；Dart TextSpan 分段绘制。明确不做：内嵌字体加载/px 字号/粗斜体字形 | ✅ 完成（2026-08-23，真书验收：42 卷首页全命中、832 样式化标题、42 段行内 runs） |
+| A10 | **EPUB 阅读级简繁转换 + JS 中断迁移（M4）** | dom_json.rs 拆 Value 形态构建/序列化 + `convert_text_nodes` DOM 文本节点预转换（IR 构建前，D10 契约下 runs 区间天然对齐）；`get_chapter_content_structured_ex` + FFI `get_page_structured`/`get_page_count_structured` 同参携带 chineseConvert 逐调用下发；StructuredPageKey 加 convert_mode 换模式即换缓存键；兜底路径同步转换。chapter_extractor 由纯 tokio timeout 迁移为 **AtomicBool 置位型中断**（eval 前装句柄 + 32MB 内存帽/1MB 栈帽，tokio timeout 留作延迟兜底），死循环规则测试 <8s 通过。明确不进 EPUB：替换规则/重分段 | ✅ 完成（2026-08-24，真书验收：简繁即时切换、卷首诗红色 runs 不漂移、锚点恢复正常） |
 
 ## 10. 附录
 
@@ -331,8 +335,11 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 - **D9** **JS 引擎主链路原则**：提炼/识别/替换以 QuickJS 执行 JS 规则为主，
   正则仅降级兜底与极简构建两种存在形式（§0）
 - **D10** **结构化路径 IR→布局零文本变换契约**：process_structured_chapter
-  不做简繁/替换规则改写——行内富文本 StyledRun 字符区间锚定依赖此契约，
-  任何在该链路引入文本变换的功能必须同步重算 runs 区间
+  的 IR→布局链路禁止任何文本改写——行内富文本 StyledRun 字符区间锚定依赖
+  此契约。正文文本变换只允许发生在 **IR 构建之前的 DOM 文本层**
+  （M4 先例：convert_text_nodes 于 DOM 构建后、JS 规则提取前就地转换，
+  哨兵回收与 runs 区间随后全部在转换后文本上计算，天然对齐）；在该层之外
+  引入文本变换的功能必须同步重算 runs 区间
 - **D11** **双分页核心有意分离**：layout_text（TXT 进度锚点字符偏移逐字节
   精确依赖）与 layout_items（EPUB 富内容）禁止合并重构；后者镜像前者的
   锚点约定（图片项不消耗锚点、每段落 +1 分隔）

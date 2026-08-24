@@ -134,6 +134,7 @@ fn epub_import_and_read_end_to_end() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
+        0,
     )
     .expect("结构化分页计数失败");
     assert!(count >= 1, "至少一页");
@@ -145,6 +146,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
+        0,
     )
     .expect("结构化分页失败");
     assert!(
@@ -163,6 +165,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
+        0,
     )
     .expect("结构化分页失败");
     assert!(page_text(&page_ch2).contains("深夜的巷口"), "第 2 章正文应在位");
@@ -175,6 +178,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         Some(usize::MAX),
+        0,
     )
     .expect("锚点定位失败");
     assert!(!page_text(&last).is_empty() || count == 1);
@@ -269,6 +273,7 @@ fn epub_structured_ad_filtering() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
+        0,
     )
     .expect("结构化分页计数失败");
 
@@ -282,6 +287,7 @@ fn epub_structured_ad_filtering() {
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
             None,
+            0,
         )
         .expect("结构化分页失败");
         all_text.push_str(&page_text(&page));

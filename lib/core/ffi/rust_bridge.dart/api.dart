@@ -264,6 +264,7 @@ Future<BigInt> getPageCountProcessed({
 ///
 /// `anchor_char_offset`: 进度锚点——章内文本字符偏移（与 TXT 路径同语义，
 /// 图片项不消耗锚点）；提供时返回包含该偏移的页（跳过纯图装饰页）。
+/// `chinese_convert`: 阅读级简繁转换（0=无 1=简→繁 2=繁→简；与 TXT 同编码）
 Future<PageInfo> getPageStructured({
   required String bookId,
   required BigInt chapterIndex,
@@ -278,6 +279,7 @@ Future<PageInfo> getPageStructured({
   required double paddingBottom,
   required String fontName,
   BigInt? anchorCharOffset,
+  required int chineseConvert,
 }) => RustLib.instance.api.crateApiGetPageStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -292,6 +294,7 @@ Future<PageInfo> getPageStructured({
   paddingBottom: paddingBottom,
   fontName: fontName,
   anchorCharOffset: anchorCharOffset,
+  chineseConvert: chineseConvert,
 );
 
 /// 结构化分页计数（EPUB 主路径）
@@ -307,6 +310,7 @@ Future<BigInt> getPageCountStructured({
   required double paddingRight,
   required double paddingBottom,
   required String fontName,
+  required int chineseConvert,
 }) => RustLib.instance.api.crateApiGetPageCountStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -319,6 +323,7 @@ Future<BigInt> getPageCountStructured({
   paddingRight: paddingRight,
   paddingBottom: paddingBottom,
   fontName: fontName,
+  chineseConvert: chineseConvert,
 );
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）

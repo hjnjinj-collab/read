@@ -78,27 +78,60 @@ impl ChapterExtractor {
         content: &str,
         rule_script: &str,
     ) -> Result<Vec<JsChapterInfo>> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
         let content = content.to_string();
         let script = rule_script.to_string();
         let timeout_duration = Duration::from_secs(self.timeout_secs);
 
-        // 使用 spawn_blocking 在阻塞线程中执行 JS
-        let result = timeout(timeout_duration, tokio::task::spawn_blocking(move || {
-            Self::execute_js_sync(&content, &script)
-        }))
-        .await
-        .context("JS 执行超时")?
-        .context("JS 执行任务失败")?;
+        // 中断标志：超时后置位，rquickjs 中断句柄据此中止 JS 死循环，
+        // 孤儿阻塞线程得以真正退出（tokio timeout 包不住阻塞线程）
+        let interrupt = Arc::new(AtomicBool::new(false));
 
-        result
+        // 使用 spawn_blocking 在阻塞线程中执行 JS
+        let result = timeout(
+            timeout_duration,
+            {
+                let interrupt = interrupt.clone();
+                tokio::task::spawn_blocking(move || {
+                    Self::execute_js_sync(&content, &script, interrupt)
+                })
+            },
+        )
+        .await;
+
+        match result {
+            Ok(join) => join.context("JS 执行任务失败")?,
+            Err(_) => {
+                // 超时：置位中断标志让阻塞线程内的 JS 循环退出
+                interrupt.store(true, Ordering::Relaxed);
+                anyhow::bail!("JS 执行超时");
+            }
+        }
     }
 
     /// 同步执行 JS（在 spawn_blocking 中调用）
+    ///
+    /// `interrupt`: 外层超时后置位；中断句柄在 eval 前安装，
+    /// JS 引擎在每个检查点轮询，置位后 eval 返回中断错误
     #[cfg(feature = "js-engine")]
-    fn execute_js_sync(content: &str, script: &str) -> Result<Vec<JsChapterInfo>> {
+    fn execute_js_sync(
+        content: &str,
+        script: &str,
+        interrupt: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<Vec<JsChapterInfo>> {
         use rquickjs::{Context, Runtime};
+        use std::sync::atomic::Ordering;
 
         let runtime = Runtime::new().context("创建 JS Runtime 失败")?;
+        // 资源上限对齐 clean_rules（防恶意规则耗尽内存/栈）
+        runtime.set_memory_limit(32 * 1024 * 1024);
+        runtime.set_max_stack_size(1024 * 1024);
+        // 中断句柄必须在 eval 前安装
+        runtime.set_interrupt_handler(Some(Box::new(move || {
+            interrupt.load(Ordering::Relaxed)
+        })));
         let context = Context::full(&runtime).context("创建 JS Context 失败")?;
 
         context.with(|ctx| {
@@ -107,7 +140,7 @@ impl ChapterExtractor {
                 .set("content", content)
                 .context("设置 content 变量失败")?;
 
-            // 执行脚本
+            // 执行脚本（死循环被中断句柄中止后在此报错）
             let result: rquickjs::Value = ctx
                 .eval(script)
                 .context("执行 JS 脚本失败")?;
@@ -762,6 +795,25 @@ Second chapter content.
         for chapter in &chapters {
             assert_eq!(chapter.level, 1);
         }
+    }
+
+    #[tokio::test]
+    async fn test_infinite_loop_interrupted() {
+        // 死循环规则：tokio timeout 到期后置位中断标志，
+        // 阻塞线程内的 JS 必须在宽限期内真正退出（而非孤儿泄漏）
+        let extractor = ChapterExtractor::new();
+        let start = std::time::Instant::now();
+        let result = extractor
+            .extract_with_js("正文", "while(true){}")
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "死循环应报错");
+        assert!(
+            elapsed < Duration::from_secs(8),
+            "超时+中断应在 timeout_secs+宽限内完成，实际 {:?}",
+            elapsed
+        );
     }
 
     #[tokio::test]

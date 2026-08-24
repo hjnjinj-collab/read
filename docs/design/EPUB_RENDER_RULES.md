@@ -1,6 +1,6 @@
 # EPUB 统一渲染规则（路线2：结构化 IR + CSS 物化 + 原生绘制）
 
-> 更新: 2026-08-23（M3：文字样式/行内富文本/表格排版）
+> 更新: 2026-08-24（M4：阅读级简繁转换）；2026-08-23（M3：文字样式/行内富文本/表格排版）
 > 地位: EPUB 富内容渲染管线的**权威规则描述**，以代码实际状态为准。
 > 验收基准: 《剑来》（Duokan 制作，474 spine，416 章头出血图 + ~19 整页背景 + ~40 卷首页）
 > 关联: ARCHITECTURE.md §A8 / css_lite.rs / content_ir.rs / extract_rules.rs / layout_engine::layout_items
@@ -15,6 +15,8 @@ spine XHTML（原始字节）
    ▼
 JSON DOM {"t","a","c"}（根=body；script/style/template/noscript 跳过；
    │                      深度帽 512、序列化帽 8MB）
+   │ ☆ 阅读级简繁转换（可选，M4）：convert_text_nodes 就地改写 c 数组
+   │   字符串文本节点；标签名/属性天然不动（详见 §7）
    │ ② 规则层：extract_rules.rs ▓JS▓（D9：语义分类归 JS）
    ▼
 { body_tag, body_classes, body_style, blocks[+anc 祖先链] }
@@ -204,7 +206,7 @@ CSS 声明 → css_lite 物化（自身+继承回溯）
 - JS 字符串为 UTF-16 计数，Rust char 计数对 BMP 内中文字符等价；
   星表面文字/emoji 在样式区段内可能偏移 ±1（真实书未出现）
 - em/strong 仅当 CSS 显式声明 font-size/color 才有视觉差异，
-  字形本身不加粗不倾斜（见 §7）
+  字形本身不加粗不倾斜（见 §8）
 
 ## 6. 表格排版专项（原子多列）
 
@@ -224,7 +226,27 @@ Table{rows, margin_top_percent} → LayoutItem::Table(TableInput)
 - **垂直对齐**：一律 top（真实书两 td 均 vertical-align:top）
 - 锚点：单元格字符累计 + 每段落 +1；is_chapter_start 首行标记照常生效
 
-## 7. 明确不支持清单（定论，勿再误判为 bug）
+## 7. 阅读级简繁转换（M4）
+
+EPUB 结构化路径此前完全跳过阅读级预处理。M4 起支持**仅简繁转换**
+（替换规则明确不进 EPUB），实现为 **DOM 文本节点预转换**：
+
+| 项 | 规则 |
+|---|---|
+| 变换位置 | DOM 构建之后、JS 规则提取之前——`dom_json::convert_text_nodes` 就地只递归改写 `c` 数组中的字符串元素；标签名与属性值天然不动，class/style 选择器匹配不受影响 |
+| D10 契约 | 变换先于 IR 构建 ⇒ PUA 哨兵回收与 StyledRun 区间全部在**转换后文本**上计算，行内样式区间天然对齐；布局/绘制层零感知 |
+| 实现口径 | 唯一权威 `book_parser::chinese_convert`（zhconv 词组级，ARCHITECTURE D6）；编码 u8 与 TXT 同款：0=无 1=简→繁 2=繁→简 |
+| 参数通道 | FFI 逐调用传参（`get_page_structured`/`get_page_count_structured` 同携带 chineseConvert，两函数必须同参否则页数/内容错位），非全局状态 |
+| 缓存 | StructuredPageKey 携带 convert_mode，换模式即换缓存键，LRU 自然淘汰；锚点在转换后文本上二分定位，进度恢复不受影响 |
+| 兜底路径 | structured_fallback 纯文本输出的 Paragraph 同样应用转换 |
+| 词组级特性 | zhconv 按词组映射：字面无歧义词不变化属正常（如「皇后」繁体本就写作「皇后」），验证须用无歧义词组 |
+
+**EPUB 有意不做**（定论勿误判为缺失）：替换净化规则（EPUB 无行级净化
+需求；未来若引入必须同样前置到 DOM 文本层）、去重标题/重分段
+（EPUB 段落为语义 `<p>`，无 TXT 行重组问题）、导入级 EpubCleanedBook
+半退役缓存维持现状（结构化路径不依赖它）。
+
+## 8. 明确不支持清单（定论，勿再误判为 bug）
 
 1. 内嵌自定义字体还原（DK-*、zdy* 等）——系统字体渲染
 2. id 选择器 / !important / @media 响应式
@@ -237,7 +259,7 @@ Table{rows, margin_top_percent} → LayoutItem::Table(TableInput)
 8. 脚注（ol.duokan-footnote）交互
 9. 表格 margin 的非 top 方向（右对齐 auto 忽略，表格整体左置）
 
-## 8. 新元素接入涉及文件速查
+## 9. 新元素接入涉及文件速查
 
 | 层 | 文件 | 改什么 |
 |---|---|---|

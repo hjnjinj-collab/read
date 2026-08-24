@@ -59,6 +59,9 @@ struct StructuredPageKey {
     line_height: u32,
     padding: (u32, u32, u32, u32),
     font_name: String,
+    /// 阅读级简繁转换模式（0=无 1=简→繁 2=繁→简）；换模式即换键，
+    /// LRU 自然淘汰旧缓存
+    convert_mode: u8,
 }
 
 impl StructuredPageKey {
@@ -66,6 +69,7 @@ impl StructuredPageKey {
         book_id: &str,
         chapter_index: usize,
         config: &LayoutConfig,
+        convert_mode: u8,
     ) -> Self {
         Self {
             book_id: book_id.to_string(),
@@ -81,6 +85,7 @@ impl StructuredPageKey {
                 config.padding.bottom.to_bits(),
             ),
             font_name: config.font_name.clone(),
+            convert_mode,
         }
     }
 }
@@ -1180,13 +1185,14 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
     }
 }
 
-/// 结构化章节的「提取 + 分页」（带 LRU 缓存；键含排版配置）
+/// 结构化章节的「提取 + 分页」（带 LRU 缓存；键含排版配置+简繁模式）
 fn process_structured_chapter(
     book_id: &str,
     chapter_index: usize,
     config: &LayoutConfig,
+    chinese_convert: u8,
 ) -> anyhow::Result<Vec<crate::PageInfo>> {
-    let cache_key = StructuredPageKey::new(book_id, chapter_index, config);
+    let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert);
 
     // 缓存命中：零计算
     if let Some(cached) = STRUCTURED_PAGINATION_CACHE
@@ -1198,6 +1204,13 @@ fn process_structured_chapter(
         return Ok(cached);
     }
 
+    // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
+    let convert_mode = match chinese_convert {
+        1 => book_parser::content_cleaner::ConvertMode::SimplifiedToTraditional,
+        2 => book_parser::content_cleaner::ConvertMode::TraditionalToSimplified,
+        _ => book_parser::content_cleaner::ConvertMode::None,
+    };
+
     // 提取 IR（锁内：parser 独占可变状态）
     let (content, background) = {
         let mut books = BOOKS.write().unwrap();
@@ -1208,7 +1221,10 @@ fn process_structured_chapter(
             .structured
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
-        let content = structured.parser.get_chapter_content_structured(chapter_index)?;
+        let content =
+            structured
+                .parser
+                .get_chapter_content_structured_ex(chapter_index, convert_mode)?;
         let background = content.background.clone();
         (content, background)
     };
@@ -1308,6 +1324,7 @@ fn structured_layout_config(
 ///
 /// `anchor_char_offset`: 进度锚点——章内文本字符偏移（与 TXT 路径同语义，
 /// 图片项不消耗锚点）；提供时返回包含该偏移的页（跳过纯图装饰页）。
+/// `chinese_convert`: 阅读级简繁转换（0=无 1=简→繁 2=繁→简；与 TXT 同编码）
 #[allow(clippy::too_many_arguments)]
 pub fn get_page_structured(
     book_id: String,
@@ -1323,6 +1340,7 @@ pub fn get_page_structured(
     padding_bottom: f32,
     font_name: String,
     anchor_char_offset: Option<usize>,
+    chinese_convert: u8,
 ) -> anyhow::Result<crate::PageInfo> {
     let config = structured_layout_config(
         width,
@@ -1335,7 +1353,7 @@ pub fn get_page_structured(
         padding_bottom,
         font_name,
     );
-    let pages = process_structured_chapter(&book_id, chapter_index, &config)?;
+    let pages = process_structured_chapter(&book_id, chapter_index, &config, chinese_convert)?;
 
     let effective = match anchor_char_offset {
         Some(offset) => locate_structured_page(&pages, offset),
@@ -1362,6 +1380,7 @@ pub fn get_page_count_structured(
     padding_right: f32,
     padding_bottom: f32,
     font_name: String,
+    chinese_convert: u8,
 ) -> anyhow::Result<usize> {
     let config = structured_layout_config(
         width,
@@ -1374,7 +1393,7 @@ pub fn get_page_count_structured(
         padding_bottom,
         font_name,
     );
-    let pages = process_structured_chapter(&book_id, chapter_index, &config)?;
+    let pages = process_structured_chapter(&book_id, chapter_index, &config, chinese_convert)?;
     Ok(pages.len())
 }
 

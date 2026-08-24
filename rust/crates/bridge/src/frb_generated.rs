@@ -1709,6 +1709,7 @@ fn wire__crate__api__get_page_count_structured_impl(
             let api_padding_right = <f32>::sse_decode(&mut deserializer);
             let api_padding_bottom = <f32>::sse_decode(&mut deserializer);
             let api_font_name = <String>::sse_decode(&mut deserializer);
+            let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1725,6 +1726,7 @@ fn wire__crate__api__get_page_count_structured_impl(
                             api_padding_right,
                             api_padding_bottom,
                             api_font_name,
+                            api_chinese_convert,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1838,6 +1840,7 @@ fn wire__crate__api__get_page_structured_impl(
             let api_padding_bottom = <f32>::sse_decode(&mut deserializer);
             let api_font_name = <String>::sse_decode(&mut deserializer);
             let api_anchor_char_offset = <Option<usize>>::sse_decode(&mut deserializer);
+            let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1856,6 +1859,7 @@ fn wire__crate__api__get_page_structured_impl(
                             api_padding_bottom,
                             api_font_name,
                             api_anchor_char_offset,
+                            api_chinese_convert,
                         )?;
                         Ok(output_ok)
                     })(),
