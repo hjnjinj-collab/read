@@ -34,6 +34,6 @@ pub use scheduler::{
     PreloadExecutor, PreloadExecutorConfig, PreloadHandle, PreloadResult, PreloadStatus, PreloadStats,
 };
 pub use session::{
-    ChapterCache, CachedChapterPages as ChapterCachePages, PreloadCacheIntegrator,
+    ChapterCache, CachedChapterPages as ChapterCachePages,
     ReadSession, ReadSessionManager, ReadSessionRef,
 };

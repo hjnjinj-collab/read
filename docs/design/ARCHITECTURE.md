@@ -309,6 +309,7 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 | A9 | **文字样式·行内富文本·表格排版（M3）** | IR 增加 color/font_scale/StyledRun（PUA 哨兵在空白折叠+去广告完成后回收边界，免疫偏移漂移）；css_lite color/font-size 继承链回溯 + 盒模型简写展开（margin:20% 0 0 auto → margin-top% + margin-left:auto 右置）；layout_styled_paragraph 逐字符倍率测量换行、runs 跨行切段、表格原子多列排版（1.2em 窄列逐字竖排还原卷首标题）；FFI 扁平字段透传；Dart TextSpan 分段绘制。明确不做：内嵌字体加载/px 字号/粗斜体字形 | ✅ 完成（2026-08-23，真书验收：42 卷首页全命中、832 样式化标题、42 段行内 runs） |
 | A10 | **EPUB 阅读级简繁转换 + JS 中断迁移（M4）** | dom_json.rs 拆 Value 形态构建/序列化 + `convert_text_nodes` DOM 文本节点预转换（IR 构建前，D10 契约下 runs 区间天然对齐）；`get_chapter_content_structured_ex` + FFI `get_page_structured`/`get_page_count_structured` 同参携带 chineseConvert 逐调用下发；StructuredPageKey 加 convert_mode 换模式即换缓存键；兜底路径同步转换。chapter_extractor 由纯 tokio timeout 迁移为 **AtomicBool 置位型中断**（eval 前装句柄 + 32MB 内存帽/1MB 栈帽，tokio timeout 留作延迟兜底），死循环规则测试 <8s 通过。明确不进 EPUB：替换规则/重分段 | ✅ 完成（2026-08-24，真书验收：简繁即时切换、卷首诗红色 runs 不漂移、锚点恢复正常） |
 | A11 | **M5 元素渲染补全（粗斜体/列表/ruby/表格线框/px·rgb）+ TXT 标题对齐** | StyledRun 加 bold/italic/underline 三 bool（serde default+skip 向后兼容）全链透传至 Dart TextSpan；物化层标签 UA 默认语义（b/strong/i/em/cite/a）+ CSS font-weight/font-style 覆盖（数值按级联语义整体覆盖）；ruby 以整元素为处理单元进哨兵通道、rt 默认 RUBY_SCALE=0.5 小字跟随；列表「• /N. 」bridge 层合成前缀+runs 同步偏移（hr 先例延伸）；PageEntry::Rect 引擎变体 + FFI 扁平 is_table_frame + Dart stroke 细灰线框；px/pt 按当前排版字号换算、rgb()/rgba()/命名色 17 项入 resolved_color；is_chapter_start 补 FFI 透传洞，TXT 章节标题随粗体开关加粗（!isEpub 门控）。**两开关纯绘制期过滤不进任何缓存键**（零缓存失效）；测量保持单字体，Dart 合成粗体（CJK 字宽不变，拉丁 ±2-8% 已知限制） | ✅ 完成（2026-08-24，真书验收：开关四组合正确/TXT 标题加粗/ruby 不撑行/线框闭合/列表前缀不错位/锚点恢复正常） |
+| A12 | **预加载修复 + EPUB 翻章预取（M6/B 方向）** | TXT：PreloadExecutor load_fn 由「读原始文本即丢弃」改为经 LAST_TXT_LAYOUT_SNAPSHOT 快照同参调 process_and_layout_chapter 真预热 PAGINATION_CACHE（Dart 零改动）；删 per-call thread::spawn+Runtime::new（泄漏 Runtime 句柄 + 共享 shared_tokio_runtime + load_fn 移入 spawn_blocking 使超时真正可触发）；queue_depth 补出队 fetch_sub；删死 FFI preload_chapter/queue_depth/cancel_preload 与死代码 PreloadManager/PreloadCacheIntegrator。EPUB：新 FFI `prefetch_structured_chapter`（幂等键查秒回；process_structured_chapter 加 prefer_try_lock——提取段 try_write 抢锁失败即让路 Ok(None)，前台恒阻塞等待恒 Some）；Dart 当前章渲染完成后 unawaited 预取下一章（参数逐字节同前台，f32 bits 入键口径一致）。**不做 generation/取消机制**：键隔离使旧参预取最多白算一次 | ✅ 完成（2026-08-24，真书验收：翻章无可感停顿、快速连翻正常、改设置后正常、TXT 回归） |
 
 ## 10. 附录
 
@@ -318,7 +319,7 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 |-------|----------|-----------|
 | book_parser | loader / txt_parser / epub_parser / chapter_extractor / chapter_recognizer / content_cleaner / clean_rules / epub_clean_cache / chinese_convert / encoding / dom_json / extract_rules / css_lite / image_size / content_ir | 加载工厂、TXT 主解析、EPUB 解析(roxmltree 结构解析+结构化提取主路径)、JS 章节规则、置信度识别器(未接线)、导入级净化(JS 规则主路径)、EPUB 净化缓存、zhconv 简繁权威实现、编码检测、XHTML→JSON DOM、结构化提取 JS 规则集、CSS 子集解析物化、图片头尺寸探测、内容 IR v2 定义 |
 | layout_engine | LayoutEngine(layout_text/layout_items) / SmartPaginator(未接线) / GlyphCache / parallel(未接线) / AdvancedGlyphCache(未接线) | 排版分页（layout_text=TXT 承重路径逐字节不动；layout_items=结构化富内容路径：样式化文本/图片原子/表格多列）、智能分页、字形测宽缓存、多章并行、GB2312 预热 |
-| reader_core | ContentPreprocessor / processing/(休眠) / ReadSessionManager / position_tracker / PaginationCache | 阅读级六阶段预处理、富流水线+JS池(待激活)、阅读会话、偏移定位、LRU 分页缓存 |
+| reader_core | ContentPreprocessor / processing/(休眠) / ReadSessionManager / position_tracker / PaginationCache / scheduler(preload·preload_executor) | 阅读级六阶段预处理、富流水线+JS池(待激活)、阅读会话、偏移定位、LRU 分页缓存、相邻章分页预热（M6：load_fn 真预热+spawn_blocking+泄漏 Runtime 句柄） |
 | bridge | api.rs（BOOKS/PAGINATION_CACHE/STRUCTURED_PAGINATION_CACHE/RULES_PREPROCESSORS/FONT_MANAGER）+ lib.rs（BookHandle.structured/PageEntryInfo 扁平模型） | 全部 FFI 入口；process_and_layout_chapter 统一「处理+排版」；结构化路径 get_page_structured/get_page_count_structured/get_book_resource/get_book_cover/get_book_format |
 | book_source_engine | CSS/JSONPath/Regex 分析器 | 书源规则（无 JS，与章节识别 JS 是两回事） |
 
@@ -327,7 +328,14 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 - **D1** 章节识别走 JS 引擎规则，放弃多级正则+置信度评分；正则仅为降级路径
 - **D2** 字节偏移一律扫描原始字节 `\n` 建立行起始表（禁止 `lines()[i].len()+1` 累加）
 - **D3** 章节边界与所索引文本同源：净化后必须重新计算边界，不符按标题单调对齐兜底
-- **D4** 调度落地形态为 PreloadExecutor + DefaultPreloadStrategy（旧文档命名漂移注意）
+- **D4** 调度落地形态为 PreloadExecutor + DefaultPreloadStrategy（旧文档命名
+  漂移注意）。**M6 修正职责表述**：executor 的真实职责是「相邻章 TXT 分页
+  缓存预热」——load_fn 经 LAST_TXT_LAYOUT_SNAPSHOT 快照以与前台逐字节同参
+  调 process_and_layout_chapter，副作用（PAGINATION_CACHE 回填）即目的；
+  结构化（EPUB）路径预取不经 executor，走独立 FFI
+  `prefetch_structured_chapter`（try_write 让路、前台绝对优先、幂等）。
+  死代码 PreloadManager/PreloadCacheIntegrator 已删；手动预加载死 FFI
+  （preload_chapter/queue_depth/cancel_preload）已删
 - **D5** 章节强制分页通过 `TextLine.is_chapter_start` 标记传递
 - **D6** 简繁转换唯一权威实现 = `book_parser::chinese_convert`（zhconv 词组级），
   导入级与阅读级共用；另立实现必然漂移

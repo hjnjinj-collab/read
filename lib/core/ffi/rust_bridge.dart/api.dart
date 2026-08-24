@@ -7,9 +7,9 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `ensure_epub_cleaned_cache`, `get_preload_executor`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `slice_utf8_safe`, `structured_layout_config`, `trigger_preload_async`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `StructuredPageKey`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `ensure_epub_cleaned_cache`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_layout_config`, `trigger_preload_async`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredPageKey`, `TxtLayoutSnapshot`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
 /// Load font from file path
 Future<void> loadFontFile({required String fontName, required String fontPath}) =>
@@ -326,6 +326,40 @@ Future<BigInt> getPageCountStructured({
   chineseConvert: chineseConvert,
 );
 
+/// EPUB 翻章预取：以与前台完全一致的参数预计算目标章分页并写入缓存。
+///
+/// 幂等——键已存在立即返回 true；BOOKS 写锁被前台占用时让路返回 false。
+/// ⚠ 参数必须与 get_page_structured/get_page_count_structured 完全同参
+/// （f32 按 bits 入键），否则入键错位、预取无效。Dart 侧 fire-and-forget
+/// 调用（当前章渲染完成后预取下一章）。
+Future<bool> prefetchStructuredChapter({
+  required String bookId,
+  required BigInt chapterIndex,
+  required double width,
+  required double height,
+  required double fontSize,
+  required double lineHeightMultiplier,
+  required double paddingLeft,
+  required double paddingTop,
+  required double paddingRight,
+  required double paddingBottom,
+  required String fontName,
+  required int chineseConvert,
+}) => RustLib.instance.api.crateApiPrefetchStructuredChapter(
+  bookId: bookId,
+  chapterIndex: chapterIndex,
+  width: width,
+  height: height,
+  fontSize: fontSize,
+  lineHeightMultiplier: lineHeightMultiplier,
+  paddingLeft: paddingLeft,
+  paddingTop: paddingTop,
+  paddingRight: paddingRight,
+  paddingBottom: paddingBottom,
+  fontName: fontName,
+  chineseConvert: chineseConvert,
+);
+
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）
 Future<Uint8List> getBookResource({required String bookId, required String resourceHref}) =>
     RustLib.instance.api.crateApiGetBookResource(bookId: bookId, resourceHref: resourceHref);
@@ -589,18 +623,6 @@ Future<String> diagnoseChapterEncodingApi({required String bookId, required BigI
 /// 对比原始内容和处理后内容
 Future<String> compareRawAndProcessedContent({required String bookId, required BigInt chapterIndex}) =>
     RustLib.instance.api.crateApiCompareRawAndProcessedContent(bookId: bookId, chapterIndex: chapterIndex);
-
-/// 手动触发单章预加载
-Future<void> preloadChapter({required String bookId, required BigInt chapterIndex}) =>
-    RustLib.instance.api.crateApiPreloadChapter(bookId: bookId, chapterIndex: chapterIndex);
-
-/// 获取预加载队列深度
-Future<BigInt> getPreloadQueueDepth() => RustLib.instance.api.crateApiGetPreloadQueueDepth();
-
-/// 取消书籍的所有预加载任务
-/// 注意: 当前 PreloadExecutor 不支持按 book_id 取消
-/// 此函数为占位实现，完整功能需要在 UnifiedScheduler 中实现
-Future<void> cancelPreload({required String bookId}) => RustLib.instance.api.crateApiCancelPreload(bookId: bookId);
 
 /// 内容净化选项
 class ContentCleaningOptions {

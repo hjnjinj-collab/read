@@ -273,6 +273,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         currentPageIndex: page.pageIndex,
       );
 
+      // EPUB 翻章预取（M6）：当前章已渲染，后台预计算下一章分页入缓存，
+      // 翻章零延迟。fire-and-forget：失败/被前台让路均静默不影响阅读
+      _prefetchNextChapterEpub();
+
       // 进度自动保存（债#3）：每次成功加载页面即落库。
       // charOffset 为章内锚点，恢复时经 locate_page_for_offset 精确定位；
       // 本地 sqlite 写入微秒级，无需节流；失败静默（不阻塞阅读）。
@@ -293,6 +297,35 @@ class ReaderNotifier extends Notifier<ReadingState> {
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
+  }
+
+  /// EPUB 翻章预取（M6）：预计算下一章全部分页写入 Rust LRU 缓存。
+  ///
+  /// 参数必须与上方 getPageStructured 完全一致（f32 按 bits 入缓存键，
+  /// 不同参则入键错位、预取无效）。幂等：下一章已在缓存时 Rust 秒回；
+  /// 前台占用写锁时让路返回 false。仅向后一章——向前翻章目标通常
+  /// 已在 LRU 中；并发多章无收益（JS 提取器进程级单 Context）。
+  void _prefetchNextChapterEpub() {
+    final bookId = state.bookId;
+    if (bookId == null || !_isEpub) return;
+    final next = state.currentChapterIndex + 1;
+    if (next >= state.chapters.length) return;
+    final convertCode = _chineseConvert == ChineseConvertType.s2t ? 1
+        : _chineseConvert == ChineseConvertType.t2s ? 2
+        : 0;
+    unawaited(_bookService.prefetchStructuredChapter(
+      bookId,
+      next,
+      width: _screenWidth,
+      height: _screenHeight,
+      fontSize: _fontSize,
+      lineHeightMultiplier: _lineHeight,
+      paddingLeft: _paddingHorizontal,
+      paddingTop: _paddingVertical,
+      paddingRight: _paddingHorizontal,
+      paddingBottom: _paddingVertical,
+      chineseConvert: convertCode,
+    ));
   }
 
   // ===== 书签 =====

@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -182284686;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1767164213;
 
 // Section: executor
 
@@ -84,41 +84,6 @@ fn wire__crate__api__batch_process_chapters_impl(
                         Ok(output_ok)
                     })()
                     .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__cancel_preload_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "cancel_preload",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api__book_id = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || {
-                        let output_ok = crate::api::cancel_preload(api__book_id)?;
-                        Ok(output_ok)
-                    })(),
                 )
             }
         },
@@ -1902,38 +1867,6 @@ fn wire__crate__api__get_pagination_cache_stats_impl(
         },
     )
 }
-fn wire__crate__api__get_preload_queue_depth_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "get_preload_queue_depth",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, ()>((move || {
-                    let output_ok = Result::<_, ()>::Ok(crate::api::get_preload_queue_depth())?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__api__get_preload_stats_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2506,7 +2439,7 @@ fn wire__crate__api__parse_txt_file_with_cleaning_impl(
         },
     )
 }
-fn wire__crate__api__preload_chapter_impl(
+fn wire__crate__api__prefetch_structured_chapter_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -2514,7 +2447,7 @@ fn wire__crate__api__preload_chapter_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "preload_chapter",
+            debug_name: "prefetch_structured_chapter",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -2530,12 +2463,34 @@ fn wire__crate__api__preload_chapter_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_book_id = <String>::sse_decode(&mut deserializer);
             let api_chapter_index = <usize>::sse_decode(&mut deserializer);
+            let api_width = <f32>::sse_decode(&mut deserializer);
+            let api_height = <f32>::sse_decode(&mut deserializer);
+            let api_font_size = <f32>::sse_decode(&mut deserializer);
+            let api_line_height_multiplier = <f32>::sse_decode(&mut deserializer);
+            let api_padding_left = <f32>::sse_decode(&mut deserializer);
+            let api_padding_top = <f32>::sse_decode(&mut deserializer);
+            let api_padding_right = <f32>::sse_decode(&mut deserializer);
+            let api_padding_bottom = <f32>::sse_decode(&mut deserializer);
+            let api_font_name = <String>::sse_decode(&mut deserializer);
+            let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
-                        let output_ok =
-                            crate::api::preload_chapter(api_book_id, api_chapter_index)?;
+                        let output_ok = crate::api::prefetch_structured_chapter(
+                            api_book_id,
+                            api_chapter_index,
+                            api_width,
+                            api_height,
+                            api_font_size,
+                            api_line_height_multiplier,
+                            api_padding_left,
+                            api_padding_top,
+                            api_padding_right,
+                            api_padding_bottom,
+                            api_font_name,
+                            api_chinese_convert,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )
@@ -3285,109 +3240,107 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__api__batch_process_chapters_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__cancel_preload_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__clear_all_caches_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__clear_all_pagination_cache_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__clear_book_cache_impl(port, ptr, rust_vec_len, data_len),
-        6 => {
+        2 => wire__crate__api__clear_all_caches_impl(port, ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__clear_all_pagination_cache_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__clear_book_cache_impl(port, ptr, rust_vec_len, data_len),
+        5 => {
             wire__crate__api__clear_content_cleaning_options_impl(port, ptr, rust_vec_len, data_len)
         }
-        7 => wire__crate__api__clear_pagination_cache_for_book_impl(
+        6 => wire__crate__api__clear_pagination_cache_for_book_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        8 => wire__crate__api__close_session_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__compare_raw_and_processed_content_impl(
+        7 => wire__crate__api__close_session_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__compare_raw_and_processed_content_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        10 => wire__crate__api__content_cleaning_options_default_impl(
+        9 => wire__crate__api__content_cleaning_options_default_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__crate__api__create_reading_session_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__delete_book_source_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__detect_book_format_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__detect_format_detailed_impl(port, ptr, rust_vec_len, data_len),
-        15 => {
+        10 => wire__crate__api__create_reading_session_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__delete_book_source_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__detect_book_format_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__detect_format_detailed_impl(port, ptr, rust_vec_len, data_len),
+        14 => {
             wire__crate__api__diagnose_chapter_encoding_api_impl(port, ptr, rust_vec_len, data_len)
         }
-        16 => wire__crate__api__diagnose_file_encoding_api_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__epub_chapter_structured_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__ffi_process_options_default_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__get_active_session_count_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__get_book_cover_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__get_book_format_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__get_book_info_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__get_book_info_by_id_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__get_book_info_by_json_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__get_book_resource_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__get_book_source_json_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__get_book_title_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__get_cache_statistics_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__get_cache_stats_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__get_chapter_content_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__get_chapter_content_from_source_impl(
+        15 => wire__crate__api__diagnose_file_encoding_api_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__epub_chapter_structured_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__ffi_process_options_default_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__get_active_session_count_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__get_book_cover_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__get_book_format_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__get_book_info_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__get_book_info_by_id_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__get_book_info_by_json_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__get_book_resource_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__get_book_source_json_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__get_book_title_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__get_cache_statistics_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__get_cache_stats_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__get_chapter_content_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__get_chapter_content_from_source_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        32 => wire__crate__api__get_chapter_content_from_source_json_impl(
+        31 => wire__crate__api__get_chapter_content_from_source_json_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => {
+        32 => {
             wire__crate__api__get_chapter_content_processed_impl(port, ptr, rust_vec_len, data_len)
         }
-        34 => wire__crate__api__get_chapters_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__get_font_count_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__get_page_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__get_page_cached_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__get_page_cached_processed_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__get_page_count_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__get_page_count_cached_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__get_page_count_processed_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__get_page_count_structured_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__get_page_processed_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__get_page_structured_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__get_pagination_cache_stats_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__get_preload_queue_depth_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__get_preload_stats_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__get_session_book_info_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__get_session_chapter_content_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__get_session_chapters_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__get_toc_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__get_toc_by_json_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__layout_chapter_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__list_book_sources_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__load_book_source_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__load_book_source_ffi_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__load_font_data_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__load_font_file_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__parse_txt_file_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__parse_txt_file_async_impl(port, ptr, rust_vec_len, data_len),
-        61 => {
+        33 => wire__crate__api__get_chapters_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__get_font_count_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__get_page_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__get_page_cached_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__get_page_cached_processed_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__get_page_count_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__get_page_count_cached_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__get_page_count_processed_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__get_page_count_structured_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__get_page_processed_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__get_page_structured_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__get_pagination_cache_stats_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__get_preload_stats_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__get_session_book_info_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__get_session_chapter_content_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__get_session_chapters_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__get_toc_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__get_toc_by_json_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__layout_chapter_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__list_book_sources_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__load_book_source_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__load_book_source_ffi_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__load_font_data_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__load_font_file_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__parse_txt_file_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__parse_txt_file_async_impl(port, ptr, rust_vec_len, data_len),
+        59 => {
             wire__crate__api__parse_txt_file_with_cleaning_impl(port, ptr, rust_vec_len, data_len)
         }
-        62 => wire__crate__api__preload_chapter_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__process_chapter_content_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__release_book_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__search_book_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__search_book_by_json_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__set_book_source_enabled_impl(port, ptr, rust_vec_len, data_len),
-        68 => {
+        60 => wire__crate__api__prefetch_structured_chapter_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__process_chapter_content_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__release_book_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__search_book_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__search_book_by_json_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__set_book_source_enabled_impl(port, ptr, rust_vec_len, data_len),
+        66 => {
             wire__crate__api__set_content_cleaning_options_impl(port, ptr, rust_vec_len, data_len)
         }
-        69 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

@@ -786,6 +786,137 @@ fn epub_table_frame_probe() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// M6 探针：EPUB 翻章预取——前台持锁让路、幂等秒回、预热后前台命中、参数隔离
+#[test]
+fn epub_prefetch_structured_chapter() {
+    let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+    let dir = std::env::temp_dir().join(format!("epub_pf_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("p.epub");
+    build_minimal_epub(&path).unwrap();
+
+    let book_id =
+        parse_txt_file(path.to_string_lossy().to_string(), None).expect("EPUB 导入失败");
+
+    let args = (360.0f32, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0);
+
+    // 前台先读 ch0（建立书状态与缓存基线）
+    let count0 = get_page_count_structured(
+        book_id.clone(),
+        0,
+        args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        "TestFont".to_string(),
+        0,
+    )
+    .expect("ch0 计数失败");
+    assert!(count0 >= 1);
+
+    // 前台持 BOOKS 写锁 → 预取让路返回 false（try_write 失败即放弃，
+    // 不阻塞前台——std RwLock 非重入但 try_write 永不阻塞，同线程安全）
+    {
+        let _guard = bridge::BOOKS.write().unwrap();
+        assert!(
+            !prefetch_structured_chapter(
+                book_id.clone(),
+                1,
+                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+                "TestFont".to_string(),
+                0,
+            )
+            .expect("锁忙预取不应报错"),
+            "前台持锁时预取应让路返回 false"
+        );
+    }
+
+    // 锁释放后预取 ch1：真实提取入缓存。
+    // （并行测试会争用全局 BOOKS 锁，可能瞬时让路——重试直至成功）
+    let mut warmed = false;
+    for _ in 0..100 {
+        if prefetch_structured_chapter(
+            book_id.clone(),
+            1,
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            "TestFont".to_string(),
+            0,
+        )
+        .expect("预取不应报错")
+        {
+            warmed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(warmed, "锁释放后预取应最终成功");
+
+    // 幂等：再次预取键已存在秒回 true
+    assert!(
+        prefetch_structured_chapter(
+            book_id.clone(),
+            1,
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            "TestFont".to_string(),
+            0,
+        )
+        .expect("幂等预取失败")
+    );
+
+    // 预热后前台读取 ch1 内容正确（缓存命中路径）
+    let page_ch1 = get_page_structured(
+        book_id.clone(),
+        1,
+        0,
+        args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        "TestFont".to_string(),
+        None,
+        0,
+    )
+    .expect("ch1 前台读取失败");
+    assert!(page_text(&page_ch1).contains("深夜的巷口"), "第 2 章正文应在位");
+
+    // 参数隔离：不同 convert_mode 是不同键，各自预取/读取互不干扰
+    let mut warmed_s2t = false;
+    for _ in 0..100 {
+        if prefetch_structured_chapter(
+            book_id.clone(),
+            1,
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            "TestFont".to_string(),
+            1,
+        )
+        .expect("convert=1 预取不应报错")
+        {
+            warmed_s2t = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(warmed_s2t, "convert=1 预取应最终成功");
+    let count_s2t = get_page_count_structured(
+        book_id.clone(),
+        1,
+        args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        "TestFont".to_string(),
+        1,
+    )
+    .expect("convert=1 计数失败");
+    assert!(count_s2t >= 1);
+    // 原模式缓存不受影响
+    let page_again = get_page_structured(
+        book_id.clone(),
+        1,
+        0,
+        args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        "TestFont".to_string(),
+        None,
+        0,
+    )
+    .expect("原模式回读失败");
+    assert!(page_text(&page_again).contains("深夜的巷口"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// M2/M3 真书探针（#[ignore]）：EBOOK_PROBE_PATH 指向真实 EPUB，
 /// 打印抽样章 IR 摘要（背景/块样式/图片物化），并全量扫描统计
 /// 文字样式与表格物化的命中情况

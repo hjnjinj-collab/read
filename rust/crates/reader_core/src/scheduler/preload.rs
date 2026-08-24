@@ -1,8 +1,4 @@
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
-use std::sync::Arc;
-
-use tokio::sync::{Mutex, Semaphore};
 
 /// Preload priority levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -118,75 +114,10 @@ impl PreloadStrategy for DefaultPreloadStrategy {
     }
 }
 
-/// Preload manager with priority queue and concurrency control.
-pub struct PreloadManager {
-    /// Priority queue for pending tasks
-    queue: Arc<Mutex<BinaryHeap<PreloadTask>>>,
-    /// Concurrency limit
-    semaphore: Arc<Semaphore>,
-    /// Maximum concurrent preloads
-    max_concurrent: usize,
-}
-
-impl PreloadManager {
-    /// Create a new preload manager.
-    pub fn new(max_concurrent: usize) -> Self {
-        Self {
-            queue: Arc::new(Mutex::new(BinaryHeap::new())),
-            semaphore: Arc::new(Semaphore::new(max_concurrent)),
-            max_concurrent,
-        }
-    }
-
-    /// Create a preload manager with default settings (3 concurrent).
-    pub fn default_manager() -> Self {
-        Self::new(3)
-    }
-
-    /// Add a task to the preload queue.
-    pub async fn add_task(&self, task: PreloadTask) {
-        let mut queue = self.queue.lock().await;
-        queue.push(task);
-    }
-
-    /// Get the next task to execute (highest priority).
-    pub async fn next_task(&self) -> Option<PreloadTask> {
-        let mut queue = self.queue.lock().await;
-        queue.pop()
-    }
-
-    /// Check if there are pending tasks.
-    pub async fn has_tasks(&self) -> bool {
-        let queue = self.queue.lock().await;
-        !queue.is_empty()
-    }
-
-    /// Get the number of pending tasks.
-    pub async fn pending_count(&self) -> usize {
-        let queue = self.queue.lock().await;
-        queue.len()
-    }
-
-    /// Clear all pending tasks.
-    pub async fn clear(&self) {
-        let mut queue = self.queue.lock().await;
-        queue.clear();
-    }
-
-    /// Try to acquire a permit for concurrent execution.
-    pub async fn acquire_permit(&self) -> bool {
-        self.semaphore.try_acquire().is_ok()
-    }
-
-    /// Get maximum concurrent limit.
-    pub fn max_concurrent(&self) -> usize {
-        self.max_concurrent
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BinaryHeap;
 
     #[test]
     fn test_default_preload_strategy() {
@@ -250,60 +181,5 @@ mod tests {
         assert_eq!(heap.pop().unwrap().priority, PreloadPriority::Critical);
         assert_eq!(heap.pop().unwrap().priority, PreloadPriority::High);
         assert_eq!(heap.pop().unwrap().priority, PreloadPriority::Low);
-    }
-
-    #[tokio::test]
-    async fn test_preload_manager() {
-        let manager = PreloadManager::new(2);
-
-        // Add tasks
-        manager.add_task(PreloadTask {
-            chapter_index: 0,
-            priority: PreloadPriority::Critical,
-            book_id: "book1".to_string(),
-        }).await;
-        manager.add_task(PreloadTask {
-            chapter_index: 1,
-            priority: PreloadPriority::High,
-            book_id: "book1".to_string(),
-        }).await;
-
-        assert_eq!(manager.pending_count().await, 2);
-        assert!(manager.has_tasks().await);
-
-        // Get next task (should be Critical)
-        let task = manager.next_task().await.unwrap();
-        assert_eq!(task.priority, PreloadPriority::Critical);
-        assert_eq!(task.chapter_index, 0);
-
-        // Get next task (should be High)
-        let task = manager.next_task().await.unwrap();
-        assert_eq!(task.priority, PreloadPriority::High);
-        assert_eq!(task.chapter_index, 1);
-
-        // Queue should be empty
-        assert!(!manager.has_tasks().await);
-    }
-
-    #[tokio::test]
-    async fn test_preload_manager_clear() {
-        let manager = PreloadManager::default_manager();
-
-        manager.add_task(PreloadTask {
-            chapter_index: 0,
-            priority: PreloadPriority::Critical,
-            book_id: "book1".to_string(),
-        }).await;
-        manager.add_task(PreloadTask {
-            chapter_index: 1,
-            priority: PreloadPriority::High,
-            book_id: "book1".to_string(),
-        }).await;
-
-        assert_eq!(manager.pending_count().await, 2);
-
-        manager.clear().await;
-        assert_eq!(manager.pending_count().await, 0);
-        assert!(!manager.has_tasks().await);
     }
 }

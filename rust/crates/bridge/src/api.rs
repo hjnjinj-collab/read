@@ -1,13 +1,13 @@
 use crate::{BookHandle, ChapterInfo, PageInfo, BOOKS};
 use crate::diagnostics::{diagnose_file_encoding, diagnose_chapter_content};
-use book_parser::{BookParser, TxtParser, BookFormat, ContentCleaner, ConvertMode, ParagraphMode, CleanOptions};
+use book_parser::{BookParser, BookFormat, ContentCleaner, ConvertMode, ParagraphMode, CleanOptions};
 use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, Page};
 use reader_core::{
     ContentPreprocessor, ProcessOptions, ChineseConvertType, ReplaceRule, RuleType,
     PaginationCache, CacheKey, CachedChapterPages,
     ReadSessionManager,
     PreloadExecutor, PreloadExecutorConfig,
-    PreloadTask, PreloadPriority, DefaultPreloadStrategy, PreloadStrategy,
+    PreloadTask, DefaultPreloadStrategy, PreloadStrategy,
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use once_cell::sync::Lazy;
@@ -35,6 +35,74 @@ static RULES_PREPROCESSORS: Lazy<Mutex<std::collections::HashMap<u64, Arc<Conten
 static PAGINATION_CACHE: Lazy<Arc<Mutex<PaginationCache>>> = Lazy::new(|| {
     Arc::new(Mutex::new(PaginationCache::new(10)))
 });
+
+/// 最近一次 TXT 前台排版参数快照（book_id + 完整处理选项）。
+/// 预加载 load_fn 据此以同参重建相邻章分页写入 PAGINATION_CACHE——
+/// 保证预取缓存键与前台键逐字节一致（含 f32 bits 口径）
+#[derive(Clone)]
+struct TxtLayoutSnapshot {
+    config: LayoutConfig,
+    remove_duplicate_title: bool,
+    re_segment: bool,
+    chinese_convert: u8,
+    replace_rules: Vec<FfiReplaceRule>,
+}
+
+static LAST_TXT_LAYOUT_SNAPSHOT: Mutex<Option<(String, TxtLayoutSnapshot)>> =
+    Mutex::new(None);
+
+/// 记录最近一次 TXT 前台排版参数（get_page_processed / get_page_count 成功路径调用）
+fn remember_txt_layout(
+    book_id: &str,
+    config: &LayoutConfig,
+    remove_duplicate_title: bool,
+    re_segment: bool,
+    chinese_convert: u8,
+    replace_rules: &[FfiReplaceRule],
+) {
+    *LAST_TXT_LAYOUT_SNAPSHOT.lock().unwrap() = Some((
+        book_id.to_string(),
+        TxtLayoutSnapshot {
+            config: config.clone(),
+            remove_duplicate_title,
+            re_segment,
+            chinese_convert,
+            replace_rules: replace_rules.to_vec(),
+        },
+    ));
+}
+
+/// 进程级共享 Tokio 运行时（前台预处理与预加载共用，消除 per-call 新建）
+static SHARED_TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn shared_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    SHARED_TOKIO_RUNTIME.get_or_init(|| {
+        tokio::runtime::Runtime::new().expect("Failed to create shared Tokio runtime")
+    })
+}
+
+/// TXT 相邻章预热：按最近一次前台排版快照重建目标章分页并写入
+/// PAGINATION_CACHE（缓存命中即零开销，副作用即目的）。
+/// 无快照或书不匹配时跳过返回 false。
+fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool> {
+    let snap = LAST_TXT_LAYOUT_SNAPSHOT.lock().unwrap().clone();
+    let Some((snap_book, snap)) = snap else {
+        return Ok(false);
+    };
+    if snap_book != book_id {
+        return Ok(false);
+    }
+    process_and_layout_chapter(
+        book_id,
+        chapter_index,
+        &snap.config,
+        snap.remove_duplicate_title,
+        snap.re_segment,
+        snap.chinese_convert,
+        &snap.replace_rules,
+    )?;
+    Ok(true)
+}
 
 /// 结构化路径分页结果缓存（EPUB；键含排版配置，容量 10 章）
 ///
@@ -402,8 +470,8 @@ fn process_and_layout_chapter(
     };
 
     let preprocessor = get_preprocessor_for_rules(&rules);
-    let rt = tokio::runtime::Runtime::new()?;
-    let processed = rt.block_on(preprocessor.process(&raw_content, &options))?;
+    let processed =
+        shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = LayoutEngine::new(config.clone(), font_manager);
@@ -677,56 +745,43 @@ fn ensure_epub_cleaned_cache(
     Ok(())
 }
 
-/// 异步触发预加载
+/// 异步触发预加载（在泄漏的共享 Runtime 上提交任务，无新建线程/运行时）
 fn trigger_preload_async(book_id: String, current_chapter: usize) {
-    let executor = get_preload_executor();
-    let book_id_clone = book_id.clone();
-    
-    // 使用 std::thread 避免 Tokio 运行时问题
-    std::thread::spawn(move || {
-        // 创建一个临时 Tokio 运行时来执行异步任务
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        rt.block_on(async move {
-            // 获取总章节数
-            let total_chapters = {
-                let books = BOOKS.read().unwrap();
-                books.get(&book_id_clone)
-                    .map(|h| h.book.chapters.len())
-                    .unwrap_or(0)
-            };
-            
-            if total_chapters == 0 {
-                return;
-            }
+    let rt_handle = get_preload_runtime().handle.clone();
+    rt_handle.spawn(async move {
+        // 获取总章节数
+        let total_chapters = {
+            let books = BOOKS.read().unwrap();
+            books.get(&book_id)
+                .map(|h| h.book.chapters.len())
+                .unwrap_or(0)
+        };
+
+        if total_chapters == 0 {
+            return;
+        }
+
         // 使用 DefaultPreloadStrategy 计算预加载范围
         let strategy = DefaultPreloadStrategy::default();
-        let chapters_to_preload = strategy.calculate_preload_chapters(
-            current_chapter,
-            total_chapters,
-        );
-        
-        // 提交预加载任务
+        let chapters_to_preload =
+            strategy.calculate_preload_chapters(current_chapter, total_chapters);
+
+        let executor = get_preload_executor();
         for (chapter_index, priority) in chapters_to_preload {
             if chapter_index == current_chapter {
                 continue; // 跳过当前章节
             }
-            
+
             let task = PreloadTask {
                 chapter_index,
                 priority,
-                book_id: book_id_clone.clone(),
+                book_id: book_id.clone(),
             };
-            
-            match executor.submit(task).await {
-                Ok(_handle) => {
-                    // 预加载任务已提交
-                },
-                Err(e) => {
-                    log::warn!("预加载任务提交失败: {}", e);
-                }
+
+            if let Err(e) = executor.submit(task).await {
+                log::warn!("预加载任务提交失败: {}", e);
             }
         }
-        });
     });
 }
 
@@ -943,6 +998,14 @@ pub fn get_page_processed(
         chinese_convert,
         &replace_rules,
     )?;
+    remember_txt_layout(
+        &book_id,
+        &config,
+        remove_duplicate_title,
+        re_segment,
+        chinese_convert,
+        &replace_rules,
+    );
 
     // 3. 页面定位：优先锚点（进度保持），否则用请求页码
     let effective = match anchor_char_offset {
@@ -1003,6 +1066,14 @@ pub fn get_page_count_processed(
         chinese_convert,
         &replace_rules,
     )?;
+    remember_txt_layout(
+        &book_id,
+        &config,
+        remove_duplicate_title,
+        re_segment,
+        chinese_convert,
+        &replace_rules,
+    );
 
     Ok(pages.len())
 }
@@ -1229,12 +1300,17 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
 }
 
 /// 结构化章节的「提取 + 分页」（带 LRU 缓存；键含排版配置+简繁模式）
+///
+/// `prefer_try_lock`: 预取语义——提取段用 try_write 抢 BOOKS 写锁，
+/// 被前台占用时让路返回 Ok(None)（绝不阻塞前台）；前台调用恒传 false
+/// （阻塞等待、恒返回 Some）。
 fn process_structured_chapter(
     book_id: &str,
     chapter_index: usize,
     config: &LayoutConfig,
     chinese_convert: u8,
-) -> anyhow::Result<Vec<crate::PageInfo>> {
+    prefer_try_lock: bool,
+) -> anyhow::Result<Option<Vec<crate::PageInfo>>> {
     let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert);
 
     // 缓存命中：零计算
@@ -1244,7 +1320,7 @@ fn process_structured_chapter(
         .get(&cache_key)
         .cloned()
     {
-        return Ok(cached);
+        return Ok(Some(cached));
     }
 
     // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
@@ -1254,22 +1330,27 @@ fn process_structured_chapter(
         _ => book_parser::content_cleaner::ConvertMode::None,
     };
 
-    // 提取 IR（锁内：parser 独占可变状态）
-    let (content, background) = {
-        let mut books = BOOKS.write().unwrap();
-        let handle = books
-            .get_mut(book_id)
-            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-        let structured = handle
-            .structured
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
-        let content = structured
-            .parser
-            .get_chapter_content_structured_ex(chapter_index, convert_mode, config.font_size)?;
-        let background = content.background.clone();
-        (content, background)
+    // 提取 IR（锁内：parser 独占可变状态；预取抢不到写锁即让路）
+    let mut books = if prefer_try_lock {
+        match BOOKS.try_write() {
+            Ok(guard) => guard,
+            Err(_) => return Ok(None),
+        }
+    } else {
+        BOOKS.write().unwrap()
     };
+    let handle = books
+        .get_mut(book_id)
+        .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+    let structured = handle
+        .structured
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
+    let content = structured
+        .parser
+        .get_chapter_content_structured_ex(chapter_index, convert_mode, config.font_size)?;
+    let background = content.background.clone();
+    drop(books);
 
     // IR → 布局项 → 分页（重活在锁外）
     let mut items = Vec::with_capacity(content.blocks.len());
@@ -1305,7 +1386,7 @@ fn process_structured_chapter(
         .unwrap()
         .put(cache_key, infos.clone());
 
-    Ok(infos)
+    Ok(Some(infos))
 }
 
 /// 页内是否含文本项（纯图/空页判定）
@@ -1395,7 +1476,9 @@ pub fn get_page_structured(
         padding_bottom,
         font_name,
     );
-    let pages = process_structured_chapter(&book_id, chapter_index, &config, chinese_convert)?;
+    let pages =
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
+            .expect("前台结构化分页恒返回 Some");
 
     let effective = match anchor_char_offset {
         Some(offset) => locate_structured_page(&pages, offset),
@@ -1435,8 +1518,52 @@ pub fn get_page_count_structured(
         padding_bottom,
         font_name,
     );
-    let pages = process_structured_chapter(&book_id, chapter_index, &config, chinese_convert)?;
+    let pages =
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
+            .expect("前台结构化分页恒返回 Some");
     Ok(pages.len())
+}
+
+/// EPUB 翻章预取：以与前台完全一致的参数预计算目标章分页并写入缓存。
+///
+/// 幂等——键已存在立即返回 true；BOOKS 写锁被前台占用时让路返回 false。
+/// ⚠ 参数必须与 get_page_structured/get_page_count_structured 完全同参
+/// （f32 按 bits 入键），否则入键错位、预取无效。Dart 侧 fire-and-forget
+/// 调用（当前章渲染完成后预取下一章）。
+#[allow(clippy::too_many_arguments)]
+pub fn prefetch_structured_chapter(
+    book_id: String,
+    chapter_index: usize,
+    width: f32,
+    height: f32,
+    font_size: f32,
+    line_height_multiplier: f32,
+    padding_left: f32,
+    padding_top: f32,
+    padding_right: f32,
+    padding_bottom: f32,
+    font_name: String,
+    chinese_convert: u8,
+) -> anyhow::Result<bool> {
+    let config = structured_layout_config(
+        width,
+        height,
+        font_size,
+        line_height_multiplier,
+        padding_left,
+        padding_top,
+        padding_right,
+        padding_bottom,
+        font_name,
+    );
+    let cache_key = StructuredPageKey::new(&book_id, chapter_index, &config, chinese_convert);
+    if STRUCTURED_PAGINATION_CACHE.lock().unwrap().contains(&cache_key) {
+        return Ok(true);
+    }
+    Ok(
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, true)?
+            .is_some(),
+    )
 }
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）
@@ -2093,34 +2220,40 @@ pub fn get_active_session_count() -> usize {
 
 // ===== 预加载系统 FFI =====
 
-/// 全局预加载执行器（延迟初始化）
-static PRELOAD_EXECUTOR: OnceLock<Arc<PreloadExecutor>> = OnceLock::new();
+/// 预加载运行时：执行器 + 泄漏 Tokio Runtime 的句柄
+/// （worker 线程挂在泄漏的 Runtime 上；handle 供外部 spawn 提交任务，
+/// 消除历史上每次触发的 thread::spawn + Runtime::new 风暴）
+struct PreloadRuntime {
+    executor: Arc<PreloadExecutor>,
+    handle: tokio::runtime::Handle,
+}
 
-/// 获取或初始化预加载执行器
-fn get_preload_executor() -> Arc<PreloadExecutor> {
-    PRELOAD_EXECUTOR.get_or_init(|| {
-        // 在 Tokio 运行时中初始化
+static PRELOAD_RUNTIME: OnceLock<PreloadRuntime> = OnceLock::new();
+
+fn get_preload_runtime() -> &'static PreloadRuntime {
+    PRELOAD_RUNTIME.get_or_init(|| {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        let handle = rt.handle().clone();
         let executor = rt.block_on(async {
             Arc::new(PreloadExecutor::new_with_book_id(
                 PreloadExecutorConfig::default(),
-                |book_id, chapter_index| {
-                    // 从全局 BOOKS 获取书籍并加载章节内容
-                    let books = BOOKS.read().unwrap();
-                    let handle = books.get(book_id)
-                        .ok_or_else(|| anyhow::anyhow!("Book not found: {}", book_id))?;
-                    
-                    // 调用 TxtParser 加载章节内容
-                    TxtParser::get_chapter_content(&handle.book, chapter_index)
-                        .ok_or_else(|| anyhow::anyhow!("Chapter {} not found", chapter_index))
+                |book_id, chapter_index| match preload_txt_warm(book_id, chapter_index) {
+                    // 预热目的在副作用（分页缓存回填），返回值仅作诊断
+                    Ok(true) => Ok(format!("warmed ch{}", chapter_index)),
+                    Ok(false) => Ok("skipped (no snapshot)".to_string()),
+                    Err(e) => Err(e),
                 },
             ))
         });
-        
-        // 保持运行时存活（泄漏它）
+        // 泄漏运行时保活 worker；handle 已克隆可继续使用
         std::mem::forget(rt);
-        executor
-    }).clone()
+        PreloadRuntime { executor, handle }
+    })
+}
+
+/// 获取或初始化预加载执行器
+fn get_preload_executor() -> Arc<PreloadExecutor> {
+    get_preload_runtime().executor.clone()
 }
 
 /// 获取预加载统计信息
@@ -2388,50 +2521,66 @@ pub fn compare_raw_and_processed_content(
     ))
 }
 
-// ===== 预加载控制 API (新增) =====
+// 死 FFI 已删（Dart 零调用，AGENTS.md「确定无用彻底删」）：
+// preload_chapter / get_preload_queue_depth / cancel_preload——
+// 相邻章预热由 get_chapter_content 尾部自动触发（trigger_preload_async）
 
-/// 手动触发单章预加载
-pub fn preload_chapter(book_id: String, chapter_index: usize) -> anyhow::Result<()> {
-    let executor = get_preload_executor();
-    let book_id_clone = book_id.clone();
-    
-    // 使用 std::thread 避免 Tokio 运行时问题
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        rt.block_on(async move {
-            let task = PreloadTask {
-                chapter_index,
-                priority: PreloadPriority::High,
-                book_id: book_id_clone,
-            };
-            
-            match executor.submit(task).await {
-                Ok(handle) => {
-                    // 等待完成（可选）
-                    if let Err(e) = handle.wait().await {
-                        log::warn!("预加载失败: {:?}", e);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("预加载任务提交失败: {}", e);
-                }
-            }
-        });
-    });
-    
-    Ok(())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// 获取预加载队列深度
-pub fn get_preload_queue_depth() -> usize {
-    let executor = get_preload_executor();
-    executor.stats().queue_depth.load(std::sync::atomic::Ordering::Relaxed)
-}
+    /// M6-S1：TXT 预加载真预热——load_fn 副作用（分页缓存回填）验证。
+    /// 旧实现只读原始文本即丢弃、对缓存零贡献；本测试锁定「预热→命中」语义
+    #[test]
+    fn preload_txt_warm_fills_pagination_cache() {
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
 
-/// 取消书籍的所有预加载任务
-/// 注意: 当前 PreloadExecutor 不支持按 book_id 取消
-/// 此函数为占位实现，完整功能需要在 UnifiedScheduler 中实现
-pub fn cancel_preload(_book_id: String) -> anyhow::Result<()> {
-    // TODO: 在阶段 3 实现 UnifiedScheduler 时添加按 book_id 取消的功能
-    Ok(())
+        let dir = std::env::temp_dir().join(format!("txt_preload_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let txt_path = dir.join("preload.txt");
+        std::fs::write(
+            &txt_path,
+            "第一章 起点\n\n正文内容第一段落。\n\n第二章 终点\n\n第二章节的正文内容。\n",
+        )
+        .unwrap();
+
+        let book_id =
+            parse_txt_file(txt_path.to_string_lossy().to_string(), None).expect("TXT 导入失败");
+
+        // 前台读 ch0：建立排版快照
+        get_page_processed(
+            book_id.clone(),
+            0,
+            0,
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+            "TestFont".to_string(),
+            false, false, 0, Vec::new(), None,
+        )
+        .expect("ch0 前台读取失败");
+
+        // 预热 ch1（与 load_fn 同路径）
+        assert!(
+            preload_txt_warm(&book_id, 1).expect("预热失败"),
+            "有快照时应执行预热"
+        );
+
+        // 同参前台读取 ch1 应命中缓存（预热回填生效）
+        let hits_before = get_cache_statistics().unwrap().hits;
+        get_page_processed(
+            book_id.clone(),
+            1,
+            0,
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+            "TestFont".to_string(),
+            false, false, 0, Vec::new(), None,
+        )
+        .expect("ch1 前台读取失败");
+        let hits_after = get_cache_statistics().unwrap().hits;
+        assert!(hits_after > hits_before, "预热后的同参调用应命中分页缓存");
+
+        // 无快照的书 → 跳过不报错
+        assert!(!preload_txt_warm("nonexistent-book", 0).unwrap());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

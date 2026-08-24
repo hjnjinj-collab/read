@@ -418,6 +418,41 @@ class BookService {
     return count.toInt();
   }
 
+  /// EPUB 翻章预取：预计算目标章分页写入缓存（幂等；前台占用写锁时让路）。
+  ///
+  /// ⚠ 参数必须与 getPageStructured/getPageCountStructured 完全一致
+  /// （f32 按 bits 入缓存键），否则入键错位、预取无效。
+  /// 返回 true=已入缓存（含本就命中），false=前台忙被跳过。
+  Future<bool> prefetchStructuredChapter(
+    String bookId,
+    int chapterIndex, {
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+    int chineseConvert = 0,
+  }) async {
+    return await rust_api.prefetchStructuredChapter(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+      chineseConvert: chineseConvert,
+    );
+  }
+
   /// 读取书内资源字节（EPUB 图片；ZIP 全路径与 IR resourceHref 同基准）
   Future<Uint8List> getBookResource(String bookId, String resourceHref) async {
     return await rust_api.getBookResource(

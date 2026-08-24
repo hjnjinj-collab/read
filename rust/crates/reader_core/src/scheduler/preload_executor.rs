@@ -200,7 +200,7 @@ impl PreloadExecutor {
         is_shutdown: Arc<AtomicBool>,
         timeout: Duration,
     ) where
-        F: Fn(&str, usize) -> Result<String> + Send + Sync,
+        F: Fn(&str, usize) -> Result<String> + Send + Sync + 'static,
     {
         loop {
             if is_shutdown.load(Ordering::Relaxed) {
@@ -215,20 +215,33 @@ impl PreloadExecutor {
 
             match message {
                 Some(message) => {
+                    // 任务已出队，队列深度回落（提交时 fetch_add 的配对）
+                    stats.queue_depth.fetch_sub(1, Ordering::Relaxed);
+
                     let task = message.task;
                     let result_tx = message.result_tx;
                     let mut cancel_rx = message.cancel_rx;
 
                     stats.total_tasks.fetch_add(1, Ordering::Relaxed);
 
-                    // 执行预加载任务（带超时）
+                    // 执行预加载任务（带超时）。load_fn 是同步阻塞代码，
+                    // 必须放 spawn_blocking——既避免卡死 async worker，
+                    // 也让超时 select 真正可触发
                     let chapter_index = task.chapter_index;
                     let book_id = task.book_id.clone();
                     let start = std::time::Instant::now();
 
                     let result = tokio::select! {
                         result = tokio::time::timeout(timeout, async {
-                            load_fn(&book_id, chapter_index)
+                            let load_fn = load_fn.clone();
+                            let book_id = book_id.clone();
+                            tokio::task::spawn_blocking(move || {
+                                load_fn(&book_id, chapter_index)
+                            })
+                            .await
+                            .unwrap_or_else(|e| {
+                                Err(anyhow::anyhow!("预加载任务 panic: {}", e))
+                            })
                         }) => {
                             match result {
                                 Ok(Ok(content)) => PreloadResult {
