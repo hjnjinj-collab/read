@@ -82,6 +82,12 @@ class PageEntry {
   /// 行内富文本分段（span 等样式覆盖；空=整行统一用行级样式）
   final List<EntrySegment> segments;
 
+  /// 章节首行标记（TXT 强制分页；绘制端按粗体开关渲染标题加粗）
+  final bool isChapterStart;
+
+  /// 表格单元格线框矩形（x/y/width/height 为几何；绘制端描边不填充）
+  final bool isTableFrame;
+
   const PageEntry({
     this.text,
     this.resourceHref,
@@ -92,6 +98,8 @@ class PageEntry {
     this.color,
     this.fontScale,
     this.segments = const [],
+    this.isChapterStart = false,
+    this.isTableFrame = false,
   });
 
   bool get isImage => resourceHref != null;
@@ -105,11 +113,19 @@ class EntrySegment {
   final String? color;
   final double? fontScale;
 
+  /// 字形样式（绘制端按用户开关决定粗/斜是否应用；下划线恒应用）
+  final bool bold;
+  final bool italic;
+  final bool underline;
+
   const EntrySegment({
     required this.start,
     required this.end,
     this.color,
     this.fontScale,
+    this.bold = false,
+    this.italic = false,
+    this.underline = false,
   });
 }
 

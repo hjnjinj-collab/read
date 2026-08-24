@@ -41,6 +41,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _removeAds = true;
   bool _smartParagraph = true;
 
+  // 字形样式开关（EPUB 行内粗斜体；TXT 章节标题加粗）。
+  // 纯绘制期过滤：不进任何缓存键，切换零缓存失效
+  bool _boldEnabled = true;
+  bool _italicEnabled = true;
+
   /// 当前书是否为 EPUB（结构化路径分流标记）
   bool _isEpub = false;
 
@@ -52,6 +57,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool get removeHtmlTags => _removeHtmlTags;
   bool get removeAds => _removeAds;
   bool get smartParagraph => _smartParagraph;
+  bool get boldEnabled => _boldEnabled;
+  bool get italicEnabled => _italicEnabled;
+
+  /// 当前书是否按 EPUB 结构化路径渲染
+  bool get renderAsEpub => _isEpub;
 
   void setScreenSize(double width, double height) {
     _screenWidth = width;
@@ -92,6 +102,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required bool removeHtmlTags,
     required bool removeAds,
     required bool smartParagraph,
+    required bool boldEnabled,
+    required bool italicEnabled,
   }) async {
     _removeDuplicateTitle = removeDuplicateTitle;
     _reSegment = reSegment;
@@ -100,6 +112,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _removeHtmlTags = removeHtmlTags;
     _removeAds = removeAds;
     _smartParagraph = smartParagraph;
+    _boldEnabled = boldEnabled;
+    _italicEnabled = italicEnabled;
 
     if (state.bookId == null) return;
 

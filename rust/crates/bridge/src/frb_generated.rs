@@ -3178,6 +3178,8 @@ impl SseDecode for crate::PageEntryInfo {
         let mut var_color = <Option<String>>::sse_decode(deserializer);
         let mut var_fontScale = <Option<f32>>::sse_decode(deserializer);
         let mut var_segments = <Vec<crate::PageSegInfo>>::sse_decode(deserializer);
+        let mut var_isChapterStart = <bool>::sse_decode(deserializer);
+        let mut var_isTableFrame = <bool>::sse_decode(deserializer);
         return crate::PageEntryInfo {
             text: var_text,
             resource_href: var_resourceHref,
@@ -3188,6 +3190,8 @@ impl SseDecode for crate::PageEntryInfo {
             color: var_color,
             font_scale: var_fontScale,
             segments: var_segments,
+            is_chapter_start: var_isChapterStart,
+            is_table_frame: var_isTableFrame,
         };
     }
 }
@@ -3223,11 +3227,17 @@ impl SseDecode for crate::PageSegInfo {
         let mut var_end = <usize>::sse_decode(deserializer);
         let mut var_color = <Option<String>>::sse_decode(deserializer);
         let mut var_fontScale = <Option<f32>>::sse_decode(deserializer);
+        let mut var_bold = <bool>::sse_decode(deserializer);
+        let mut var_italic = <bool>::sse_decode(deserializer);
+        let mut var_underline = <bool>::sse_decode(deserializer);
         return crate::PageSegInfo {
             start: var_start,
             end: var_end,
             color: var_color,
             font_scale: var_fontScale,
+            bold: var_bold,
+            italic: var_italic,
+            underline: var_underline,
         };
     }
 }
@@ -3599,6 +3609,8 @@ impl flutter_rust_bridge::IntoDart for crate::PageEntryInfo {
             self.color.into_into_dart().into_dart(),
             self.font_scale.into_into_dart().into_dart(),
             self.segments.into_into_dart().into_dart(),
+            self.is_chapter_start.into_into_dart().into_dart(),
+            self.is_table_frame.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3639,6 +3651,9 @@ impl flutter_rust_bridge::IntoDart for crate::PageSegInfo {
             self.end.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
             self.font_scale.into_into_dart().into_dart(),
+            self.bold.into_into_dart().into_dart(),
+            self.italic.into_into_dart().into_dart(),
+            self.underline.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3927,6 +3942,8 @@ impl SseEncode for crate::PageEntryInfo {
         <Option<String>>::sse_encode(self.color, serializer);
         <Option<f32>>::sse_encode(self.font_scale, serializer);
         <Vec<crate::PageSegInfo>>::sse_encode(self.segments, serializer);
+        <bool>::sse_encode(self.is_chapter_start, serializer);
+        <bool>::sse_encode(self.is_table_frame, serializer);
     }
 }
 
@@ -3951,6 +3968,9 @@ impl SseEncode for crate::PageSegInfo {
         <usize>::sse_encode(self.end, serializer);
         <Option<String>>::sse_encode(self.color, serializer);
         <Option<f32>>::sse_encode(self.font_scale, serializer);
+        <bool>::sse_encode(self.bold, serializer);
+        <bool>::sse_encode(self.italic, serializer);
+        <bool>::sse_encode(self.underline, serializer);
     }
 }
 

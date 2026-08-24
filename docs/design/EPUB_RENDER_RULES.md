@@ -1,6 +1,6 @@
 # EPUB 统一渲染规则（路线2：结构化 IR + CSS 物化 + 原生绘制）
 
-> 更新: 2026-08-24（M4：阅读级简繁转换）；2026-08-23（M3：文字样式/行内富文本/表格排版）
+> 更新: 2026-08-24（M5：粗斜体字形/列表符号/ruby 注音/表格线框/px·rgb）；2026-08-24（M4：阅读级简繁转换）；2026-08-23（M3：文字样式/行内富文本/表格排版）
 > 地位: EPUB 富内容渲染管线的**权威规则描述**，以代码实际状态为准。
 > 验收基准: 《剑来》（Duokan 制作，474 spine，416 章头出血图 + ~19 整页背景 + ~40 卷首页）
 > 关联: ARCHITECTURE.md §A8 / css_lite.rs / content_ir.rs / extract_rules.rs / layout_engine::layout_items
@@ -28,9 +28,10 @@ StructuredContent v2 { version, background, body_classes, blocks }
    │                     intrinsic 尺寸已探测；文字样式/runs/表格列宽已物化）
    │ ④ 布局层：layout_engine::layout_items（bridge 把块映射为 LayoutItem）
    ▼
-Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
-   │    （表格在布局期折算为一组绝对定位文本行，绘制层无感知）
-   │ ⑤ 绘制层：Flutter PagePainter（文本 TextPainter / 图片 paintImage）
+Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + 字符锚点区间
+   │    （表格在布局期折算为一组绝对定位文本行+线框矩形，绘制层无感知）
+   │ ⑤ 绘制层：Flutter PagePainter（文本 TextPainter / 图片 paintImage /
+   │    线框 drawRect stroke；粗斜体按用户开关绘制期合成）
    ▼
 页面（背景图 → 图片 → 文本行，按坐标绝对定位）
 ```
@@ -52,14 +53,14 @@ Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
 | `<img src alt>` | 独立图块；src 由 Rust 按内容目录解析为 ZIP 全路径 | Image | 见 §3 图片规则 | ✅ |
 | `<svg><image xlink:href></svg>` | SVG 包裹图片（《剑来》封面页形态）：svg 容器透明下沉，image 同 img 提取（href 读 src→xlink:href→href）；配合 duokan-page-fullscreen 转整页背景（见 §3.1） | Image | 同 img 规则；全屏页转背景铺满裁切 | ✅ |
 | `div.logo>img`（包裹容器） | anc 链携带祖先 class | Image | CSS 物化 width%/align/bleed 后绘制 | ✅ |
-| `<ul>`/`<ol>`/`<li>` | 列表；li 内嵌套 ul/ol 递归；li 内 p/img 混排 | List{ordered,items} | 前序展平为段/图序列；**项目符号/编号不渲染** | ◐ |
+| `<ul>`/`<ol>`/`<li>` | 列表；li 内嵌套 ul/ol 递归；li 内 p/img 混排 | List{ordered,items} | 前序展平为段/图序列；**项目符号「• 」/编号「N. 」前缀渲染**（M5：bridge 层合成，见 §8；悬挂缩进不做、ol start 属性忽略恒从 1 起） | ✅ |
 | `<blockquote>` | 引用块递归提取 | Quote | 展平为普通段落（**无缩进/竖线样式**） | ◐ |
 | `<hr>` | 分隔线 | Rule | 渲染为「────────」文本行 | ◐ |
-| `<table>` | caption/tr/th·td；thead/tbody/tfoot 透明；单元格完整内容提取并携带 td 链路 | Table{rows,margin_top_percent} | **原子双列/多列排版**：列宽提示+逐字竖排（见 §6） | ✅ |
+| `<table>` | caption/tr/th·td；thead/tbody/tfoot 透明；单元格完整内容提取并携带 td 链路 | Table{rows,margin_top_percent} | **原子双列/多列排版**：列宽提示+逐字竖排+单元格细灰线框（M5，见 §6） | ✅ |
 | th/td colspan·rowspan | 忽略跨列跨行，按文档序对齐（允许参差行） | TableCell | 同上，跨列跨行错位 | ◐ |
-| `<ruby>/<rt>/<rp>` | rt/rp 文本并入正文行内 | Paragraph | **注音混入正文**（无小字上标形态） | ◐ |
-| `<a href>` | 文本并入所在段落 | Paragraph(内) | 无样式区分、**无跳转** | ◐ |
-| em/strong/b/i/u/s/span/code/small/sub/sup/cite/q/mark | 行内样式元素以 runs 区段携带 anc 链（嵌套时最外层胜出） | Paragraph.runs | **CSS color/font-size 生效**；粗斜体等字形差异仍丢失 | ◐ |
+| `<ruby>/<rt>/<rp>` | ruby 为处理单元：基字留段落缓冲、rt 独立成 run（anc 末位 ["rt"]）、rp 括号丢弃（M5） | Paragraph{runs} | rt 以 **0.5× 小字同基线跟随基字**（CSS font-size 可覆盖）；行高下限 1.0 不撑行；真上标形态不做（单基线模型） | ✅ |
+| `<a href>` | 文本并入所在段落，产出 runs（anc 带 ["a"]） | Paragraph(内) | **下划线生效**（无开关恒应用）；颜色随段落/CSS；**无跳转** | ◐ |
+| em/strong/b/i/u/s/span/code/small/sub/sup/cite/q/mark | 行内样式元素以 runs 区段携带 anc 链（嵌套时最外层胜出） | Paragraph.runs | CSS color/font-size 生效；**b/strong 粗、i/em/cite 斜（M5，标签 UA 默认语义 + CSS 声明覆盖，受用户开关控制，见 §8）**；u 下划线仍无 | ✅ |
 | `<figure>/<figcaption>` | 透明容器：图块与题注段按文档序产出 | Image+Paragraph | 图与题注顺序正确，无绑定关系 | ◐ |
 | `<svg>`（含 svg>image 封面） | 透明容器退化；封面经独立提取通道（OPF meta/properties），不走正文 | （封面=cover_data） | 封面进书架；正文内联 svg 不产块 | ◐ |
 | `<div>/section/article/main…` | 透明容器递归 | —（穿透） | — | ✅ |
@@ -98,8 +99,10 @@ Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
 |---|---|---|
 | width | Image.width_percent；**TableCell.width_em**（列宽提示） | 图片 %保留、px/em 忽略；td 仅 em |
 | text-align | Paragraph/Heading/Image.align | center/right/left；justify≈left；**沿祖先链继承查找** |
-| color | Paragraph/Heading/StyledRun.color | `#abc`/`#aabbcc` 规范化为小写 6 位；rgb()/命名色忽略；**沿祖先链继承** |
-| font-size | Paragraph/Heading/StyledRun.font_scale | em/% → 相对基准倍率；px/pt/rem 忽略；**沿祖先链继承** |
+| color | Paragraph/Heading/StyledRun.color | `#abc`/`#aabbcc` 规范化为小写 6 位；**rgb()/rgba()（alpha 忽略）/常用命名色 17 项解析（M5）**；**沿祖先链继承** |
+| font-size | Paragraph/Heading/StyledRun.font_scale | em/% → 相对基准倍率；**px/pt → px(或 pt·4/3) ÷ 当前排版字号 换算倍率（M5）；rem 忽略**；**沿祖先链继承** |
+| font-weight | StyledRun.bold | bold/bolder→粗、normal/lighter→常规（显式声明阻断继承）、数值 ≥550 粗其余常规（CSS 级联语义整体覆盖标签默认）（M5） |
+| font-style | StyledRun.italic | italic/oblique→斜、normal 显式常规（M5） |
 | display | Image.hidden（none 时过滤该块） | 仅关键字 none |
 | duokan-bleed | Image.bleed | 关键字含 "left" 即出血（真实书唯一形态 lefttopright） |
 | background(-image)/background | PageBackground.image_href | url() 提取；简写形态扫全文取 url(...) |
@@ -170,6 +173,9 @@ Page[] = entries[(样式化 Text 行 | Image 矩形)] + 字符锚点区间
   start==end==0），由背景填充视觉
 - 锚点恢复：`get_page_structured(anchor_char_offset)` 二分定位后**跳过与命中页
   同起点的纯图页**（装饰图页与后继文本页 start 相同）；超界锚点收敛到末页
+- 列表前缀（M5）：「• 」/「N. 」为 bridge 层合成文本，前缀字符计入
+  char_index 累计（runs 区间同步偏移，锚定自洽）——跨版本进度锚点微漂移
+  与 hr→「────」同类，二分定位容错无损
 - TXT 路径（layout_text）与本矩阵无关，其字符偏移语义被进度库精确依赖，
   两套分页核心有意分离、禁止合并重构
 
@@ -205,8 +211,11 @@ CSS 声明 → css_lite 物化（自身+继承回溯）
 
 - JS 字符串为 UTF-16 计数，Rust char 计数对 BMP 内中文字符等价；
   星表面文字/emoji 在样式区段内可能偏移 ±1（真实书未出现）
-- em/strong 仅当 CSS 显式声明 font-size/color 才有视觉差异，
-  字形本身不加粗不倾斜（见 §8）
+- **粗斜体为 Dart 绘制期合成**（M5）：Rust 测量保持单字体（字形缓存键
+  不加 weight 维度），CJK 字 advance 基本不变；拉丁字符 w700 变宽约
+  2-8%，行尾偶有轻微挤压或提前一字符换行——接受为已知限制
+- Heading 块无 runs 字段：标题内的行内样式（含 b/i）不生效（JS 标题臂
+  不走哨兵通道，四层缺口，真实书标题均纯文本，维持现状）
 
 ## 6. 表格排版专项（原子多列）
 
@@ -224,6 +233,10 @@ Table{rows, margin_top_percent} → LayoutItem::Table(TableInput)
 - **原子性**：整表高度一次性计算，当前页放不下且页非空→整表翻次页；
   超整页高的表格允许溢出底部（真实书未出现，文档定论不做行列拆分续排）
 - **垂直对齐**：一律 top（真实书两 td 均 vertical-align:top）
+- **单元格线框（M5）**：layout_table 逐行攒每格 `(x=base_x+列前缀和,
+  y=行顶, w=列宽, h=行高)`，经 PageEntry::Rect（引擎内部变体）→ FFI
+  扁平 `is_table_frame: bool` 标志透传；Dart 端 stroke 描边 1px 细灰
+  （0xFF999999）不填充；空表无矩形；margin-left:auto 右置随 base_x 自然跟随
 - 锚点：单元格字符累计 + 每段落 +1；is_chapter_start 首行标记照常生效
 
 ## 7. 阅读级简繁转换（M4）
@@ -246,20 +259,50 @@ EPUB 结构化路径此前完全跳过阅读级预处理。M4 起支持**仅简�
 （EPUB 段落为语义 `<p>`，无 TXT 行重组问题）、导入级 EpubCleanedBook
 半退役缓存维持现状（结构化路径不依赖它）。
 
-## 8. 明确不支持清单（定论，勿再误判为 bug）
+## 8. M5 渲染能力与用户开关
+
+### 8.1 字形样式开关（粗体/斜体独立）
+
+- **链路**：设置对话框「字形样式」两个 SwitchListTile → reader_provider
+  `_boldEnabled/_italicEnabled`（默认双开，纯内存不持久化）→
+  applyContentProcessingSettings 批量提交 → reader_page 组合参数传入
+  PagePainter；**斜体仅 EPUB 生效**（TXT 无行内标记语义）
+- **纯绘制期过滤原则**：两开关不进任何缓存键（StructuredPageKey 与 TXT
+  options_hash 均不含），切换必缓存命中秒回、零缓存失效；Rust 测量与
+  分页对开关无感知
+- **TXT 章节标题加粗对齐**：`isChapterStart && boldOn && !renderAsEpub`
+  时该行 baseStyle 加 w700——EPUB 结构化路径同样置位 is_chapter_start，
+  必须格式门控防 EPUB 章首行误加粗；TextSpan 子段继承父级字重，
+  segments 分支无需重复判断
+- 物化双源：标签 UA 默认语义（b/strong→粗、i/em/cite→斜）+ CSS
+  font-weight/font-style 声明覆盖（CSS 命中胜出，显式 normal 阻断继承）
+
+### 8.2 其余 M5 能力速查
+
+| 能力 | 规则所在 |
+|---|---|
+| ruby 小字跟随 | §1 ruby 行 / resolve_runs RUBY_SCALE=0.5 |
+| 列表符号编号 | §1 ul/ol 行 / §4 锚点口径（bridge 层合成+runs 同步偏移） |
+| 表格线框 | §6（Rect 条目 + is_table_frame 标志 + stroke 1px 细灰） |
+| px/pt 字号换算 | §2.3 font-size 行（÷当前排版字号，DEFAULT_BASE_FONT_PX=18 为探针/诊断缺省） |
+| rgb()/命名色 | §2.3 color 行 |
+
+## 9. 明确不支持清单（定论，勿再误判为 bug）
 
 1. 内嵌自定义字体还原（DK-*、zdy* 等）——系统字体渲染
 2. id 选择器 / !important / @media 响应式
-3. ruby 注音的小字上标形态（现混入正文）；a 链接下划线与跳转
-4. 表格线框绘制；colspan·rowspan 跨列跨行（按文档序对齐、参差行错位）
-5. 行内元素**字形**差异（粗体/斜体/上下标）；行内嵌套样式的最外层胜出语义
+3. ruby 真·上标形态（单基线模型，现 0.5× 小字同基线跟随）；a 链接跳转
+4. colspan·rowspan 跨列跨行（按文档序对齐、参差行错位）
+5. u/s/sub/sup 的下划线/删除线/上下标字形；标题（Heading）内的行内样式；
+   行内嵌套样式的最外层胜出语义
 6. 正文内联 svg 矢量图形（仅支持 `svg>image` 纯图片包裹形态，见 §1/§3.1）；
-   列表项目符号与编号
-7. px/em/pt 绝对尺寸的图片宽度与字号换算；rgb()/命名色
+   列表悬挂缩进与 ol start 起始编号
+7. px/em/pt 绝对尺寸的图片宽度；rem 字号；合成粗体不参与 Rust 断行测量
+   （拉丁字符行尾可能轻微挤压，见 §5.3）
 8. 脚注（ol.duokan-footnote）交互
 9. 表格 margin 的非 top 方向（右对齐 auto 忽略，表格整体左置）
 
-## 9. 新元素接入涉及文件速查
+## 10. 新元素接入涉及文件速查
 
 | 层 | 文件 | 改什么 |
 |---|---|---|

@@ -1019,6 +1019,16 @@ fn blocks_to_layout_items(
     blocks: &[book_parser::ContentBlock],
     out: &mut Vec<layout_engine::LayoutItem>,
 ) {
+    blocks_to_layout_items_inner(blocks, out, &mut None);
+}
+
+/// 列表项前缀（Some=该 li 的前缀尚未挂到首个非空段落）
+/// 先例：hr→「────」文本即 bridge 层合成；runs 区间同步偏移保证锚定自洽
+fn blocks_to_layout_items_inner(
+    blocks: &[book_parser::ContentBlock],
+    out: &mut Vec<layout_engine::LayoutItem>,
+    list_prefix: &mut Option<String>,
+) {
     use book_parser::ContentBlock;
     for block in blocks {
         match block {
@@ -1033,12 +1043,30 @@ fn blocks_to_layout_items(
                 if text.trim().is_empty() {
                     continue;
                 }
+                // 消费本 li 前缀：文本加前缀，runs 区间整体平移 k 个字符
+                let (text, runs) = match list_prefix.take() {
+                    Some(marker) => {
+                        let k = marker.chars().count();
+                        (
+                            format!("{}{}", marker, text),
+                            runs.iter()
+                                .map(|r| {
+                                    let mut m = map_run(r);
+                                    m.start += k;
+                                    m.end += k;
+                                    m
+                                })
+                                .collect(),
+                        )
+                    }
+                    None => (text.clone(), runs.iter().map(map_run).collect()),
+                };
                 out.push(layout_engine::LayoutItem::Text(layout_engine::TextItem {
-                    text: text.clone(),
+                    text,
                     align: map_align(*align),
                     color: color.clone(),
                     font_scale: *font_scale,
-                    runs: runs.iter().map(map_run).collect(),
+                    runs,
                 }));
             }
             ContentBlock::Heading {
@@ -1088,12 +1116,24 @@ fn blocks_to_layout_items(
                     bleed: *bleed,
                 });
             }
-            ContentBlock::List { items, .. } => {
+            ContentBlock::List { items, ordered, .. } => {
+                // 每个 li 独立前缀：ol 同级递增（恒从 1 起，start 属性不支持）、
+                // ul 项目符号；嵌套列表自建计数器。前缀挂 li 内首个非空段落，
+                // 其前的 Image/Heading 跳过不加；无段落的 li 无前缀
+                let mut counter = 0u32;
                 for item in items {
-                    blocks_to_layout_items(&item.blocks, out);
+                    counter += 1;
+                    let mut prefix = if *ordered {
+                        Some(format!("{}. ", counter))
+                    } else {
+                        Some("• ".to_string())
+                    };
+                    blocks_to_layout_items_inner(&item.blocks, out, &mut prefix);
                 }
             }
-            ContentBlock::Quote { blocks } => blocks_to_layout_items(blocks, out),
+            ContentBlock::Quote { blocks } => {
+                blocks_to_layout_items_inner(blocks, out, list_prefix);
+            }
             ContentBlock::Table {
                 caption: _,
                 rows,
@@ -1182,6 +1222,9 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
         end: r.end,
         color: r.color.clone(),
         font_scale: r.font_scale,
+        bold: r.bold,
+        italic: r.italic,
+        underline: r.underline,
     }
 }
 
@@ -1221,10 +1264,9 @@ fn process_structured_chapter(
             .structured
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
-        let content =
-            structured
-                .parser
-                .get_chapter_content_structured_ex(chapter_index, convert_mode)?;
+        let content = structured
+            .parser
+            .get_chapter_content_structured_ex(chapter_index, convert_mode, config.font_size)?;
         let background = content.background.clone();
         (content, background)
     };

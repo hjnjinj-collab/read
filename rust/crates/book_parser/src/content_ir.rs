@@ -89,6 +89,13 @@ pub struct StyledRun {
     /// CSS font-size 相对基准字号的倍率（em/% 物化；None=不缩放）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_scale: Option<f32>,
+    /// 字形样式：标签语义（b/strong、i/em/cite、a）或 CSS 声明物化
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bold: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub italic: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub underline: bool,
     /// JS 层中间字段：行内元素自身+祖先链；CSS 匹配后剥离
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anc: Option<Vec<Vec<String>>>,
@@ -273,6 +280,9 @@ impl ContentBlock {
                         end: r.end,
                         color: r.color,
                         font_scale: r.font_scale,
+                        bold: r.bold,
+                        italic: r.italic,
+                        underline: r.underline,
                         anc: r.anc,
                     })
                     .collect(),
@@ -386,6 +396,9 @@ impl ContentBlock {
                         end: r.end,
                         color: r.color,
                         font_scale: r.font_scale,
+                        bold: r.bold,
+                        italic: r.italic,
+                        underline: r.underline,
                         anc: None,
                     })
                     .collect(),
@@ -503,6 +516,9 @@ mod tests {
                         end: 4,
                         color: Some("#498428".to_string()),
                         font_scale: None,
+                        bold: false,
+                        italic: false,
+                        underline: false,
                         anc: Some(vec![vec!["p".into()], vec!["span".into(), "txtu2".into()]]),
                     }],
                     anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
@@ -565,6 +581,52 @@ mod tests {
         let fb = StructuredContent::from_fallback_text("第一行\n\n第二行");
         assert_eq!(fb.blocks.len(), 2);
         assert_eq!(fb.version, CONTENT_IR_VERSION);
+    }
+
+    /// 字形样式字段：serde 往返 + 旧 JSON（无新字段）向后兼容
+    #[test]
+    fn styled_run_glyph_fields_roundtrip_and_compat() {
+        let run = StyledRun {
+            start: 0,
+            end: 3,
+            color: None,
+            font_scale: None,
+            bold: true,
+            italic: true,
+            underline: true,
+            anc: None,
+        };
+        let json = serde_json::to_string(&run).unwrap();
+        assert!(json.contains("\"bold\":true"));
+        assert!(json.contains("\"italic\":true"));
+        assert!(json.contains("\"underline\":true"));
+        let back: StyledRun = serde_json::from_str(&json).unwrap();
+        assert_eq!(run, back);
+
+        // 无样式 run 序列化零增量（skip_serializing_if）
+        let plain = StyledRun {
+            start: 0,
+            end: 1,
+            color: None,
+            font_scale: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            anc: None,
+        };
+        let plain_json = serde_json::to_string(&plain).unwrap();
+        assert!(!plain_json.contains("bold"));
+        assert!(!plain_json.contains("italic"));
+        assert!(!plain_json.contains("underline"));
+
+        // M5 之前的 IR JSON（无字形字段）反序列化得 false
+        let legacy: StyledRun = serde_json::from_str(
+            r##"{"start":0,"end":2,"color":"#ff0000","font_scale":1.5}"##,
+        )
+        .unwrap();
+        assert!(!legacy.bold);
+        assert!(!legacy.italic);
+        assert!(!legacy.underline);
     }
 
     /// strip_anc：三层嵌套内全部清除，物化字段保留

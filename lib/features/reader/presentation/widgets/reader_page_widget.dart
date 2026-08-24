@@ -8,10 +8,18 @@ import '../services/book_image_store.dart';
 
 class ReaderPageWidget extends StatefulWidget {
   final PageInfo pageInfo;
+  /// 字形开关（纯绘制期过滤：粗/斜按用户设置应用，下划线恒应用）
+  final bool applyBold;
+  final bool applyItalic;
+  /// TXT 章节标题加粗（粗体开关 && 非 EPUB；EPUB 章首行不加粗）
+  final bool applyTitleBold;
 
   const ReaderPageWidget({
     Key? key,
     required this.pageInfo,
+    this.applyBold = true,
+    this.applyItalic = true,
+    this.applyTitleBold = false,
   }) : super(key: key);
 
   @override
@@ -41,6 +49,9 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
         widget.pageInfo,
         repaint: _repaintTick,
         onImageNeeded: _onImageReady,
+        applyBold: widget.applyBold,
+        applyItalic: widget.applyItalic,
+        applyTitleBold: widget.applyTitleBold,
       ),
       size: Size.infinite,
     );
@@ -51,6 +62,9 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
 class PagePainter extends CustomPainter {
   final PageInfo pageInfo;
   final VoidCallback onImageNeeded;
+  final bool applyBold;
+  final bool applyItalic;
+  final bool applyTitleBold;
 
   static const Color _paperColor = Color(0xFFF5F1E8);
 
@@ -58,6 +72,9 @@ class PagePainter extends CustomPainter {
     this.pageInfo, {
     required ValueNotifier<int> repaint,
     required this.onImageNeeded,
+    this.applyBold = true,
+    this.applyItalic = true,
+    this.applyTitleBold = false,
   }) : super(repaint: repaint);
 
   @override
@@ -104,15 +121,31 @@ class PagePainter extends CustomPainter {
         continue;
       }
 
+      // 表格单元格线框：细灰描边（不填充；几何由布局引擎折算）
+      if (entry.isTableFrame) {
+        canvas.drawRect(
+          Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0
+            ..color = const Color(0xFF999999),
+        );
+        continue;
+      }
+
       final text = entry.text;
       if (text == null || text.isEmpty) continue;
       final baseColor = _parseHexColor(entry.color) ?? Colors.black;
       final baseScale = entry.fontScale ?? 1.0;
+      // TXT 章节标题加粗（与 EPUB 行内粗体同一开关；TextSpan 子段
+      // 未显式设置时继承父级，segments 分支无需重复判断）
       final baseStyle = TextStyle(
         color: baseColor,
         fontSize: 18 * baseScale,
         height: 1.5,
         fontFamily: 'sans-serif',
+        fontWeight:
+            (applyTitleBold && entry.isChapterStart) ? FontWeight.w700 : null,
       );
 
       final TextSpan textSpan;
@@ -136,6 +169,14 @@ class PagePainter extends CustomPainter {
                 fontSize: 18 * (seg.fontScale ?? baseScale),
                 height: 1.5,
                 fontFamily: 'sans-serif',
+                // 合成粗/斜体（绘制期，不参与 Rust 断行测量）；
+                // null 时继承行级默认
+                fontWeight:
+                    (seg.bold && applyBold) ? FontWeight.w700 : null,
+                fontStyle:
+                    (seg.italic && applyItalic) ? FontStyle.italic : null,
+                decoration:
+                    seg.underline ? TextDecoration.underline : null,
               ),
             ));
             cursor = e;
@@ -206,6 +247,9 @@ class PagePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(PagePainter oldDelegate) {
-    return oldDelegate.pageInfo != pageInfo;
+    return oldDelegate.pageInfo != pageInfo ||
+        oldDelegate.applyBold != applyBold ||
+        oldDelegate.applyItalic != applyItalic ||
+        oldDelegate.applyTitleBold != applyTitleBold;
   }
 }

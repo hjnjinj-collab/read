@@ -40,6 +40,14 @@ fn text_of<'a, 'input>(node: roxmltree::Node<'a, 'input>) -> String {
 /// Dublin Core 命名空间（metadata 键名归一化为 dc:* 用）
 const DC_NAMESPACE: &str = "http://purl.org/dc/elements/1.1/";
 
+/// ruby 注音默认字号倍率（rt 小字跟随；CSS font-size 命中时覆盖）
+const RUBY_SCALE: f32 = 0.5;
+
+/// px/pt 字号换算的默认基准字号。与 LayoutConfig 默认 font_size
+/// （layout_engine lib.rs）及 Dart 绘制端基准 18 三方一致；
+/// 阅读路径经 get_chapter_content_structured_ex 传实际排版字号覆盖
+pub const DEFAULT_BASE_FONT_PX: f32 = 18.0;
+
 /// 结构性 XML 解析选项
 ///
 /// 真实书籍的 container/OPF/NCX 常带 `<!DOCTYPE ... DTD>` 声明，
@@ -704,17 +712,23 @@ impl EpubParser {
         &mut self,
         chapter_index: usize,
     ) -> Result<crate::content_ir::StructuredContent> {
-        self.get_chapter_content_structured_ex(chapter_index, crate::content_cleaner::ConvertMode::None)
+        self.get_chapter_content_structured_ex(
+            chapter_index,
+            crate::content_cleaner::ConvertMode::None,
+            DEFAULT_BASE_FONT_PX,
+        )
     }
 
     /// 带阅读级简繁转换的结构化提取。
     ///
     /// 转换发生在 DOM 文本节点层（JS 提取/哨兵回收之前）——runs 字符区间
     /// 在转换后文本上计算，天然对齐，不破坏 D10 契约（IR→布局零文本变换）。
+    /// `base_font_px` 为 px/pt 字号 CSS 换算基准（当前排版字号）
     pub fn get_chapter_content_structured_ex(
         &mut self,
         chapter_index: usize,
         convert_mode: crate::content_cleaner::ConvertMode,
+        base_font_px: f32,
     ) -> Result<crate::content_ir::StructuredContent> {
         use crate::content_ir::{BgSize, PageBackground, StructuredContent, CONTENT_IR_VERSION};
         use crate::css_lite::DeclValue;
@@ -843,7 +857,7 @@ impl EpubParser {
             .blocks
             .into_iter()
             .map(|b| b.resolve_image_paths(&content_dir))
-            .map(|b| Self::apply_css_to_block(b, &merged_sheet))
+            .map(|b| Self::apply_css_to_block(b, &merged_sheet, base_font_px))
             .filter(|b| !matches!(b, crate::content_ir::ContentBlock::Image { hidden: true, .. }))
             .collect();
 
@@ -1063,35 +1077,132 @@ impl EpubParser {
         None
     }
 
-    /// 块级 color 物化（含继承）
+    /// 块级 color 物化（含继承）：#hex / rgb(a)() / 常用命名色，
+    /// 统一输出 #rrggbb 小写规范形
     fn resolved_color(
         sheet: &crate::css_lite::CssStylesheet,
         ctx: &crate::css_lite::NodeCtx,
     ) -> Option<String> {
         match Self::self_or_inherited(sheet, ctx, "color") {
-            Some(crate::css_lite::DeclValue::Keyword(k)) => Self::normalize_hex_color(&k),
+            Some(crate::css_lite::DeclValue::Keyword(k)) => Self::normalize_hex_color(&k)
+                .or_else(|| Self::parse_rgb(&k))
+                .or_else(|| Self::named_color(&k)),
             _ => None,
         }
     }
 
-    /// 块级 font-size 相对倍率物化（em/% 含继承；px/pt/rem 脱离页面上下文，忽略）
+    /// rgb()/rgba() 手工解析：拆分量 clamp 0-255，alpha 忽略按不透明处理。
+    /// css_lite 解析期已转小写
+    fn parse_rgb(raw: &str) -> Option<String> {
+        let rest = raw.strip_prefix("rgba").or_else(|| raw.strip_prefix("rgb"))?;
+        let inner = rest.trim().strip_prefix('(')?.strip_suffix(')')?;
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if parts.len() < 3 || parts.len() > 4 {
+            return None;
+        }
+        let mut out = String::from("#");
+        for p in &parts[..3] {
+            let v = p.parse::<f32>().ok()?;
+            out.push_str(&format!("{:02x}", v.round().clamp(0.0, 255.0) as u8));
+        }
+        Some(out)
+    }
+
+    /// CSS 基本命名色精简表（真实书高频形态）
+    fn named_color(keyword: &str) -> Option<String> {
+        const NAMED_COLORS: &[(&str, &str)] = &[
+            ("white", "#ffffff"),
+            ("black", "#000000"),
+            ("red", "#ff0000"),
+            ("green", "#008000"),
+            ("lime", "#00ff00"),
+            ("blue", "#0000ff"),
+            ("gray", "#808080"),
+            ("grey", "#808080"),
+            ("silver", "#c0c0c0"),
+            ("maroon", "#800000"),
+            ("navy", "#000080"),
+            ("olive", "#808000"),
+            ("purple", "#800080"),
+            ("teal", "#008080"),
+            ("yellow", "#ffff00"),
+            ("orange", "#ffa500"),
+            ("gold", "#ffd700"),
+        ];
+        NAMED_COLORS
+            .iter()
+            .find(|(k, _)| *k == keyword)
+            .map(|(_, v)| v.to_string())
+    }
+
+    /// 块级 font-size 相对倍率物化：em/% 直接为倍率；px/pt 以当前
+    /// 排版基准字号换算（rem 维持忽略——脱离根字号上下文）
     fn resolved_font_scale(
         sheet: &crate::css_lite::CssStylesheet,
         ctx: &crate::css_lite::NodeCtx,
+        base_font_px: f32,
     ) -> Option<f32> {
         match Self::self_or_inherited(sheet, ctx, "font-size") {
             Some(crate::css_lite::DeclValue::Em(e)) => Some(e),
             Some(crate::css_lite::DeclValue::Percent(p)) => Some(p / 100.0),
+            Some(crate::css_lite::DeclValue::Px(px)) if base_font_px > 0.0 => {
+                Some(px / base_font_px)
+            }
+            Some(crate::css_lite::DeclValue::Pt(pt)) if base_font_px > 0.0 => {
+                Some(pt * 4.0 / 3.0 / base_font_px)
+            }
+            _ => None,
+        }
+    }
+
+    /// 行内标签的 UA 默认字形语义（b/strong 粗、i/em/cite 斜、a 下划线）
+    fn tag_glyph_semantics(ctx: &crate::css_lite::NodeCtx) -> (bool, bool, bool) {
+        match ctx.tag.as_str() {
+            "b" | "strong" => (true, false, false),
+            "i" | "em" | "cite" => (false, true, false),
+            "a" => (false, false, true),
+            _ => (false, false, false),
+        }
+    }
+
+    /// font-weight 物化：Some(true)=粗、Some(false)=显式常规（阻断继承）、
+    /// None=未声明。bold/bolder 为粗；normal/lighter 为常规；数值按
+    /// CSS 级联语义整体覆盖 UA 默认（≥550 粗，其余常规）
+    fn resolved_font_weight(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+    ) -> Option<bool> {
+        use crate::css_lite::DeclValue;
+        match Self::self_or_inherited(sheet, ctx, "font-weight") {
+            Some(DeclValue::Keyword(k)) => match k.as_str() {
+                "bold" | "bolder" => Some(true),
+                "normal" | "lighter" => Some(false),
+                _ => k.parse::<f32>().ok().map(|n| n >= 550.0),
+            },
+            _ => None,
+        }
+    }
+
+    /// font-style 物化：italic/oblique 为斜，normal 显式常规，其余未声明
+    fn resolved_font_style(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+    ) -> Option<bool> {
+        match Self::self_or_inherited(sheet, ctx, "font-style") {
+            Some(v) if v.is_keyword("italic") || v.is_keyword("oblique") => Some(true),
+            Some(v) if v.is_keyword("normal") => Some(false),
             _ => None,
         }
     }
 
     /// 行内富文本段物化：run 自身链路解析颜色/字号（继承语义天然覆盖
-    /// 外层段落与更远祖先），空区间与越界区间过滤
+    /// 外层段落与更远祖先），空区间与越界区间过滤；字形样式按标签默认
+    /// 语义 + CSS 声明覆盖（CSS 命中胜出，未命中保留标签判定）
     fn resolve_runs(
         runs: Vec<crate::content_ir::StyledRun>,
         sheet: &crate::css_lite::CssStylesheet,
         text_chars: usize,
+        base_font_px: f32,
     ) -> Vec<crate::content_ir::StyledRun> {
         runs.into_iter()
             .filter(|r| r.end > r.start)
@@ -1101,7 +1212,17 @@ impl EpubParser {
                 if let Some(anc) = r.anc.take() {
                     let ctx = Self::node_ctx_from_anc(Some(&anc));
                     r.color = Self::resolved_color(sheet, &ctx);
-                    r.font_scale = Self::resolved_font_scale(sheet, &ctx);
+                    r.font_scale =
+                        Self::resolved_font_scale(sheet, &ctx, base_font_px);
+                    // ruby 注音：CSS 未声明字号时以小字跟随基字（行高下限
+                    // 1.0 取 max，不撑行）；CSS 命中则用 CSS
+                    if ctx.tag == "rt" && r.font_scale.is_none() {
+                        r.font_scale = Some(RUBY_SCALE);
+                    }
+                    let (tag_bold, tag_italic, tag_underline) = Self::tag_glyph_semantics(&ctx);
+                    r.bold = Self::resolved_font_weight(sheet, &ctx).unwrap_or(tag_bold);
+                    r.italic = Self::resolved_font_style(sheet, &ctx).unwrap_or(tag_italic);
+                    r.underline = tag_underline;
                 }
                 r
             })
@@ -1111,9 +1232,11 @@ impl EpubParser {
 
     /// 对单块做 CSS 物化：图片宽度百分比/对齐/隐藏，段落与标题对齐；
     /// 容器类递归下沉。JS 输出的 align 字段已存在时以 JS 为准（预留）。
+    /// `base_font_px` 为 px/pt 字号换算基准（当前排版字号）
     fn apply_css_to_block(
         block: crate::content_ir::ContentBlock,
         sheet: &crate::css_lite::CssStylesheet,
+        base_font_px: f32,
     ) -> crate::content_ir::ContentBlock {
         use crate::content_ir::ContentBlock;
         use crate::css_lite::DeclValue;
@@ -1166,8 +1289,8 @@ impl EpubParser {
                 let align = align.or_else(|| Self::inherited_text_align(sheet, &ctx));
                 let color = color.or_else(|| Self::resolved_color(sheet, &ctx));
                 let font_scale =
-                    font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx));
-                let runs = Self::resolve_runs(runs, sheet, text.chars().count());
+                    font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx, base_font_px));
+                let runs = Self::resolve_runs(runs, sheet, text.chars().count(), base_font_px);
                 ContentBlock::Paragraph {
                     text,
                     align,
@@ -1189,7 +1312,7 @@ impl EpubParser {
                 let align = align.or_else(|| Self::inherited_text_align(sheet, &ctx));
                 let color = color.or_else(|| Self::resolved_color(sheet, &ctx));
                 let font_scale =
-                    font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx));
+                    font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx, base_font_px));
                 ContentBlock::Heading {
                     level,
                     text,
@@ -1202,7 +1325,7 @@ impl EpubParser {
             ContentBlock::Quote { blocks } => ContentBlock::Quote {
                 blocks: blocks
                     .into_iter()
-                    .map(|b| Self::apply_css_to_block(b, sheet))
+                    .map(|b| Self::apply_css_to_block(b, sheet, base_font_px))
                     .collect(),
             },
             ContentBlock::List { ordered, items } => ContentBlock::List {
@@ -1213,7 +1336,7 @@ impl EpubParser {
                         blocks: item
                             .blocks
                             .into_iter()
-                            .map(|b| Self::apply_css_to_block(b, sheet))
+                            .map(|b| Self::apply_css_to_block(b, sheet, base_font_px))
                             .collect(),
                     })
                     .collect(),
@@ -1263,7 +1386,13 @@ impl EpubParser {
                                         blocks: cell
                                             .blocks
                                             .into_iter()
-                                            .map(|b| Self::apply_css_to_block(b, sheet))
+                                            .map(|b| {
+                                                Self::apply_css_to_block(
+                                                    b,
+                                                    sheet,
+                                                    base_font_px,
+                                                )
+                                            })
                                             .collect(),
                                     }
                                 })
@@ -2171,7 +2300,7 @@ mod tests {
             anc: Some(vec![vec!["body".into()], vec!["h2".into(), "head1".into()]]),
         };
         let ContentBlock::Heading { align, color, font_scale, .. } =
-            EpubParser::apply_css_to_block(heading, &sheet)
+            EpubParser::apply_css_to_block(heading, &sheet, DEFAULT_BASE_FONT_PX)
         else {
             panic!("结构不应改变");
         };
@@ -2186,14 +2315,14 @@ mod tests {
             color: None,
             font_scale: None,
             runs: vec![
-                StyledRun { start: 0, end: 1, color: None, font_scale: None, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu".into()]]) },
-                StyledRun { start: 1, end: 2, color: None, font_scale: None, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu2".into()]]) },
-                StyledRun { start: 2, end: 3, color: None, font_scale: None, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into()]]) },
+                StyledRun { start: 0, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu".into()]]) },
+                StyledRun { start: 1, end: 2, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu2".into()]]) },
+                StyledRun { start: 2, end: 3, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into()]]) },
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
         };
         let ContentBlock::Paragraph { runs, .. } =
-            EpubParser::apply_css_to_block(para, &sheet)
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
         else {
             panic!("结构不应改变");
         };
@@ -2203,11 +2332,12 @@ mod tests {
         // 越界/空区间防御
         assert!(EpubParser::resolve_runs(
             vec![
-                StyledRun { start: 99, end: 100, color: None, font_scale: None, anc: None },
-                StyledRun { start: 1, end: 1, color: None, font_scale: None, anc: None },
+                StyledRun { start: 99, end: 100, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None },
+                StyledRun { start: 1, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None },
             ],
             &sheet,
             3,
+            DEFAULT_BASE_FONT_PX,
         )
         .is_empty());
 
@@ -2249,7 +2379,7 @@ mod tests {
             margin_left_auto: false,
         };
         let ContentBlock::Table { margin_top_percent, margin_left_auto, rows, .. } =
-            EpubParser::apply_css_to_block(table, &sheet)
+            EpubParser::apply_css_to_block(table, &sheet, DEFAULT_BASE_FONT_PX)
         else {
             panic!("结构不应改变");
         };
@@ -2263,5 +2393,304 @@ mod tests {
         assert_eq!(*align, Some(crate::content_ir::Align::Center));
         assert_eq!(color.as_deref(), Some("#000000"), "table 级 color 应继承到单元格");
         assert_eq!(*font_scale, Some(1.4));
+    }
+
+    /// 字形样式物化：标签 UA 默认语义 + CSS 声明覆盖（CSS 胜出）
+    #[test]
+    fn glyph_semantics_materialize_from_tags_and_css() {
+        use crate::content_ir::{ContentBlock, StyledRun};
+
+        let mk = |start: usize,
+                  end: usize,
+                  chain: Vec<Vec<&str>>|
+         -> StyledRun {
+            StyledRun {
+                start,
+                end,
+                color: None,
+                font_scale: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                anc: Some(
+                    chain
+                        .into_iter()
+                        .map(|e| e.into_iter().map(String::from).collect())
+                        .collect(),
+                ),
+            }
+        };
+
+        // 标签默认：strong/b 粗、em 斜、a 下划线；普通 span 无字形
+        let sheet = crate::css_lite::CssStylesheet::parse("");
+        let para = ContentBlock::Paragraph {
+            text: "粗粗斜链常".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![
+                mk(0, 1, vec![vec!["body"], vec!["p"], vec!["strong"]]),
+                mk(1, 2, vec![vec!["body"], vec!["p"], vec!["b"]]),
+                mk(2, 3, vec![vec!["body"], vec!["p"], vec!["em"]]),
+                mk(3, 4, vec![vec!["body"], vec!["p"], vec!["a", "link"]]),
+                mk(4, 5, vec![vec!["body"], vec!["p"], vec!["span"]]),
+            ],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(runs[0].bold && !runs[0].italic && !runs[0].underline);
+        assert!(runs[1].bold);
+        assert!(runs[2].italic && !runs[2].bold);
+        assert!(runs[3].underline);
+        assert!(!runs[4].bold && !runs[4].italic && !runs[4].underline);
+
+        // CSS 覆盖：类命中加粗；显式 normal 阻断 i 的默认斜体；
+        // em.it 双源一致斜体
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            ".bl { font-weight: bold; }\n\
+             .up { font-style: normal; }\n\
+             .it { font-style: italic; }",
+        );
+        let para2 = ContentBlock::Paragraph {
+            text: "甲乙丙".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![
+                mk(0, 1, vec![vec!["body"], vec!["p"], vec!["span", "bl"]]),
+                mk(1, 2, vec![vec!["body"], vec!["p"], vec!["i", "up"]]),
+                mk(2, 3, vec![vec!["body"], vec!["p"], vec!["em", "it"]]),
+            ],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para2, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(runs[0].bold, "CSS font-weight:bold 应命中 span.bl");
+        assert!(
+            !runs[1].italic,
+            "显式 font-style:normal 应阻断 i 的 UA 默认斜体"
+        );
+        assert!(runs[2].italic, "em 与 CSS 双源一致");
+
+        // 数值字重按 CSS 级联语义整体覆盖：700→粗、400→显式常规
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            ".w7 { font-weight: 700; }\n.w4 { font-weight: 400; }",
+        );
+        let para3 = ContentBlock::Paragraph {
+            text: "甲乙".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![
+                mk(0, 1, vec![vec!["body"], vec!["p"], vec!["span", "w7"]]),
+                mk(1, 2, vec![vec!["body"], vec!["p"], vec!["b", "w4"]]),
+            ],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para3, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(runs[0].bold);
+        assert!(!runs[1].bold, "数值 400 应覆盖 b 的 UA 默认粗体");
+    }
+
+    /// ruby 注音：rt run 默认小字倍率，CSS font-size 命中时覆盖
+    #[test]
+    fn ruby_rt_scale_defaults_and_css_override() {
+        use crate::content_ir::{ContentBlock, StyledRun};
+
+        let mk = |chain: Vec<Vec<&str>>| -> StyledRun {
+            StyledRun {
+                start: 0,
+                end: 1,
+                color: None,
+                font_scale: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                anc: Some(
+                    chain
+                        .into_iter()
+                        .map(|e| e.into_iter().map(String::from).collect())
+                        .collect(),
+                ),
+            }
+        };
+
+        // 无 CSS 声明 → 默认 RUBY_SCALE
+        let sheet = crate::css_lite::CssStylesheet::parse("");
+        let para = ContentBlock::Paragraph {
+            text: "甲注".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![mk(vec![
+                vec!["body"],
+                vec!["p"],
+                vec!["ruby"],
+                vec!["rt"],
+            ])],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(runs[0].font_scale, Some(RUBY_SCALE));
+
+        // CSS 命中 → 覆盖默认值
+        let sheet = crate::css_lite::CssStylesheet::parse("rt { font-size: 0.6em; }");
+        let para = ContentBlock::Paragraph {
+            text: "甲注".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![mk(vec![
+                vec!["body"],
+                vec!["p"],
+                vec!["ruby"],
+                vec!["rt"],
+            ])],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(
+            runs[0].font_scale,
+            Some(0.6),
+            "CSS font-size 应覆盖 ruby 默认缩放"
+        );
+
+        // 非 rt 行内元素不受影响
+        let sheet = crate::css_lite::CssStylesheet::parse("");
+        let para = ContentBlock::Paragraph {
+            text: "甲乙".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![mk(vec![vec!["body"], vec!["p"], vec!["span"]])],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(runs[0].font_scale, None);
+    }
+
+    /// S6：px/pt 字号换算（以基准字号折算）与 rgb()/命名色解析
+    #[test]
+    fn px_pt_font_scale_and_rgb_named_colors() {
+        use crate::content_ir::{ContentBlock, StyledRun};
+
+        let run_with_class = |classes: &[&str]| -> StyledRun {
+            StyledRun {
+                start: 0,
+                end: 1,
+                color: None,
+                font_scale: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                anc: Some(vec![
+                    vec!["body".into()],
+                    vec!["p".into()],
+                    {
+                        let mut e = vec!["span".to_string()];
+                        e.extend(classes.iter().map(|s| s.to_string()));
+                        e
+                    },
+                ]),
+            }
+        };
+
+        // px 换算：28px / 基准 18
+        let sheet =
+            crate::css_lite::CssStylesheet::parse("h2 { font-size: 28px; }");
+        let heading = ContentBlock::Heading {
+            level: 2,
+            text: "大".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            anc: Some(vec![vec!["body".into()], vec!["h2".into()]]),
+        };
+        let ContentBlock::Heading { font_scale, .. } =
+            EpubParser::apply_css_to_block(heading, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(font_scale, Some(28.0 / 18.0), "px 应按基准字号换算");
+
+        // pt 换算：14pt = 14·4/3 px，再除以基准
+        let sheet =
+            crate::css_lite::CssStylesheet::parse("td { font-size: 14pt; }");
+        let para = ContentBlock::Paragraph {
+            text: "格".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["table".into()],
+                vec!["tr".into()],
+                vec!["td".into()],
+            ]),
+        };
+        let ContentBlock::Paragraph { font_scale, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(font_scale, Some(14.0 * 4.0 / 3.0 / DEFAULT_BASE_FONT_PX));
+
+        // 颜色：rgb()/rgba(alpha 忽略)/命名色/未知色
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            ".c1 { color: rgb(181,10,2); }\n\
+             .c2 { color: rgba(0, 255, 0, 0.5); }\n\
+             .c3 { color: red; }\n\
+             .c4 { color: notacolor; }",
+        );
+        let para = ContentBlock::Paragraph {
+            text: "甲乙丙丁".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![
+                run_with_class(&["c1"]),
+                run_with_class(&["c2"]),
+                run_with_class(&["c3"]),
+                run_with_class(&["c4"]),
+            ],
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+        };
+        let ContentBlock::Paragraph { runs, .. } =
+            EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert_eq!(runs[0].color.as_deref(), Some("#b50a02"));
+        assert_eq!(
+            runs[1].color.as_deref(),
+            Some("#00ff00"),
+            "rgba 的 alpha 忽略按不透明处理"
+        );
+        assert_eq!(runs[2].color.as_deref(), Some("#ff0000"));
+        assert_eq!(runs[3].color, None, "未知颜色回落主题默认");
     }
 }

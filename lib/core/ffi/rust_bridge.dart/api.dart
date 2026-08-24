@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `ensure_epub_cleaned_cache`, `get_preload_executor`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `slice_utf8_safe`, `structured_layout_config`, `trigger_preload_async`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `ensure_epub_cleaned_cache`, `get_preload_executor`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `slice_utf8_safe`, `structured_layout_config`, `trigger_preload_async`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `StructuredPageKey`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 

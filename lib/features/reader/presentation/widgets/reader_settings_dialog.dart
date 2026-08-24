@@ -23,6 +23,10 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _removeAds = true;
   bool _smartParagraph = true;
 
+  // 字形样式开关
+  bool _boldEnabled = true;
+  bool _italicEnabled = true;
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +40,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _removeHtmlTags = n.removeHtmlTags;
     _removeAds = n.removeAds;
     _smartParagraph = n.smartParagraph;
+    _boldEnabled = n.boldEnabled;
+    _italicEnabled = n.italicEnabled;
   }
 
   @override
@@ -111,6 +117,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
       removeHtmlTags: _removeHtmlTags,
       removeAds: _removeAds,
       smartParagraph: _smartParagraph,
+      boldEnabled: _boldEnabled,
+      italicEnabled: _italicEnabled,
     );
 
     if (!mounted) return;
@@ -207,6 +215,29 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   value: _reSegment,
                   onChanged: (value) {
                     setState(() => _reSegment = value);
+                  },
+                ),
+
+                const SizedBox(height: 24),
+
+                // 字形样式 section（EPUB 行内粗斜体；TXT 章节标题加粗）
+                _buildSectionHeader('字形样式'),
+                const SizedBox(height: 8),
+                _buildSwitchTile(
+                  title: '还原粗体',
+                  subtitle:
+                      '原书 b/strong 等标记以粗体显示（TXT 为章节标题加粗）',
+                  value: _boldEnabled,
+                  onChanged: (value) {
+                    setState(() => _boldEnabled = value);
+                  },
+                ),
+                _buildSwitchTile(
+                  title: '还原斜体',
+                  subtitle: '原书 i/em 等标记以斜体显示（仅 EPUB 生效）',
+                  value: _italicEnabled,
+                  onChanged: (value) {
+                    setState(() => _italicEnabled = value);
                   },
                 ),
 

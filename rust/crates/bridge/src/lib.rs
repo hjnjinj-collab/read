@@ -90,6 +90,10 @@ pub struct PageEntryInfo {
     pub font_scale: Option<f32>,
     /// 行内富文本分段（span 等，区间为行内字符偏移；空=整行统一）
     pub segments: Vec<PageSegInfo>,
+    /// 章节首行标记（TXT 强制分页用；绘制端按粗体开关渲染标题加粗）
+    pub is_chapter_start: bool,
+    /// 表格单元格线框矩形（x/y/width/height 即几何；绘制端描边）
+    pub is_table_frame: bool,
 }
 
 /// 文本行内样式分段
@@ -101,6 +105,10 @@ pub struct PageSegInfo {
     pub color: Option<String>,
     /// 段级字号倍率覆盖（None=继承行级）
     pub font_scale: Option<f32>,
+    /// 字形样式（绘制端按用户开关决定是否应用；下划线恒应用）
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
 }
 
 impl From<Page> for PageInfo {
@@ -129,8 +137,13 @@ impl From<Page> for PageInfo {
                                 end: s.end,
                                 color: s.color,
                                 font_scale: s.font_scale,
+                                bold: s.bold,
+                                italic: s.italic,
+                                underline: s.underline,
                             })
                             .collect(),
+                        is_chapter_start: line.is_chapter_start,
+                        is_table_frame: false,
                     },
                     layout_engine::PageEntry::Image(image) => PageEntryInfo {
                         text: None,
@@ -142,6 +155,21 @@ impl From<Page> for PageInfo {
                         color: None,
                         font_scale: None,
                         segments: Vec::new(),
+                        is_chapter_start: false,
+                        is_table_frame: false,
+                    },
+                    layout_engine::PageEntry::Rect(rect) => PageEntryInfo {
+                        text: None,
+                        resource_href: None,
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height,
+                        color: None,
+                        font_scale: None,
+                        segments: Vec::new(),
+                        is_chapter_start: false,
+                        is_table_frame: true,
                     },
                 })
                 .collect(),

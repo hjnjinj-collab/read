@@ -101,7 +101,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             ),
                           )
                         : state.currentPage != null
-                            ? ReaderPageWidget(pageInfo: state.currentPage!)
+                            ? ReaderPageWidget(
+                                pageInfo: state.currentPage!,
+                                applyBold: ref.watch(
+                                    readerProvider.notifier).boldEnabled,
+                                applyItalic: ref.watch(
+                                    readerProvider.notifier).italicEnabled,
+                                // TXT 章节标题加粗对齐：粗体开关开启且非 EPUB
+                                applyTitleBold:
+                                    ref.watch(readerProvider.notifier)
+                                            .boldEnabled &&
+                                        !ref.watch(readerProvider.notifier)
+                                            .renderAsEpub,
+                              )
                             : const Center(child: Text('No content')),
               ),
             ),

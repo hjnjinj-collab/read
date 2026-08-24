@@ -274,7 +274,7 @@ mod tests {
             .iter()
             .filter_map(|e| match e {
                 PageEntry::Text(l) => Some(l),
-                PageEntry::Image(_) => None,
+                PageEntry::Image(_) | PageEntry::Rect(_) => None,
             })
             .collect()
     }

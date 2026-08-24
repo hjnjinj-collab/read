@@ -158,6 +158,12 @@ class PageEntryInfo {
   /// 行内富文本分段（span 等，区间为行内字符偏移；空=整行统一）
   final List<PageSegInfo> segments;
 
+  /// 章节首行标记（TXT 强制分页用；绘制端按粗体开关渲染标题加粗）
+  final bool isChapterStart;
+
+  /// 表格单元格线框矩形（x/y/width/height 即几何；绘制端描边）
+  final bool isTableFrame;
+
   const PageEntryInfo({
     this.text,
     this.resourceHref,
@@ -168,6 +174,8 @@ class PageEntryInfo {
     this.color,
     this.fontScale,
     required this.segments,
+    required this.isChapterStart,
+    required this.isTableFrame,
   });
 
   @override
@@ -180,7 +188,9 @@ class PageEntryInfo {
       height.hashCode ^
       color.hashCode ^
       fontScale.hashCode ^
-      segments.hashCode;
+      segments.hashCode ^
+      isChapterStart.hashCode ^
+      isTableFrame.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -195,7 +205,9 @@ class PageEntryInfo {
           height == other.height &&
           color == other.color &&
           fontScale == other.fontScale &&
-          segments == other.segments;
+          segments == other.segments &&
+          isChapterStart == other.isChapterStart &&
+          isTableFrame == other.isTableFrame;
 }
 
 /// FFI-safe page info
@@ -266,10 +278,30 @@ class PageSegInfo {
   /// 段级字号倍率覆盖（None=继承行级）
   final double? fontScale;
 
-  const PageSegInfo({required this.start, required this.end, this.color, this.fontScale});
+  /// 字形样式（绘制端按用户开关决定是否应用；下划线恒应用）
+  final bool bold;
+  final bool italic;
+  final bool underline;
+
+  const PageSegInfo({
+    required this.start,
+    required this.end,
+    this.color,
+    this.fontScale,
+    required this.bold,
+    required this.italic,
+    required this.underline,
+  });
 
   @override
-  int get hashCode => start.hashCode ^ end.hashCode ^ color.hashCode ^ fontScale.hashCode;
+  int get hashCode =>
+      start.hashCode ^
+      end.hashCode ^
+      color.hashCode ^
+      fontScale.hashCode ^
+      bold.hashCode ^
+      italic.hashCode ^
+      underline.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -279,5 +311,8 @@ class PageSegInfo {
           start == other.start &&
           end == other.end &&
           color == other.color &&
-          fontScale == other.fontScale;
+          fontScale == other.fontScale &&
+          bold == other.bold &&
+          italic == other.italic &&
+          underline == other.underline;
 }

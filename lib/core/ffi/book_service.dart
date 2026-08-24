@@ -328,8 +328,13 @@ class BookService {
                           end: s.end.toInt(),
                           color: s.color,
                           fontScale: s.fontScale,
+                          bold: s.bold,
+                          italic: s.italic,
+                          underline: s.underline,
                         ))
                     .toList(),
+                isChapterStart: e.isChapterStart,
+                isTableFrame: e.isTableFrame,
               ))
           .toList(),
       backgroundHref: page.backgroundHref,

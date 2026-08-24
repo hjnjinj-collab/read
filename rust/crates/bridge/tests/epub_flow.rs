@@ -463,6 +463,329 @@ fn epub_structured_probe() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 构造含行内字形标记的最小 EPUB（strong/em/a/span.bl + 外链 CSS）
+fn build_glyph_epub(path: &std::path::Path) -> anyhow::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::FileOptions::default();
+
+    zip.start_file("mimetype", opts)?;
+    zip.write_all(b"application/epub+zip")?;
+
+    zip.start_file("META-INF/container.xml", opts)?;
+    zip.write_all(
+        br#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+    )?;
+
+    zip.start_file("OEBPS/content.opf", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>字形书</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="styles.css" media-type="text/css"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="ch1"/></spine>
+</package>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/toc.ncx", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1"><navLabel><text>第一章</text></navLabel><content src="ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/styles.css", opts)?;
+    zip.write_all(b"span.bl { font-weight: bold; }")?;
+
+    zip.start_file("OEBPS/ch1.xhtml", opts)?;
+    zip.write_all(
+        r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title>
+<link rel="stylesheet" type="text/css" href="styles.css"/></head>
+<body><h2>第一章</h2>
+<p>甲<strong>粗</strong>乙<em>斜</em>丙<a>链</a>丁<span class="bl">类粗</span>尾</p>
+</body></html>"#
+            .as_bytes(),
+    )?;
+
+    zip.finish()?;
+    Ok(())
+}
+
+/// M5 探针：行内字形物化——标签默认语义（strong/em/a）+ CSS 类覆盖，
+/// IR JSON 的 runs 携带 bold/italic/underline
+#[test]
+fn epub_glyph_runs_probe() {
+    let dir = std::env::temp_dir().join(format!("epub_glyph_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("g.epub");
+    build_glyph_epub(&path).unwrap();
+
+    let json = epub_chapter_structured(path.to_string_lossy().to_string(), 0)
+        .expect("结构化探针失败");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("IR 应为合法 JSON");
+    let blocks = v["blocks"].as_array().expect("blocks 应为数组");
+    let para = blocks
+        .iter()
+        .find(|b| b["type"] == "paragraph")
+        .expect("应含段落块");
+    assert_eq!(para["text"], "甲粗乙斜丙链丁类粗尾");
+
+    let runs = para["runs"].as_array().expect("runs 应为数组");
+    assert_eq!(runs.len(), 4, "应有 4 个样式区段（strong/em/a/span.bl）");
+
+    // 探针返回物化后 IR（anc 已剥离），以字符区间识别区段归属：
+    // 甲(0) 粗(1) 乙(2) 斜(3) 丙(4) 链(5) 丁(6) 类粗(7..9) 尾(9)
+    // （false 字段被 skip 序列化，读取为 Null）
+    assert_eq!(runs[0]["start"], 1);
+    assert_eq!(runs[0]["end"], 2);
+    assert_eq!(runs[0]["bold"], true, "strong → 粗体");
+    assert!(runs[0]["italic"].is_null());
+
+    assert_eq!(runs[1]["start"], 3);
+    assert_eq!(runs[1]["end"], 4);
+    assert!(runs[1]["bold"].is_null());
+    assert_eq!(runs[1]["italic"], true, "em → 斜体");
+
+    assert_eq!(runs[2]["start"], 5);
+    assert_eq!(runs[2]["end"], 6);
+    assert_eq!(runs[2]["underline"], true, "a → 下划线");
+
+    assert_eq!(runs[3]["start"], 7);
+    assert_eq!(runs[3]["end"], 9);
+    assert_eq!(runs[3]["bold"], true, "CSS font-weight:bold 应物化到 span.bl");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 构造含 ruby 注音的最小 EPUB（单章）
+fn build_ruby_epub(path: &std::path::Path) -> anyhow::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::FileOptions::default();
+
+    zip.start_file("mimetype", opts)?;
+    zip.write_all(b"application/epub+zip")?;
+
+    zip.start_file("META-INF/container.xml", opts)?;
+    zip.write_all(
+        br#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+    )?;
+
+    zip.start_file("OEBPS/content.opf", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>注音书</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="ch1"/></spine>
+</package>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/toc.ncx", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1"><navLabel><text>第一章</text></navLabel><content src="ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/ch1.xhtml", opts)?;
+    zip.write_all(
+        r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head>
+<body><h2>第一章</h2>
+<p>见<ruby>漢<rp>(</rp><rt>han</rt></ruby>字成句</p>
+</body></html>"#
+            .as_bytes(),
+    )?;
+
+    zip.finish()?;
+    Ok(())
+}
+
+/// M5 探针：ruby 注音——rp 丢弃、rt 独立 run 且默认小字号倍率、
+/// 基字与注音留在同一段落
+#[test]
+fn epub_ruby_probe() {
+    let dir = std::env::temp_dir().join(format!("epub_ruby_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("r.epub");
+    build_ruby_epub(&path).unwrap();
+
+    let json = epub_chapter_structured(path.to_string_lossy().to_string(), 0)
+        .expect("结构化探针失败");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("IR 应为合法 JSON");
+    let blocks = v["blocks"].as_array().expect("blocks 应为数组");
+
+    // rp 括号必须消失；基字/注音/后字同段连续
+    let texts: Vec<&str> = blocks
+        .iter()
+        .filter(|b| b["type"] == "paragraph")
+        .filter_map(|b| b["text"].as_str())
+        .collect();
+    assert!(
+        texts.iter().any(|t| *t == "见漢han字成句"),
+        "基字与注音应在同一段落且 rp 丢弃，实际: {:?}",
+        texts
+    );
+
+    let para = blocks
+        .iter()
+        .find(|b| b["type"] == "paragraph" && b["text"] == "见漢han字成句")
+        .expect("应含注音段落");
+    let runs = para["runs"].as_array().expect("runs 应为数组");
+    assert_eq!(runs.len(), 1, "只有 rt 一个样式区段");
+    assert_eq!(runs[0]["start"], 2);
+    assert_eq!(runs[0]["end"], 5);
+    assert_eq!(
+        runs[0]["font_scale"], 0.5,
+        "rt 默认小字倍率"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 构造含小表格的最小 EPUB（单章，2 列 × 2 行）
+fn build_table_epub(path: &std::path::Path) -> anyhow::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::FileOptions::default();
+
+    zip.start_file("mimetype", opts)?;
+    zip.write_all(b"application/epub+zip")?;
+
+    zip.start_file("META-INF/container.xml", opts)?;
+    zip.write_all(
+        br#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+    )?;
+
+    zip.start_file("OEBPS/content.opf", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>表书</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="ch1"/></spine>
+</package>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/toc.ncx", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1"><navLabel><text>第一章</text></navLabel><content src="ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/ch1.xhtml", opts)?;
+    zip.write_all(
+        r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head>
+<body><h2>第一章</h2>
+<table><tr><td>甲一</td><td>乙二</td></tr><tr><td>丙三</td><td>丁四</td></tr></table>
+<p>表后续段。</p>
+</body></html>"#
+            .as_bytes(),
+    )?;
+
+    zip.finish()?;
+    Ok(())
+}
+
+/// M5 探针：表格线框经 FFI 全链透传——页内出现 is_table_frame 条目，
+/// 几何为正数；文本条目 is_table_frame 恒 false
+#[test]
+fn epub_table_frame_probe() {
+    let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+    let dir = std::env::temp_dir().join(format!("epub_tbl_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.epub");
+    build_table_epub(&path).unwrap();
+
+    let book_id =
+        parse_txt_file(path.to_string_lossy().to_string(), None).expect("EPUB 导入失败");
+
+    let args = (360.0f32, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0);
+    let count = get_page_count_structured(
+        book_id.clone(),
+        0,
+        args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        "TestFont".to_string(),
+        0,
+    )
+    .expect("结构化分页计数失败");
+    assert!(count >= 1);
+
+    let mut frame_count = 0usize;
+    for i in 0..count {
+        let page = get_page_structured(
+            book_id.clone(),
+            0,
+            i,
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            "TestFont".to_string(),
+            None,
+            0,
+        )
+        .expect("结构化分页失败");
+        for e in &page.entries {
+            if e.is_table_frame {
+                frame_count += 1;
+                assert!(e.width > 0.0 && e.height > 0.0, "线框几何必须为正");
+                assert!(e.text.is_none(), "线框条目不携带文本");
+            } else if let Some(t) = &e.text {
+                assert!(!t.is_empty());
+            }
+        }
+    }
+    assert_eq!(frame_count, 4, "应有 4 个单元格线框（2 行 × 2 列）");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// M2/M3 真书探针（#[ignore]）：EBOOK_PROBE_PATH 指向真实 EPUB，
 /// 打印抽样章 IR 摘要（背景/块样式/图片物化），并全量扫描统计
 /// 文字样式与表格物化的命中情况

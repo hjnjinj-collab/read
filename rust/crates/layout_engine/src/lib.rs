@@ -91,6 +91,12 @@ pub struct LineSeg {
     pub color: Option<String>,
     #[serde(default)]
     pub font_scale: Option<f32>,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
 }
 
 /// 图片项的绘制参数（坐标已由布局引擎折算）
@@ -98,6 +104,15 @@ pub struct LineSeg {
 pub struct ImageEntry {
     /// ZIP 内资源路径（渲染层据此取字节解码）
     pub resource_href: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// 矩形项（表格单元格线框）：坐标为页面绝对值，绘制层描边不填充
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RectEntry {
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -112,11 +127,12 @@ pub enum LayoutAlign {
     Right,
 }
 
-/// 页面内容项：文本行或图片（图片为不可分割原子块）
+/// 页面内容项：文本行、图片或矩形（图片/表格均为不可分割原子块）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PageEntry {
     Text(TextLine),
     Image(ImageEntry),
+    Rect(RectEntry),
 }
 
 /// 文本项样式载荷（bridge 层由 ContentBlock 物化结果映射而来）
@@ -140,6 +156,10 @@ pub struct RunSpan {
     pub end: usize,
     pub color: Option<String>,
     pub font_scale: Option<f32>,
+    /// 字形样式（绘制期合成；不参与 Rust 测量）
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
 }
 
 /// 样式化排版的单行产物（layout_styled_paragraph 内部使用）
@@ -553,7 +573,7 @@ impl LayoutEngine {
                         }
                         current_y += gap;
                     }
-                    let Some((lines, total_h, chars)) =
+                    let Some((lines, rects, total_h, chars)) =
                         self.layout_table(table, content_width, font)?
                     else {
                         continue;
@@ -570,6 +590,11 @@ impl LayoutEngine {
                         line.is_chapter_start = char_index == 0 && page_start_char == 0;
                         text_lines_on_page += 1;
                         entries.push(PageEntry::Text(line));
+                    }
+                    // 单元格线框：y 平移到页面绝对坐标（x 在 layout_table 已折算）
+                    for mut rect in rects {
+                        rect.y += current_y;
+                        entries.push(PageEntry::Rect(rect));
                     }
                     current_y += total_h + self.config.paragraph_spacing;
                     char_index += chars; // 锚点由 layout_table 统一累计（含段落分隔）
@@ -721,6 +746,9 @@ impl LayoutEngine {
                     end: e - line.char_start,
                     color: r.color.clone(),
                     font_scale: r.font_scale,
+                    bold: r.bold,
+                    italic: r.italic,
+                    underline: r.underline,
                 })
             })
             .collect()
@@ -793,16 +821,17 @@ impl LayoutEngine {
         Ok(lines)
     }
 
-    /// 表格原子排版：返回（定位行[(行, 列x偏移)], 总高, 锚点字符增量）。
-    /// 列宽：同列 em 提示最大值 × 基准字号；提示总量超内容宽等比收缩，
-    /// 无提示列均分剩余；全无提示则等分。单元格文本按列宽换行，
-    /// 行高取该行最大字号倍率的行高累计。空表返回 None。
+    /// 表格原子排版：返回（定位行[(行, 列x偏移)], 单元格线框矩形,
+    /// 总高, 锚点字符增量）。列宽：同列 em 提示最大值 × 基准字号；
+    /// 提示总量超内容宽等比收缩，无提示列均分剩余；全无提示则等分。
+    /// 单元格文本按列宽换行，行高取该行最大字号倍率的行高累计。
+    /// 空表返回 None。
     fn layout_table(
         &self,
         table: &TableInput,
         content_width: f32,
         font: &ab_glyph::FontRef<'static>,
-    ) -> Result<Option<(Vec<(TextLine, f32)>, f32, usize)>> {
+    ) -> Result<Option<(Vec<(TextLine, f32)>, Vec<RectEntry>, f32, usize)>> {
         let Some(col_count) = table.rows.iter().map(|r| r.len()).max() else {
             return Ok(None);
         };
@@ -858,6 +887,7 @@ impl LayoutEngine {
         }
 
         let mut out: Vec<(TextLine, f32)> = Vec::new();
+        let mut rects: Vec<RectEntry> = Vec::new();
         let mut table_h = 0.0f32;
         let mut anchor_chars = 0usize;
 
@@ -916,13 +946,22 @@ impl LayoutEngine {
                     out.push((tl, x_off));
                 }
             }
+            // 单元格线框矩形：x 已含水平基准（margin_left_auto 右置随 base_x）
+            for (ci, _) in row.iter().enumerate() {
+                rects.push(RectEntry {
+                    x: base_x + col_x[ci.min(col_count)],
+                    y: table_h,
+                    width: col_widths[ci.min(col_count - 1)],
+                    height: row_h,
+                });
+            }
             table_h += row_h;
         }
 
         if out.is_empty() {
             return Ok(None);
         }
-        Ok(Some((out, table_h, anchor_chars)))
+        Ok(Some((out, rects, table_h, anchor_chars)))
     }
 
     /// Get specific page
@@ -1312,8 +1351,8 @@ mod tests {
             color: None,
             font_scale: None,
             runs: vec![
-                RunSpan { start: 0, end: 2, color: Some("#ff0000".into()), font_scale: None },
-                RunSpan { start: 3, end: 5, color: Some("#00ff00".into()), font_scale: None },
+                RunSpan { start: 0, end: 2, color: Some("#ff0000".into()), font_scale: None, bold: false, italic: false, underline: false },
+                RunSpan { start: 3, end: 5, color: Some("#00ff00".into()), font_scale: None, bold: false, italic: false, underline: false },
             ],
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
@@ -1334,6 +1373,43 @@ mod tests {
         assert_eq!(segs1.len(), 1);
         assert_eq!((segs1[1 - 1].start, segs1[0].end), (0, 2));
         assert_eq!(segs1[0].color.as_deref(), Some("#00ff00"));
+    }
+
+    /// 字形样式（bold/italic/underline）跨软换行切段后逐段保持
+    #[test]
+    fn glyph_flags_survive_line_split() {
+        let (engine, _) = create_test_engine();
+        // 粗体覆盖整段含 \n：两行各得一段且 bold 保持
+        let items = vec![LayoutItem::Text(TextItem {
+            text: "粗甲\n粗乙".to_string(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![RunSpan {
+                start: 0,
+                end: 5,
+                color: None,
+                font_scale: None,
+                bold: true,
+                italic: true,
+                underline: true,
+            }],
+        })];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let lines: Vec<TextLine> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            assert_eq!(line.segments.len(), 1);
+            let seg = &line.segments[0];
+            assert!(seg.bold && seg.italic && seg.underline);
+        }
     }
 
     /// 双列表格：em 列宽强制逐字竖排（卷首页形态）、单元格定位与锚点
@@ -1407,6 +1483,88 @@ mod tests {
 
         // 内容宽兜底：总提示未超宽时不等比收缩（col_w 即实际列宽）
         assert!(content_width > col_w * 2.0, "测试前提：双列远小于内容宽");
+    }
+
+    /// 单元格线框矩形：数量=行列积、几何与列宽/行高一致、右置随 base_x 平移
+    #[test]
+    fn table_cell_rects_emitted() {
+        let (engine, config) = create_test_engine();
+        let content_width = config.width - config.padding.left - config.padding.right;
+
+        let cell = |text: &str| TableCellInput {
+            width_em: Some(1.2),
+            items: vec![TextItem {
+                text: text.to_string(),
+                align: Some(LayoutAlign::Center),
+                color: None,
+                font_scale: None,
+                runs: Vec::new(),
+            }],
+        };
+        // 2 行 × 2 列
+        let items = vec![LayoutItem::Table(TableInput {
+            margin_top_percent: None,
+            margin_left_auto: false,
+            rows: vec![
+                vec![cell("甲"), cell("乙")],
+                vec![cell("丙"), cell("丁")],
+            ],
+        })];
+        let pages = engine.layout_items(&items, 0).unwrap();
+
+        let rects: Vec<RectEntry> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Rect(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rects.len(), 4, "矩形数应等于行列积");
+
+        let col_w = 1.2 * config.font_size;
+        let left = config.padding.left;
+        let right_col_x = left + col_w;
+        for r in &rects {
+            assert!(
+                (r.x - left).abs() < 0.01 || (r.x - right_col_x).abs() < 0.01,
+                "矩形 x 应落在两列左缘之一，x={}",
+                r.x
+            );
+            assert!((r.width - col_w).abs() < 0.01);
+            assert!(r.height > 0.0);
+        }
+        // 两行 y 不同（第二行 y = 第一行行高）
+        let mut ys: Vec<f32> = rects.iter().map(|r| r.y).collect();
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!(ys[3] > ys[0], "两行矩形应有不同 y");
+
+        // 右置表：全部矩形 x 整体平移到内容区右缘
+        let items_right = vec![LayoutItem::Table(TableInput {
+            margin_top_percent: None,
+            margin_left_auto: true,
+            rows: rows_single(cell("单")),
+        })];
+        let pages_r = engine.layout_items(&items_right, 0).unwrap();
+        let rect_r = pages_r[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Rect(r) => Some(r.clone()),
+                _ => None,
+            })
+            .expect("应含线框矩形");
+        let expected_x = left + (content_width - col_w).max(0.0);
+        assert!(
+            (rect_r.x - expected_x).abs() < 0.01,
+            "margin-left:auto 时矩形应右移，x={} 期望={}",
+            rect_r.x,
+            expected_x
+        );
+    }
+
+    fn rows_single(cell: TableCellInput) -> Vec<Vec<TableCellInput>> {
+        vec![vec![cell]]
     }
 
     /// 表格整体放不下当前页 → 整表翻页；空表跳过

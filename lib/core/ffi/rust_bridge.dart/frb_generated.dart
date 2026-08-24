@@ -2662,7 +2662,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageEntryInfo dco_decode_page_entry_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9) throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 11) throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return PageEntryInfo(
       text: dco_decode_opt_String(arr[0]),
       resourceHref: dco_decode_opt_String(arr[1]),
@@ -2673,6 +2673,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       color: dco_decode_opt_String(arr[6]),
       fontScale: dco_decode_opt_box_autoadd_f_32(arr[7]),
       segments: dco_decode_list_page_seg_info(arr[8]),
+      isChapterStart: dco_decode_bool(arr[9]),
+      isTableFrame: dco_decode_bool(arr[10]),
     );
   }
 
@@ -2697,12 +2699,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageSegInfo dco_decode_page_seg_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4) throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 7) throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return PageSegInfo(
       start: dco_decode_usize(arr[0]),
       end: dco_decode_usize(arr[1]),
       color: dco_decode_opt_String(arr[2]),
       fontScale: dco_decode_opt_box_autoadd_f_32(arr[3]),
+      bold: dco_decode_bool(arr[4]),
+      italic: dco_decode_bool(arr[5]),
+      underline: dco_decode_bool(arr[6]),
     );
   }
 
@@ -3110,6 +3115,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_color = sse_decode_opt_String(deserializer);
     var var_fontScale = sse_decode_opt_box_autoadd_f_32(deserializer);
     var var_segments = sse_decode_list_page_seg_info(deserializer);
+    var var_isChapterStart = sse_decode_bool(deserializer);
+    var var_isTableFrame = sse_decode_bool(deserializer);
     return PageEntryInfo(
       text: var_text,
       resourceHref: var_resourceHref,
@@ -3120,6 +3127,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       color: var_color,
       fontScale: var_fontScale,
       segments: var_segments,
+      isChapterStart: var_isChapterStart,
+      isTableFrame: var_isTableFrame,
     );
   }
 
@@ -3153,7 +3162,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_end = sse_decode_usize(deserializer);
     var var_color = sse_decode_opt_String(deserializer);
     var var_fontScale = sse_decode_opt_box_autoadd_f_32(deserializer);
-    return PageSegInfo(start: var_start, end: var_end, color: var_color, fontScale: var_fontScale);
+    var var_bold = sse_decode_bool(deserializer);
+    var var_italic = sse_decode_bool(deserializer);
+    var var_underline = sse_decode_bool(deserializer);
+    return PageSegInfo(
+      start: var_start,
+      end: var_end,
+      color: var_color,
+      fontScale: var_fontScale,
+      bold: var_bold,
+      italic: var_italic,
+      underline: var_underline,
+    );
   }
 
   @protected
@@ -3474,6 +3494,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.color, serializer);
     sse_encode_opt_box_autoadd_f_32(self.fontScale, serializer);
     sse_encode_list_page_seg_info(self.segments, serializer);
+    sse_encode_bool(self.isChapterStart, serializer);
+    sse_encode_bool(self.isTableFrame, serializer);
   }
 
   @protected
@@ -3496,6 +3518,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_usize(self.end, serializer);
     sse_encode_opt_String(self.color, serializer);
     sse_encode_opt_box_autoadd_f_32(self.fontScale, serializer);
+    sse_encode_bool(self.bold, serializer);
+    sse_encode_bool(self.italic, serializer);
+    sse_encode_bool(self.underline, serializer);
   }
 
   @protected

@@ -186,6 +186,15 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             const tag = child.t;
             if (tag === "br") { f.push("\n"); continue; }
             if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
+            if (tag === "rp") continue;
+            if (tag === "rt") {
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                continue;
+            }
+            if (tag === "ruby") {
+                rubyContent(child, depth + 1, chain.concat([selfEntry(child)]), f, out);
+                continue;
+            }
             if (INLINE.has(tag)) {
                 f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
                 continue;
@@ -214,6 +223,15 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 continue;
             }
             if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
+            if (tag === "rp") continue;
+            if (tag === "rt") {
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                continue;
+            }
+            if (tag === "ruby") {
+                rubyContent(child, depth + 1, chain.concat([selfEntry(child)]), f, out);
+                continue;
+            }
             if (INLINE.has(tag)) {
                 f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
                 continue;
@@ -243,6 +261,34 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
         return { type: "list", ordered: !!ordered, items: items };
     }
 
+    // ruby 注音：以 ruby 为处理单元（否则整体命中未知块级容错分支，
+    // 基字与注音被拆段）。基字留在当前段落缓冲；rt 独立成 run
+    // （anc 末位 ["rt"]，Rust 物化为小字号）；rp 括号丢弃；
+    // 其余子节点按段内规则容错处理
+    function rubyContent(ruby, depth, chain, f, out) {
+        if (depth > MAX_DEPTH) return;
+        const kids = ruby.c || [];
+        for (let i = 0; i < kids.length; i++) {
+            const child = kids[i];
+            if (typeof child === "string") { f.push(child); continue; }
+            if (hiddenByStyle(child)) continue;
+            const tag = child.t;
+            if (tag === "rp") continue;
+            if (tag === "rt") {
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                continue;
+            }
+            if (tag === "br") { f.push("\n"); continue; }
+            if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
+            if (INLINE.has(tag)) {
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                continue;
+            }
+            f.flush();
+            walkBlocks(child, depth + 1, out, chain.concat([selfEntry(child)]));
+        }
+    }
+
     function tableBlock(node, tableChain) {
         let caption = null;
         const rows = [];
@@ -261,6 +307,15 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 const tag = child.t;
                 if (tag === "br") { f.push("\n"); continue; }
                 if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, cellChain)); continue; }
+                if (tag === "rp") continue;
+                if (tag === "rt") {
+                    f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]));
+                    continue;
+                }
+                if (tag === "ruby") {
+                    rubyContent(child, depth + 1, cellChain.concat([selfEntry(child)]), f, out);
+                    continue;
+                }
                 if (INLINE.has(tag)) {
                     f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]));
                     continue;
@@ -627,6 +682,9 @@ mod tests {
                         end: 3,
                         color: None,
                         font_scale: None,
+                        bold: false,
+                        italic: false,
+                        underline: false,
                         anc: Some(vec![
                             vec!["body".to_string()],
                             vec!["p".to_string()],
@@ -638,6 +696,9 @@ mod tests {
                         end: 6,
                         color: None,
                         font_scale: None,
+                        bold: false,
+                        italic: false,
+                        underline: false,
                         anc: Some(vec![
                             vec!["body".to_string()],
                             vec!["p".to_string()],
@@ -781,6 +842,9 @@ mod tests {
                     end: 4,
                     color: None,
                     font_scale: None,
+                    bold: false,
+                    italic: false,
+                    underline: false,
                     anc: Some(vec![
                         vec!["body".to_string()],
                         vec!["p".to_string()],
@@ -792,6 +856,9 @@ mod tests {
                     end: 7,
                     color: None,
                     font_scale: None,
+                    bold: false,
+                    italic: false,
+                    underline: false,
                     anc: Some(vec![
                         vec!["body".to_string()],
                         vec!["p".to_string()],
