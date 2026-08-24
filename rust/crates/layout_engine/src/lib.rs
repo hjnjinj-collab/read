@@ -28,6 +28,11 @@ pub struct LayoutConfig {
     pub font_name: String,           // 字体名称
     pub letter_spacing: f32,
     pub paragraph_spacing: f32,
+    /// 页面填充率门槛（0.0-1.0）：填充达到该比例后段落放不下才整段推下页，
+    /// 低于则允许段落跨页拆分。TXT/EPUB 双路径共用
+    pub page_fill_threshold: f32,
+    /// 是否显示本章说（注释/旁注段落）；true=渲染、false=跳过绘制但保留锚点
+    pub show_comments: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +59,8 @@ impl Default for LayoutConfig {
             font_name: "default".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         }
     }
 }
@@ -79,6 +86,9 @@ pub struct TextLine {
     /// 标记是否是章节开头的第一行（用于强制分页）
     #[serde(default)]
     pub is_chapter_start: bool,
+    /// 本章说标记（Dart 层据此渲染灰色小字或隐藏）
+    #[serde(default)]
+    pub is_comment: bool,
 }
 
 /// 行内样式分段：`[start, end)` 字符区间（Rust char 计数）的样式覆盖。
@@ -147,6 +157,12 @@ pub struct TextItem {
     pub font_scale: Option<f32>,
     /// 行内富文本区段（字符区间锚定；样式为最终物化值，None=继承块级）
     pub runs: Vec<RunSpan>,
+    /// 段前间距（em 倍数，layout 期按基准字号折算 px；标题分级用，普通段落 0）
+    pub spacing_before_em: f32,
+    /// 段后间距（em 倍数；页首自动折叠）
+    pub spacing_after_em: f32,
+    /// 本章说标记（JS 提取层 aside/footnote 或 CSS 小字号兜底）
+    pub is_comment: bool,
 }
 
 /// 文本项的行内样式区段
@@ -277,7 +293,8 @@ impl LayoutEngine {
         
         // 分页控制参数
         const MIN_LINES_PER_PAGE: usize = 3;  // 每页最少3行，避免孤行
-        const PARAGRAPH_BREAK_THRESHOLD: f32 = 0.75;  // 页面填充75%后优先在段落边界分页
+        // 页面填充率达到门槛后才优先在段落边界分页（与 layout_items 共用配置）
+        let paragraph_break_threshold = self.config.page_fill_threshold;
         
         let mut pages = Vec::new();
         let mut current_lines = Vec::new();
@@ -314,9 +331,9 @@ impl LayoutEngine {
             let has_min_lines = current_lines.len() >= MIN_LINES_PER_PAGE;
             
             // 决策：是否在段落前分页
-            let should_break_before_paragraph = would_overflow 
-                && has_min_lines 
-                && page_fill_ratio >= PARAGRAPH_BREAK_THRESHOLD;
+            let should_break_before_paragraph = would_overflow
+                && has_min_lines
+                && page_fill_ratio >= paragraph_break_threshold;
             
             if should_break_before_paragraph {
                 // 在段落前分页（段落完整性优先）
@@ -371,6 +388,7 @@ impl LayoutEngine {
                     font_scale: None,
                     segments: Vec::new(),
                     is_chapter_start: is_first_line,  // 标记章节第一行
+                    is_comment: false,
                 });
                 
                 is_first_line = false;  // 后续行不再是章节开头
@@ -465,13 +483,28 @@ impl LayoutEngine {
                         .font_scale
                         .unwrap_or(1.0)
                         .max(item.runs.iter().filter_map(|r| r.font_scale).fold(1.0, f32::max));
-                    let line_h = line_height * para_max_scale;
+                    // 本章说：固定小字倍率覆盖 para_max_scale；正常段落用 para_max_scale
+                    let effective_scale = if item.is_comment { 0.7 } else { para_max_scale };
+                    let line_h = line_height * effective_scale;
 
-                    // 段落完整性优先：整段放不下且页已有足够行数时提前翻页
+                    // 段前间距（em → px）：页首折叠
+                    let space_before = if entries.is_empty() && text_lines_on_page == 0 {
+                        0.0
+                    } else {
+                        item.spacing_before_em * self.config.font_size
+                    };
+                    current_y += space_before;
+
+                    // 段落完整性优先：整段放不下、页已有足够行数、且填充率
+                    // 达到门槛时才提前翻页；未达门槛允许段落跨页拆分，
+                    // 避免大面积底部留白（门槛可在 LayoutConfig 调整）
                     let para_height =
                         laid.len() as f32 * line_h + self.config.paragraph_spacing;
+                    let page_fill_ratio =
+                        (current_y - self.config.padding.top) / content_height.max(1.0);
                     if current_y + para_height > bottom_limit
                         && text_lines_on_page >= MIN_LINES_PER_PAGE
+                        && page_fill_ratio >= self.config.page_fill_threshold
                     {
                         break_page!();
                     }
@@ -482,6 +515,11 @@ impl LayoutEngine {
                         {
                             break_page!();
                         }
+                        // 本章说 + 隐藏模式：跳过绘制但照常累计锚点
+                        if item.is_comment && !self.config.show_comments {
+                            char_index += line.char_end - line.char_start + line.newlines_before;
+                            continue;
+                        }
                         let x = self.align_line_x(line.width, content_width, item.align);
                         let segments = Self::segments_for_line(&line, item);
                         char_index += line.char_end - line.char_start + line.newlines_before;
@@ -491,15 +529,28 @@ impl LayoutEngine {
                             y: current_y,
                             width: content_width,
                             height: line_h,
-                            color: item.color.clone(),
-                            font_scale: (para_max_scale != 1.0).then_some(para_max_scale),
+                            // 本章说：灰色小字；非注释走原始色
+                            color: if item.is_comment {
+                                Some("#888888".to_string())
+                            } else {
+                                item.color.clone()
+                            },
+                            // 本章说：强制固定小字号覆盖
+                            font_scale: if item.is_comment {
+                                Some(0.7)
+                            } else {
+                                (para_max_scale != 1.0).then_some(para_max_scale)
+                            },
                             segments,
                             is_chapter_start: char_index == 0 && page_start_char == 0,
+                            is_comment: item.is_comment,
                         }));
                         text_lines_on_page += 1;
                         current_y += line_h;
                     }
-                    current_y += self.config.paragraph_spacing;
+                    // 段后间距（em → px）：页首自动折叠已由段前处理
+                    let space_after = item.spacing_after_em * self.config.font_size;
+                    current_y += space_after.max(self.config.paragraph_spacing);
                     char_index += 1; // newline
                 }
                 LayoutItem::Image {
@@ -628,47 +679,130 @@ impl LayoutEngine {
     }
 
     /// Layout a single paragraph into lines with real glyph measurement
+    ///
+    /// M7-P4 断行精修：
+    /// - 行首禁则（。，」等不得居行首）：断行点命中禁则时回退上一行末片段；
+    /// - 英文整词移行：断点落在词字符内时，把上一行尾部连续词字符整体带下。
+    /// 两种回退只在相邻行间搬移已计宽片段，Σ字符数不变 ⇒ 锚点口径不变。
     fn layout_paragraph(
         &self,
         paragraph: &str,
         max_width: f32,
         font: &ab_glyph::FontRef<'static>,
     ) -> Result<Vec<String>> {
-        let mut lines = Vec::new();
-        let mut current_line = String::new();
-        let mut current_width = 0.0;
+        const LINE_START_FORBIDDEN: &[char] = &[
+            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
+            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
+        ];
+        const LINE_END_FORBIDDEN: &[char] =
+            &['「', '『', '（', '【', '〈', '《'];
+        fn is_word_char(c: char) -> bool {
+            c.is_ascii_alphanumeric() || c == '_'
+        }
 
-        for grapheme in paragraph.graphemes(true) {
-            let ch = grapheme.chars().next().unwrap_or(' ');
-            
-            // Get character width from cache or measure
-            let width = self.get_char_width(ch, font);
-            
-            // Check if need to wrap
-            if current_width + width > max_width && !current_line.is_empty() {
-                lines.push(current_line.clone());
-                current_line.clear();
-                current_width = 0.0;
+        let eps = Self::line_fill_epsilon(max_width);
+        let mut finished: Vec<String> = Vec::new();
+        // 当前行按 grapheme 片段维护（含判满有效宽度 = 字宽 + 字距），
+        // 禁则回退需按片段弹出
+        let mut pieces: Vec<&str> = Vec::new();
+        let mut eff_widths: Vec<f32> = Vec::new();
+        let mut current_width = 0.0f32;
+
+        let gs: Vec<&str> = paragraph.graphemes(true).collect();
+        for &g in &gs {
+            let ch = g.chars().next().unwrap_or(' ');
+            let w = self.get_char_width(ch, font);
+
+            if current_width + w > max_width - eps && !pieces.is_empty() {
+                let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
+                let word_boundary = is_word_char(ch)
+                    && pieces
+                        .last()
+                        .and_then(|p| p.chars().next())
+                        .map_or(false, is_word_char);
+
+                if head_forbidden || word_boundary {
+                    // 统一回退循环：
+                    // ① 断词连续性——边界两侧同为词字符 ⇒ 整词拖带；
+                    // ② 行首禁则——ch 为禁则标点 ⇒ 至少带一个直接前导片段；
+                    // ③ 行尾禁则——上一行末尾是开括号类 ⇒ 移入下行。
+                    // 拖带过程持续维持「不产生新的词中断裂」。
+                    let mut pulled: Vec<&str> = Vec::new();
+                    let mut pulled_w = 0.0f32;
+                    loop {
+                        if pieces.is_empty() || pulled.len() >= 16 {
+                            break;
+                        }
+                        let tail_c = pieces.last().and_then(|p| p.chars().next());
+                        let tail_word = tail_c.map_or(false, is_word_char);
+                        let head_c = pulled
+                            .first()
+                            .and_then(|p| p.chars().next())
+                            .unwrap_or(ch);
+                        if is_word_char(head_c) && tail_word {
+                            let p = pieces.pop().unwrap();
+                            pulled.insert(0, p);
+                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            continue;
+                        }
+                        if pulled.is_empty() && head_forbidden {
+                            let p = pieces.pop().unwrap();
+                            pulled.insert(0, p);
+                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            continue;
+                        }
+                        if pulled.is_empty()
+                            && tail_c.map_or(false, |c| LINE_END_FORBIDDEN.contains(&c))
+                        {
+                            let p = pieces.pop().unwrap();
+                            pulled.insert(0, p);
+                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            continue;
+                        }
+                        break;
+                    }
+                    if pulled.is_empty() {
+                        finished.push(pieces.concat());
+                        pieces.clear();
+                        eff_widths.clear();
+                        current_width = 0.0;
+                    } else {
+                        finished.push(pieces.concat());
+                        for p in pulled.drain(..) {
+                            pieces.push(p);
+                        }
+                        current_width = pulled_w;
+                    }
+                } else {
+                    finished.push(pieces.concat());
+                    pieces.clear();
+                    eff_widths.clear();
+                    current_width = 0.0;
+                }
             }
 
-            current_line.push_str(grapheme);
-            current_width += width + self.config.letter_spacing;
+            pieces.push(g);
+            eff_widths.push(w + self.config.letter_spacing);
+            current_width += w + self.config.letter_spacing;
         }
 
-        if !current_line.is_empty() {
-            lines.push(current_line);
+        if !pieces.is_empty() {
+            finished.push(pieces.concat());
         }
 
-        Ok(lines)
+        Ok(finished)
     }
     
+    /// 判满安全余量（M7）：吸收 Skia 相对 ab_glyph 的正向测量偏差。
+    /// 混合式 max(1px, 0.5%)、上限 2%——纯固定值大宽度占比失衡，
+    /// 纯百分比窄列失效
+    fn line_fill_epsilon(max_width: f32) -> f32 {
+        ((max_width * 0.005).max(1.0)).min(max_width * 0.02)
+    }
+
     /// Get character width with caching
     fn get_char_width(&self, ch: char, font: &ab_glyph::FontRef<'static>) -> f32 {
-        let key = GlyphKey {
-            ch,
-            font_size_int: self.config.font_size as u32,
-            font_name: self.config.font_name.clone(),
-        };
+        let key = GlyphKey::new(ch, self.config.font_size, &self.config.font_name);
         
         // Try cache first
         if let Some(metrics) = self.glyph_cache.get(&key) {
@@ -693,11 +827,7 @@ impl LayoutEngine {
             return self.get_char_width(ch, font);
         }
         let fs = (self.config.font_size * scale).max(1.0);
-        let key = GlyphKey {
-            ch,
-            font_size_int: fs.round().max(1.0) as u32,
-            font_name: self.config.font_name.clone(),
-        };
+        let key = GlyphKey::new(ch, fs, &self.config.font_name);
         if let Some(metrics) = self.glyph_cache.get(&key) {
             return metrics.width;
         }
@@ -757,66 +887,148 @@ impl LayoutEngine {
     /// 样式化段落排版：按逐字倍率测量换行，产出带实测宽度与段落内
     /// 字符区间的行列表。与 layout_paragraph 的差异：支持 \n 显式断行、
     /// 字号缩放测量、记录行区间供分段映射。TXT 路径仍走旧函数不动。
+    ///
+    /// M7-P4 断行精修与 TXT 同款：行首禁则回退 + 英文整词移行；
+    /// 片段搬移只在相邻行间进行，char 区间总量不变 ⇒ 锚点口径不变。
     fn layout_styled_paragraph(
         &self,
         item: &TextItem,
         max_width: f32,
         font: &ab_glyph::FontRef<'static>,
     ) -> Result<Vec<LaidLine>> {
+        const LINE_START_FORBIDDEN: &[char] = &[
+            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
+            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
+        ];
+        const LINE_END_FORBIDDEN: &[char] =
+            &['「', '『', '（', '【', '〈', '《'];
+        fn is_word_char(c: char) -> bool {
+            c.is_ascii_alphanumeric() || c == '_'
+        }
+
         let mut lines: Vec<LaidLine> = Vec::new();
-        let mut current = String::new();
+        // 当前行片段：(grapheme, 字符数, 判满有效宽度)
+        let mut pieces: Vec<(&str, usize, f32)> = Vec::new();
+        let mut line_chars = 0usize;
         let mut current_width = 0.0f32;
         let mut line_start = 0usize;
         let mut gi = 0usize;
         let mut pending_newlines = 0usize;
+        // M7 安全余量：吸收 Dart/Skia 相对 ab_glyph 的正向测量偏差
+        let eps = Self::line_fill_epsilon(max_width);
+
+        macro_rules! flush_line {
+            ($flushed_len:expr) => {{
+                lines.push(LaidLine {
+                    text: pieces.iter().map(|p| p.0).collect(),
+                    width: current_width,
+                    char_start: line_start,
+                    char_end: line_start + $flushed_len,
+                    newlines_before: pending_newlines,
+                });
+                pending_newlines = 0;
+            }};
+        }
 
         for grapheme in item.text.graphemes(true) {
             if grapheme == "\n" {
-                if !current.is_empty() {
-                    lines.push(LaidLine {
-                        text: std::mem::take(&mut current),
-                        width: current_width,
-                        char_start: line_start,
-                        char_end: gi,
-                        newlines_before: pending_newlines,
-                    });
-                    pending_newlines = 0;
+                if !pieces.is_empty() {
+                    flush_line!(line_chars);
+                    line_start += line_chars + 1; // 越过行内容与该 \n
+                    pieces.clear();
+                    line_chars = 0;
                     current_width = 0.0;
                 } else {
                     // 行首换行（连续 <br>）：计入下一行
                     pending_newlines += 1;
+                    line_start = gi + 1;
                 }
                 gi += 1;
-                line_start = gi;
                 continue;
             }
             let scale = Self::scale_at(&item.runs, item.font_scale, gi);
             let ch = grapheme.chars().next().unwrap_or(' ');
-            let w = self.get_char_width_scaled(ch, font, scale);
-            if current_width + w > max_width && !current.is_empty() {
-                lines.push(LaidLine {
-                    text: std::mem::take(&mut current),
-                    width: current_width,
-                    char_start: line_start,
-                    char_end: gi,
-                    newlines_before: pending_newlines,
-                });
-                pending_newlines = 0;
-                current_width = 0.0;
-                line_start = gi;
+            let w_eff =
+                self.get_char_width_scaled(ch, font, scale) + self.config.letter_spacing;
+
+            if current_width + w_eff > max_width - eps && !pieces.is_empty() {
+                let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
+                let word_boundary = is_word_char(ch)
+                    && pieces
+                        .last()
+                        .and_then(|p| p.0.chars().next())
+                        .map_or(false, is_word_char);
+
+                if head_forbidden || word_boundary {
+                    // 统一回退循环（与 TXT 路径同规则）：
+                    // ① 断词连续性 ② 行首禁则 ③ 行尾禁则
+                    let mut pulled: Vec<(&str, usize, f32)> = Vec::new();
+                    let mut pulled_chars = 0usize;
+                    let mut pulled_w = 0.0f32;
+                    loop {
+                        if pieces.is_empty() || pulled.len() >= 16 || line_chars <= 1 {
+                            break;
+                        }
+                        let tail_c = pieces.last().and_then(|p| p.0.chars().next());
+                        let tail_word = tail_c.map_or(false, is_word_char);
+                        let head_c = pulled
+                            .first()
+                            .and_then(|p| p.0.chars().next())
+                            .unwrap_or(ch);
+                        if is_word_char(head_c) && tail_word {
+                            let (g0, c0, w0) = pieces.pop().unwrap();
+                            pulled.insert(0, (g0, c0, w0));
+                            pulled_chars += c0;
+                            pulled_w += w0;
+                            line_chars -= c0;
+                            current_width -= w0;
+                            continue;
+                        }
+                        if pulled.is_empty() && head_forbidden {
+                            let (g0, c0, w0) = pieces.pop().unwrap();
+                            pulled.insert(0, (g0, c0, w0));
+                            pulled_chars += c0;
+                            pulled_w += w0;
+                            line_chars -= c0;
+                            current_width -= w0;
+                            continue;
+                        }
+                        if pulled.is_empty()
+                            && tail_c.map_or(false, |c| LINE_END_FORBIDDEN.contains(&c))
+                        {
+                            let (g0, c0, w0) = pieces.pop().unwrap();
+                            pulled.insert(0, (g0, c0, w0));
+                            pulled_chars += c0;
+                            pulled_w += w0;
+                            line_chars -= c0;
+                            current_width -= w0;
+                            continue;
+                        }
+                        break;
+                    }
+                    flush_line!(line_chars);
+                    line_start += line_chars;
+                    for (g0, c0, w0) in pulled {
+                        pieces.push((g0, c0, w0));
+                    }
+                    line_chars = pulled_chars;
+                    current_width = pulled_w;
+                } else {
+                    flush_line!(line_chars);
+                    line_start += line_chars;
+                    pieces.clear();
+                    line_chars = 0;
+                    current_width = 0.0;
+                }
             }
-            current.push_str(grapheme);
-            current_width += w + self.config.letter_spacing;
-            gi += grapheme.chars().count();
+            let g_chars = grapheme.chars().count();
+            pieces.push((grapheme, g_chars, w_eff));
+            line_chars += g_chars;
+            current_width += w_eff;
+            gi += g_chars;
         }
-        if !current.is_empty() {
-            lines.push(LaidLine {
-                text: current,
-                width: current_width,
-                char_start: line_start,
-                char_end: gi,
-                newlines_before: pending_newlines,
-            });
+        if !pieces.is_empty() {
+            flush_line!(line_chars);
         }
         Ok(lines)
     }
@@ -928,6 +1140,7 @@ impl LayoutEngine {
                             font_scale: (max_scale != 1.0).then_some(max_scale),
                             segments: Self::segments_for_line(&line, titem),
                             is_chapter_start: false,
+                            is_comment: false,
                         });
                         cy += line_h;
                         anchor_chars += line.char_end - line.char_start + line.newlines_before;
@@ -1030,6 +1243,8 @@ mod tests {
             font_name: "TestFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 8.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         
         let engine = LayoutEngine::new(config.clone(), font_manager);
@@ -1307,6 +1522,9 @@ mod tests {
             color: Some("#b50a02".to_string()),
             font_scale: Some(1.4),
             runs: Vec::new(),
+            spacing_before_em: 0.0,
+            spacing_after_em: 0.0,
+            is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let line = match &pages[0].entries[0] {
@@ -1354,6 +1572,9 @@ mod tests {
                 RunSpan { start: 0, end: 2, color: Some("#ff0000".into()), font_scale: None, bold: false, italic: false, underline: false },
                 RunSpan { start: 3, end: 5, color: Some("#00ff00".into()), font_scale: None, bold: false, italic: false, underline: false },
             ],
+            spacing_before_em: 0.0,
+            spacing_after_em: 0.0,
+            is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let lines: Vec<TextLine> = pages[0]
@@ -1394,6 +1615,9 @@ mod tests {
                 italic: true,
                 underline: true,
             }],
+            spacing_before_em: 0.0,
+            spacing_after_em: 0.0,
+            is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let lines: Vec<TextLine> = pages[0]
@@ -1412,6 +1636,113 @@ mod tests {
         }
     }
 
+
+    /// M7-P3：判满带 epsilon——styled 路径实测行宽（LaidLine.width）必须
+    /// 填到「再放一字即超限」，且不超过 max_width - eps（给 Skia 正向偏差留缓冲）
+    #[test]
+    fn styled_lines_fill_within_epsilon_margin() {
+        let (engine, config) = create_test_engine();
+        let cw = config.width - config.padding.left - config.padding.right;
+        let item = TextItem {
+            text: "测".repeat(200),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            spacing_before_em: 0.0,
+            spacing_after_em: 0.0,
+            is_comment: false,
+        };
+        let font = engine
+            .font_manager
+            .get_font(&config.font_name)
+            .expect("测试字体应已加载");
+        let lines = engine.layout_styled_paragraph(&item, cw, &font).unwrap();
+        assert!(lines.len() >= 2, "200 字应产生多行");
+
+        let eps = LayoutEngine::line_fill_epsilon(cw);
+        for line in &lines[..lines.len() - 1] {
+            assert!(
+                line.width <= cw - eps + 0.01,
+                "行宽 {} 超过判满上限 {}",
+                line.width,
+                cw - eps
+            );
+            // 剩余空间不足以再放一个全角字（advance≈font_size）
+            assert!(
+                line.width > cw - eps - config.font_size * 1.2,
+                "行宽 {} 距上限超过一个字宽，断行过早",
+                line.width
+            );
+        }
+    }
+
+    /// M7-P4：避头尾 + 英文整词移行——多宽度扫描行为断言 + 锚点不变量
+    #[test]
+    fn kinsoku_pullback_and_word_wrap_invariants() {
+        const START_FORBIDDEN: &[char] = &[
+            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
+            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
+        ];
+        fn is_word_char(c: char) -> bool {
+            c.is_ascii_alphanumeric() || c == '_'
+        }
+        let text = "阅读器排版引擎要处理标点悬挂，English words must stay intact，两种规则都要兼顾。";
+
+        for cw in (80..200).step_by(9) {
+            let (engine, config) = create_test_engine();
+            let font = engine
+                .font_manager
+                .get_font(&config.font_name)
+                .expect("测试字体应已加载");
+            let item = TextItem {
+                text: text.to_string(),
+                align: None,
+                color: None,
+                font_scale: None,
+                runs: Vec::new(),
+                spacing_before_em: 0.0,
+                spacing_after_em: 0.0,
+                is_comment: false,
+            };
+            let lines = engine
+                .layout_styled_paragraph(&item, cw as f32, &font)
+                .unwrap();
+            if lines.len() < 2 {
+                continue;
+            }
+
+            // 行为断言：非末行的下一行不得以禁则标点开头；不得切在词中
+            for i in 0..lines.len() - 1 {
+                let head = lines[i + 1].text.chars().next().unwrap();
+                assert!(
+                    !START_FORBIDDEN.contains(&head),
+                    "cw={cw}: 第{i}行断行使禁则标点居行首（{:#?}）",
+                    &lines
+                );
+                let tail = lines[i].text.chars().last().unwrap();
+                assert!(
+                    !(is_word_char(tail) && is_word_char(head)),
+                    "cw={cw}: 第{i}行在单词中间断开（{}|{}）",
+                    &lines[i].text,
+                    &lines[i + 1].text
+                );
+            }
+
+            // 锚点不变量：char 区间从 0 起无缝覆盖全段
+            let mut covered = 0usize;
+            for l in &lines {
+                assert_eq!(l.char_start, covered, "cw={cw}: 区间断层");
+                covered += l.char_end - l.char_start;
+            }
+            assert_eq!(
+                covered,
+                text.chars().count(),
+                "cw={cw}: 行区间总量必须等于原文字符数"
+            );
+        }
+    }
+
     /// 双列表格：em 列宽强制逐字竖排（卷首页形态）、单元格定位与锚点
     #[test]
     fn table_two_columns_em_width_vertical_stack() {
@@ -1426,6 +1757,9 @@ mod tests {
                 color: Some("#b50a02".to_string()),
                 font_scale: Some(scale),
                 runs: Vec::new(),
+                spacing_before_em: 0.0,
+                spacing_after_em: 0.0,
+                is_comment: false,
             }],
         };
         let items = vec![LayoutItem::Table(TableInput {
@@ -1499,6 +1833,9 @@ mod tests {
                 color: None,
                 font_scale: None,
                 runs: Vec::new(),
+                spacing_before_em: 0.0,
+                spacing_after_em: 0.0,
+                is_comment: false,
             }],
         };
         // 2 行 × 2 列

@@ -134,7 +134,7 @@ fn epub_import_and_read_end_to_end() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
-        0,
+        0, 0.9, true,
     )
     .expect("结构化分页计数失败");
     assert!(count >= 1, "至少一页");
@@ -146,7 +146,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
-        0,
+        0, 0.9, true,
     )
     .expect("结构化分页失败");
     assert!(
@@ -165,7 +165,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
-        0,
+        0, 0.9, true,
     )
     .expect("结构化分页失败");
     assert!(page_text(&page_ch2).contains("深夜的巷口"), "第 2 章正文应在位");
@@ -178,7 +178,7 @@ fn epub_import_and_read_end_to_end() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         Some(usize::MAX),
-        0,
+        0, 0.9, true,
     )
     .expect("锚点定位失败");
     assert!(!page_text(&last).is_empty() || count == 1);
@@ -273,7 +273,7 @@ fn epub_structured_ad_filtering() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
-        0,
+        0, 0.9, true,
     )
     .expect("结构化分页计数失败");
 
@@ -287,7 +287,7 @@ fn epub_structured_ad_filtering() {
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
             None,
-            0,
+            0, 0.9, true,
         )
         .expect("结构化分页失败");
         all_text.push_str(&page_text(&page));
@@ -754,7 +754,7 @@ fn epub_table_frame_probe() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
-        0,
+        0, 0.9, true,
     )
     .expect("结构化分页计数失败");
     assert!(count >= 1);
@@ -768,7 +768,7 @@ fn epub_table_frame_probe() {
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
             None,
-            0,
+            0, 0.9, true,
         )
         .expect("结构化分页失败");
         for e in &page.entries {
@@ -807,7 +807,7 @@ fn epub_prefetch_structured_chapter() {
         0,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
-        0,
+        0, 0.9, true,
     )
     .expect("ch0 计数失败");
     assert!(count0 >= 1);
@@ -822,7 +822,7 @@ fn epub_prefetch_structured_chapter() {
                 1,
                 args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
                 "TestFont".to_string(),
-                0,
+                0, 0.9, true,
             )
             .expect("锁忙预取不应报错"),
             "前台持锁时预取应让路返回 false"
@@ -838,7 +838,7 @@ fn epub_prefetch_structured_chapter() {
             1,
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
-            0,
+            0, 0.9, true,
         )
         .expect("预取不应报错")
         {
@@ -856,7 +856,7 @@ fn epub_prefetch_structured_chapter() {
             1,
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
-            0,
+            0, 0.9, true,
         )
         .expect("幂等预取失败")
     );
@@ -869,7 +869,7 @@ fn epub_prefetch_structured_chapter() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
-        0,
+        0, 0.9, true,
     )
     .expect("ch1 前台读取失败");
     assert!(page_text(&page_ch1).contains("深夜的巷口"), "第 2 章正文应在位");
@@ -882,7 +882,7 @@ fn epub_prefetch_structured_chapter() {
             1,
             args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
             "TestFont".to_string(),
-            1,
+            1, 0.9, true,
         )
         .expect("convert=1 预取不应报错")
         {
@@ -897,7 +897,7 @@ fn epub_prefetch_structured_chapter() {
         1,
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
-        1,
+        1, 0.9, true,
     )
     .expect("convert=1 计数失败");
     assert!(count_s2t >= 1);
@@ -909,7 +909,7 @@ fn epub_prefetch_structured_chapter() {
         args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
         "TestFont".to_string(),
         None,
-        0,
+        0, 0.9, true,
     )
     .expect("原模式回读失败");
     assert!(page_text(&page_again).contains("深夜的巷口"));

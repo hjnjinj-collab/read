@@ -106,6 +106,8 @@ mod tests {
             font_name: "TestFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 8.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         
         // 创建多个章节
@@ -153,6 +155,8 @@ mod tests {
             font_name: "TestFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         
         // 创建 10 个较长的章节

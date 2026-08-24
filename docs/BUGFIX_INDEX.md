@@ -37,6 +37,9 @@
 | `Content hash on Dart side ... is different from Rust side` | Content Hash → BUG_FIXES §11 |
 | `Cannot start a runtime from within a runtime` | 异步嵌套：同步代码里已 block_on，外层不要再套 tokio::main |
 | `missing field ... in initializer` | 结构体加了新字段，构造处未同步更新 |
+| EPUB 段间出现小字号行（本章说/脚注） | display:none 漏过滤 Paragraph/Heading；aside/footnote 块下沉为正文；CSS font-size<0.85 未分类 | A14：extract_rules aside 检测 + CSS 兜底 is_comment |
+| EPUB 底部留白过大且不统一 | layout_items 无填充率门槛，≥3 行即整段推下页 | A14：page_fill_threshold 默认 0.9（可调） |
+| 双引擎行重叠/截断（TXT+EPUB） | Rust ab_glyph 与 Dart sans-serif 字体不同源；Dart 硬编码字号+无防护 | A13：字体统一 + 参数同源 + 无约束排版分级兜底 |
 
 ## 三、工程约束（踩坑沉淀，写代码前先看）
 

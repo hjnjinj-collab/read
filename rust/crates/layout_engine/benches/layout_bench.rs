@@ -51,6 +51,8 @@ fn bench_single_chapter_layout(c: &mut Criterion) {
         font_name: "BenchFont".to_string(),
         letter_spacing: 0.0,
         paragraph_spacing: 12.0,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     
     // 测试不同长度的文本
@@ -92,6 +94,8 @@ fn bench_parallel_layout(c: &mut Criterion) {
         font_name: "BenchFont".to_string(),
         letter_spacing: 0.0,
         paragraph_spacing: 12.0,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     
     // 测试不同数量的章节
@@ -139,6 +143,8 @@ fn bench_glyph_cache(c: &mut Criterion) {
         font_name: "BenchFont".to_string(),
         letter_spacing: 0.0,
         paragraph_spacing: 12.0,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     
     // 重复字符测试（高缓存命中率）
@@ -188,6 +194,8 @@ fn bench_font_sizes(c: &mut Criterion) {
             font_name: "BenchFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         
         group.bench_with_input(

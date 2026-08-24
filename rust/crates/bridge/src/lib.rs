@@ -94,6 +94,8 @@ pub struct PageEntryInfo {
     pub is_chapter_start: bool,
     /// 表格单元格线框矩形（x/y/width/height 即几何；绘制端描边）
     pub is_table_frame: bool,
+    /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
+    pub is_comment: bool,
 }
 
 /// 文本行内样式分段
@@ -144,6 +146,7 @@ impl From<Page> for PageInfo {
                             .collect(),
                         is_chapter_start: line.is_chapter_start,
                         is_table_frame: false,
+                        is_comment: line.is_comment,
                     },
                     layout_engine::PageEntry::Image(image) => PageEntryInfo {
                         text: None,
@@ -157,6 +160,7 @@ impl From<Page> for PageInfo {
                         segments: Vec::new(),
                         is_chapter_start: false,
                         is_table_frame: false,
+                        is_comment: false,
                     },
                     layout_engine::PageEntry::Rect(rect) => PageEntryInfo {
                         text: None,
@@ -170,6 +174,7 @@ impl From<Page> for PageInfo {
                         segments: Vec::new(),
                         is_chapter_start: false,
                         is_table_frame: true,
+                        is_comment: false,
                     },
                 })
                 .collect(),

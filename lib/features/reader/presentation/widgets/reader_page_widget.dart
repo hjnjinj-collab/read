@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../../../core/models/simple_models.dart';
+import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 
 class ReaderPageWidget extends StatefulWidget {
@@ -13,6 +14,9 @@ class ReaderPageWidget extends StatefulWidget {
   final bool applyItalic;
   /// TXT 章节标题加粗（粗体开关 && 非 EPUB；EPUB 章首行不加粗）
   final bool applyTitleBold;
+  /// 排版基准（M7 与 Rust 同源：替换硬编码 18/1.5，保证绘制与断行一致）
+  final double baseFontSize;
+  final double baseLineHeight;
 
   const ReaderPageWidget({
     Key? key,
@@ -20,6 +24,8 @@ class ReaderPageWidget extends StatefulWidget {
     this.applyBold = true,
     this.applyItalic = true,
     this.applyTitleBold = false,
+    this.baseFontSize = 18.0,
+    this.baseLineHeight = 1.5,
   }) : super(key: key);
 
   @override
@@ -52,6 +58,8 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
         applyBold: widget.applyBold,
         applyItalic: widget.applyItalic,
         applyTitleBold: widget.applyTitleBold,
+        baseFontSize: widget.baseFontSize,
+        baseLineHeight: widget.baseLineHeight,
       ),
       size: Size.infinite,
     );
@@ -65,6 +73,8 @@ class PagePainter extends CustomPainter {
   final bool applyBold;
   final bool applyItalic;
   final bool applyTitleBold;
+  final double baseFontSize;
+  final double baseLineHeight;
 
   static const Color _paperColor = Color(0xFFF5F1E8);
 
@@ -75,6 +85,8 @@ class PagePainter extends CustomPainter {
     this.applyBold = true,
     this.applyItalic = true,
     this.applyTitleBold = false,
+    this.baseFontSize = 18.0,
+    this.baseLineHeight = 1.5,
   }) : super(repaint: repaint);
 
   @override
@@ -135,15 +147,17 @@ class PagePainter extends CustomPainter {
 
       final text = entry.text;
       if (text == null || text.isEmpty) continue;
-      final baseColor = _parseHexColor(entry.color) ?? Colors.black;
+      final baseColor = entry.isComment
+          ? const Color(0xFF888888)
+          : (_parseHexColor(entry.color) ?? Colors.black);
       final baseScale = entry.fontScale ?? 1.0;
       // TXT 章节标题加粗（与 EPUB 行内粗体同一开关；TextSpan 子段
       // 未显式设置时继承父级，segments 分支无需重复判断）
       final baseStyle = TextStyle(
         color: baseColor,
-        fontSize: 18 * baseScale,
-        height: 1.5,
-        fontFamily: 'sans-serif',
+        fontSize: baseFontSize * baseScale,
+        height: baseLineHeight,
+        fontFamily: ReaderFont.family,
         fontWeight:
             (applyTitleBold && entry.isChapterStart) ? FontWeight.w700 : null,
       );
@@ -166,9 +180,9 @@ class PagePainter extends CustomPainter {
               text: text.substring(s, e),
               style: TextStyle(
                 color: _parseHexColor(seg.color) ?? baseColor,
-                fontSize: 18 * (seg.fontScale ?? baseScale),
-                height: 1.5,
-                fontFamily: 'sans-serif',
+                fontSize: baseFontSize * (seg.fontScale ?? baseScale),
+                height: baseLineHeight,
+                fontFamily: ReaderFont.family,
                 // 合成粗/斜体（绘制期，不参与 Rust 断行测量）；
                 // null 时继承行级默认
                 fontWeight:
@@ -194,12 +208,25 @@ class PagePainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       );
 
-      textPainter.layout(
-        minWidth: 0,
-        maxWidth: entry.width,
-      );
+      // M7：恒定无约束排版——消灭「Rust 测窄 → TextPainter 二次换行 →
+      // 与下一行重叠/页尾截断」（内容跨页丢失重复的直接来源）
+      textPainter.layout(minWidth: 0, maxWidth: double.infinity);
+      final naturalWidth = textPainter.maxIntrinsicWidth;
 
-      textPainter.paint(canvas, Offset(entry.x, entry.y));
+      if (naturalWidth <= entry.width * 1.02 || entry.width <= 0) {
+        // 正常或轻微超宽（≤2%，epsilon 已把概率压到极低）：原样绘制，
+        // 几 px 渗入右 padding 无感知，保字形保真
+        textPainter.paint(canvas, Offset(entry.x, entry.y));
+      } else {
+        // 显著超宽（粗体合成/窄列等残余场景）：该行整体等比缩放，
+        // 宁可字形略小也不丢字
+        final s = entry.width / naturalWidth;
+        canvas.save();
+        canvas.translate(entry.x, entry.y);
+        canvas.scale(s);
+        textPainter.paint(canvas, Offset.zero);
+        canvas.restore();
+      }
     }
   }
 
@@ -250,6 +277,8 @@ class PagePainter extends CustomPainter {
     return oldDelegate.pageInfo != pageInfo ||
         oldDelegate.applyBold != applyBold ||
         oldDelegate.applyItalic != applyItalic ||
-        oldDelegate.applyTitleBold != applyTitleBold;
+        oldDelegate.applyTitleBold != applyTitleBold ||
+        oldDelegate.baseFontSize != baseFontSize ||
+        oldDelegate.baseLineHeight != baseLineHeight;
   }
 }

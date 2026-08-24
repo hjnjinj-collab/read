@@ -40,6 +40,9 @@ impl CacheKey {
         config.padding.top.to_bits().hash(&mut hasher);
         config.padding.right.to_bits().hash(&mut hasher);
         config.padding.bottom.to_bits().hash(&mut hasher);
+        config.letter_spacing.to_bits().hash(&mut hasher);
+        config.paragraph_spacing.to_bits().hash(&mut hasher);
+        config.page_fill_threshold.to_bits().hash(&mut hasher);
 
         Self {
             book_id: book_id.to_string(),
@@ -223,6 +226,8 @@ mod tests {
             font_name: "default".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         
         let config2 = config1.clone();

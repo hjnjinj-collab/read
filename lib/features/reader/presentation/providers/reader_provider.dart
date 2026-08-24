@@ -29,6 +29,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _lineHeight = 1.5;
   double _paddingHorizontal = 20.0;
   double _paddingVertical = 20.0;
+  double _pageFillThreshold = 0.9;
 
   // Content processing settings
   bool _removeDuplicateTitle = true;
@@ -46,6 +47,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _boldEnabled = true;
   bool _italicEnabled = true;
 
+  // 本章说/注释显示开关（切换影响分页缓存键）
+  bool _showComments = true;
+
+  // M8-P4：章节页数内存缓存（消除翻页双 FFI）
+  // key = 排版参数指纹，value = 该章总页数
+  final Map<String, int> _chapterPageCounts = {};
+
   /// 当前书是否为 EPUB（结构化路径分流标记）
   bool _isEpub = false;
 
@@ -59,6 +67,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool get smartParagraph => _smartParagraph;
   bool get boldEnabled => _boldEnabled;
   bool get italicEnabled => _italicEnabled;
+  bool get showComments => _showComments;
+
+  /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
+  double get fontSize => _fontSize;
+  double get lineHeight => _lineHeight;
+  double get pageFillThreshold => _pageFillThreshold;
 
   /// 当前书是否按 EPUB 结构化路径渲染
   bool get renderAsEpub => _isEpub;
@@ -76,6 +90,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (width == _screenWidth && height == _screenHeight) return;
     _screenWidth = width;
     _screenHeight = height;
+    _invalidatePageCountCache(); // M8-P4：窗口尺寸变更清页数缓存
     if (state.bookId == null || state.isLoading) return;
     await _loadCurrentPage(
       anchorCharOffset: state.currentPage?.startCharIndex,
@@ -84,6 +99,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   void setFontSize(double fontSize) {
     _fontSize = fontSize;
+    _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
     // Reload current page with new settings
     if (state.bookId != null) {
       _loadCurrentPage();
@@ -104,6 +120,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required bool smartParagraph,
     required bool boldEnabled,
     required bool italicEnabled,
+    required double pageFillThreshold,
+    required bool showComments,
   }) async {
     _removeDuplicateTitle = removeDuplicateTitle;
     _reSegment = reSegment;
@@ -114,6 +132,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _smartParagraph = smartParagraph;
     _boldEnabled = boldEnabled;
     _italicEnabled = italicEnabled;
+    _pageFillThreshold = pageFillThreshold;
+    _showComments = showComments;
+
+    _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
 
     if (state.bookId == null) return;
 
@@ -239,6 +261,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingBottom: _paddingVertical,
           anchorCharOffset: anchorCharOffset,
           chineseConvert: chineseConvertCode,
+          pageFillThreshold: _pageFillThreshold,
+          showComments: _showComments,
         );
       } else {
         // 转换简繁设置为数字代码
@@ -264,6 +288,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           chineseConvert: chineseConvertCode,
           replaceRules: _replaceRules,
           anchorCharOffset: anchorCharOffset,
+          pageFillThreshold: _pageFillThreshold,
         );
       }
 
@@ -325,6 +350,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       paddingRight: _paddingHorizontal,
       paddingBottom: _paddingVertical,
       chineseConvert: convertCode,
+      pageFillThreshold: _pageFillThreshold,
+      showComments: _showComments,
     ));
   }
 
@@ -382,7 +409,34 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }
 
   /// 章节页数（按格式分流；供翻页边界判定）
+  ///
+  /// M8-P4：先查内存缓存 `_chapterPageCounts`，命中直接返回；
+  /// 未命中调 FFI getPageCountStructured / getPageCountProcessed 并缓存。
+  /// 缓存失效：fontSize/lineHeight/pageFillThreshold/showComments 变更时
+  /// 由调用方 `_invalidatePageCountCache()` 清空。
   Future<int> _pageCountOf(int chapterIndex) async {
+    final cacheKey = _pageCountCacheKey(chapterIndex);
+    final cached = _chapterPageCounts[cacheKey];
+    if (cached != null) return cached;
+
+    final count = await _pageCountOfUncached(chapterIndex);
+    _chapterPageCounts[cacheKey] = count;
+    return count;
+  }
+
+  /// 生成页数缓存键（排版参数指纹 + 章节索引）
+  String _pageCountCacheKey(int chapterIndex) {
+    return '${_screenWidth}_${_screenHeight}_'
+        '${_fontSize}_${_lineHeight}_'
+        '${_paddingHorizontal}_${_paddingVertical}_'
+        '${_pageFillThreshold}_${_showComments}_'
+        '${_removeDuplicateTitle}_${_reSegment}_'
+        '${_chineseConvert.index}_'
+        '${_replaceRules.length}_$chapterIndex';
+  }
+
+  /// 未缓存的页数获取（真正走 FFI）
+  Future<int> _pageCountOfUncached(int chapterIndex) async {
     final common = (
       width: _screenWidth,
       height: _screenHeight,
@@ -408,6 +462,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingRight: common.padH,
         paddingBottom: common.padV,
         chineseConvert: chineseConvertCode,
+        pageFillThreshold: _pageFillThreshold,
+        showComments: _showComments,
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
@@ -428,7 +484,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
       reSegment: _reSegment,
       chineseConvert: chineseConvertCode,
       replaceRules: _replaceRules,
+      pageFillThreshold: _pageFillThreshold,
     );
+  }
+
+  /// M8-P4：排版参数变更时清空页数缓存
+  void _invalidatePageCountCache() {
+    _chapterPageCounts.clear();
   }
 
   /// Go to next page
@@ -498,6 +560,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       await _bookService.releaseBook(state.bookId!);
     }
     BookImageStore.instance.clear();
+    _invalidatePageCountCache(); // M8-P4：关书清页数缓存
     state = const ReadingState();
   }
 }

@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'core/database/app_database.dart';
 import 'features/reader/presentation/providers/reader_provider.dart';
 import 'core/ffi/book_service.dart';
+import 'core/services/reader_font.dart';
 import 'core/ffi/rust_bridge.dart/api.dart' as rust_api;
 
 void main() async {
@@ -20,28 +21,26 @@ void main() async {
 }
 
 /// Load system font for text layout
+///
+/// M7 字体统一：候选表取首个成功路径，同一文件喂给两侧引擎——
+/// Rust ab_glyph 测量断行 + Dart FontLoader 注册 'ReaderSerif' 绘制，
+/// 保证 advance 同源。Dart 注册失败仅回退默认字体（排版仍用 Rust 结果）。
 Future<void> _loadSystemFont() async {
-  // Try to load common Chinese fonts on Windows
-  final fontPaths = [
-    'C:/Windows/Fonts/simsun.ttc',     // 宋体
-    'C:/Windows/Fonts/msyh.ttc',       // 微软雅黑
-    'C:/Windows/Fonts/simhei.ttf',     // 黑体
-    'C:/Windows/Fonts/simkai.ttf',     // 楷体
-    'C:/Windows/Fonts/arial.ttf',      // Arial (fallback)
-  ];
-
-  for (final path in fontPaths) {
+  for (final path in ReaderFont.candidatePaths) {
     try {
       await rust_api.loadFontFile(
         fontName: 'default',
         fontPath: path,
       );
-      debugPrint('✓ Font loaded successfully: $path');
-      return; // Success, exit
     } catch (e) {
       debugPrint('✗ Failed to load font $path: $e');
       continue; // Try next font
     }
+
+    // Rust 已加载成功：Dart 侧注册同款供绘制（失败不影响排版）
+    await ReaderFont.registerFromFile(path);
+    debugPrint('✓ Font loaded successfully: $path');
+    return; // Success, exit
   }
 
   debugPrint('⚠ Warning: No system font loaded. Text layout may fail.');

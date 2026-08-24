@@ -355,6 +355,16 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
 - **D12** **FFI 复杂返回类型用扁平 struct**：FRB 枚举变体强制 freezed 依赖，
   项目不引入——PageEntryInfo 以 Option 字段判别文本/图片项，样式走
   color/font_scale/segments 扁平字段
+- **A13** **双引擎漂移治理**（M7）：Rust(ab_glyph)与Dart(TextPainter)测量
+  同源化——统一字体(ReaderSerif/simsun.ttc face 0)、参数传递(fontSize/
+  lineHeight 从 provider 经 FFI 至 painter)、无约束排版+分级兜底(≤2%原样/
+  >2%缩字号)、断行 epsilon 混合式(max(1px,0.5%) 上限 2%)；GlyphKey
+  f32.to_bits() 消碰撞；避头尾禁则双路径统一
+- **A14** **EPUB 分页精度与性能**（M8）：LayoutConfig.page_fill_threshold
+  默认 0.9（可调）双路径统一门槛；标题按 h1-h6 分级默认倍率与间距；注释块
+  (aside/footnote/CSS小字号)→本章说灰字小行(is_comment 通路到 Dart)，开关
+  切换锚点恒定；跨章共享 GlyphCache + Arc<Vec<PageInfo>> 单页克隆 +
+  双锁合并 + Dart 页数缓存
 
 ### 10.3 工程硬约束（违反即出 Bug）
 

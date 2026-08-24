@@ -88,6 +88,9 @@ class PageEntry {
   /// 表格单元格线框矩形（x/y/width/height 为几何；绘制端描边不填充）
   final bool isTableFrame;
 
+  /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
+  final bool isComment;
+
   const PageEntry({
     this.text,
     this.resourceHref,
@@ -100,6 +103,7 @@ class PageEntry {
     this.segments = const [],
     this.isChapterStart = false,
     this.isTableFrame = false,
+    this.isComment = false,
   });
 
   bool get isImage => resourceHref != null;

@@ -249,6 +249,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             })
             .collect()
     }
@@ -326,6 +327,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 
@@ -340,6 +342,7 @@ mod tests {
             color: None,
             font_scale: None,
             segments: Vec::new(),
+            is_comment: false,
         });
 
         // Paragraph 2: lines 3-4 (small gaps)
@@ -354,6 +357,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 
@@ -386,6 +390,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 
@@ -401,6 +406,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 
@@ -426,6 +432,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
         // 章节开头行，页面远未填满
@@ -439,6 +446,7 @@ mod tests {
             color: None,
             font_scale: None,
             segments: Vec::new(),
+            is_comment: false,
         });
         for i in 1..3 {
             lines.push(TextLine {
@@ -451,6 +459,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 
@@ -482,6 +491,7 @@ mod tests {
             color: None,
             font_scale: None,
             segments: Vec::new(),
+            is_comment: false,
         });
         for i in 1..5 {
             lines.push(TextLine {
@@ -494,6 +504,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                is_comment: false,
             });
         }
 

@@ -1,7 +1,7 @@
 use crate::{BookHandle, ChapterInfo, PageInfo, BOOKS};
 use crate::diagnostics::{diagnose_file_encoding, diagnose_chapter_content};
 use book_parser::{BookParser, BookFormat, ContentCleaner, ConvertMode, ParagraphMode, CleanOptions};
-use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, Page};
+use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, GlyphCache, Page};
 use reader_core::{
     ContentPreprocessor, ProcessOptions, ChineseConvertType, ReplaceRule, RuleType,
     PaginationCache, CacheKey, CachedChapterPages,
@@ -21,6 +21,13 @@ use crate::{
 static FONT_MANAGER: Lazy<Arc<Mutex<FontManager>>> = Lazy::new(|| {
     Arc::new(Mutex::new(FontManager::new()))
 });
+
+// M8-P4：跨章共享字形缓存——所有章节排版复用同一 GlyphCache，
+// 消除每章新建 LayoutEngine → 新建 GlyphCache 的冷启动开销。
+// GlyphCache 内部键含 font_name + font_size_bits，不同字体/字号自然隔离；
+// load_font_file/load_font_data 会 clear() 防容量污染。
+static SHARED_GLYPH_CACHE: Lazy<Mutex<GlyphCache>> =
+    Lazy::new(|| Mutex::new(GlyphCache::with_capacity(10_000)));
 
 // Global content preprocessor（无替换规则的默认实例）
 static CONTENT_PREPROCESSOR: Lazy<Arc<ContentPreprocessor>> = Lazy::new(|| {
@@ -109,7 +116,10 @@ fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool>
 /// 与 PAGINATION_CACHE 分离的原因：后者存 layout_engine::Page（无背景
 /// 字段且属 reader_core 类型）；结构化路径交付 PageInfo（含 background）
 /// 且不经过文本预处理，生命周期独立。
-static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, Vec<crate::PageInfo>>>> =
+///
+/// M8-P4：值类型从 `Vec<PageInfo>` 改为 `Arc<Vec<PageInfo>>`，
+/// 命中时 Arc::clone 后锁外取单页，免整章克隆。
+static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, Arc<Vec<crate::PageInfo>>>>> =
     Lazy::new(|| {
         Mutex::new(lru::LruCache::new(
             std::num::NonZeroUsize::new(10).unwrap(),
@@ -130,6 +140,9 @@ struct StructuredPageKey {
     /// 阅读级简繁转换模式（0=无 1=简→繁 2=繁→简）；换模式即换键，
     /// LRU 自然淘汰旧缓存
     convert_mode: u8,
+    page_fill_threshold_bits: u32,
+    /// 是否显示本章说（缓存键：不同设置独立缓存）
+    show_comments: bool,
 }
 
 impl StructuredPageKey {
@@ -154,6 +167,8 @@ impl StructuredPageKey {
             ),
             font_name: config.font_name.clone(),
             convert_mode,
+            page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
+            show_comments: config.show_comments,
         }
     }
 }
@@ -166,13 +181,19 @@ static CONTENT_CLEANING_OPTIONS: Lazy<Arc<Mutex<Option<ContentCleaningOptions>>>
 /// Load font from file path
 pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()> {
     let mut manager = FONT_MANAGER.lock().unwrap();
-    manager.load_font_from_file(font_name, &font_path)
+    manager.load_font_from_file(font_name, &font_path)?;
+    // M8-P4：字体变更清共享字形缓存，防旧字体字形混入
+    SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    Ok(())
 }
 
 /// Load font from byte array
 pub fn load_font_data(font_name: String, font_data: Vec<u8>) -> anyhow::Result<()> {
     let mut manager = FONT_MANAGER.lock().unwrap();
-    manager.load_font(font_name, font_data)
+    manager.load_font(font_name, font_data)?;
+    // M8-P4：字体变更清共享字形缓存
+    SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    Ok(())
 }
 
 /// Get loaded font count
@@ -474,7 +495,9 @@ fn process_and_layout_chapter(
         shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    let engine = LayoutEngine::new(config.clone(), font_manager);
+    // M8-P4：跨章复用共享字形缓存
+    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
+    let engine = LayoutEngine::with_cache(config.clone(), font_manager, glyph_cache);
     let pages = engine.layout_text(&processed, chapter_index)?;
 
     PAGINATION_CACHE.lock().unwrap().put(
@@ -860,6 +883,8 @@ pub fn layout_chapter(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -883,9 +908,10 @@ pub fn get_page(
     padding_right: f32,
     padding_bottom: f32,
     font_name: String,
+    page_fill_threshold: f32,
 ) -> anyhow::Result<PageInfo> {
     let content = get_chapter_content(book_id, chapter_index)?;
-    
+
     let config = LayoutConfig {
         width,
         height,
@@ -900,8 +926,10 @@ pub fn get_page(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold,
+        show_comments: true,
     };
-    
+
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = LayoutEngine::new(config, font_manager);
     engine.get_page(&content, chapter_index, page_index)?
@@ -922,9 +950,10 @@ pub fn get_page_count(
     padding_right: f32,
     padding_bottom: f32,
     font_name: String,
+    page_fill_threshold: f32,
 ) -> anyhow::Result<usize> {
     let content = get_chapter_content(book_id, chapter_index)?;
-    
+
     let config = LayoutConfig {
         width,
         height,
@@ -939,8 +968,10 @@ pub fn get_page_count(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold,
+        show_comments: true,
     };
-    
+
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = LayoutEngine::new(config, font_manager);
     engine.get_page_count(&content, chapter_index)
@@ -970,6 +1001,7 @@ pub fn get_page_processed(
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
     replace_rules: Vec<FfiReplaceRule>,
     anchor_char_offset: Option<usize>,
+    page_fill_threshold: f32,
 ) -> anyhow::Result<PageInfo> {
     // 1. 排版配置
     let config = LayoutConfig {
@@ -986,6 +1018,8 @@ pub fn get_page_processed(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold,
+        show_comments: true,
     };
 
     // 2. 处理 + 排版（带缓存，选项变更自动重算）
@@ -1038,6 +1072,7 @@ pub fn get_page_count_processed(
     re_segment: bool,
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
     replace_rules: Vec<FfiReplaceRule>,
+    page_fill_threshold: f32,
 ) -> anyhow::Result<usize> {
     // 1. 排版配置
     let config = LayoutConfig {
@@ -1054,6 +1089,8 @@ pub fn get_page_count_processed(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold,
+        show_comments: true,
     };
 
     // 2. 处理 + 排版（带缓存）
@@ -1109,6 +1146,7 @@ fn blocks_to_layout_items_inner(
                 color,
                 font_scale,
                 runs,
+                is_comment,
                 ..
             } => {
                 if text.trim().is_empty() {
@@ -1138,10 +1176,13 @@ fn blocks_to_layout_items_inner(
                     color: color.clone(),
                     font_scale: *font_scale,
                     runs,
+                    spacing_before_em: 0.0,
+                    spacing_after_em: 0.0,
+                    is_comment: *is_comment,
                 }));
             }
             ContentBlock::Heading {
-                level: _,
+                level,
                 text,
                 align,
                 color,
@@ -1151,12 +1192,23 @@ fn blocks_to_layout_items_inner(
                 if text.trim().is_empty() {
                     continue;
                 }
+                // 标题分级：仅 CSS 未指定倍率时给默认值与前后间距
+                let (default_scale, space_before, space_after) = match level {
+                    1 => (1.6, 0.6, 0.3),
+                    2 => (1.4, 0.5, 0.3),
+                    3 => (1.25, 0.4, 0.3),
+                    _ => (1.1, 0.3, 0.3), // h4-h6
+                };
+                let final_scale = font_scale.or(Some(default_scale));
                 out.push(layout_engine::LayoutItem::Text(layout_engine::TextItem {
                     text: text.clone(),
                     align: map_align(*align),
                     color: color.clone(),
-                    font_scale: *font_scale,
+                    font_scale: final_scale,
                     runs: Vec::new(),
+                    spacing_before_em: space_before,
+                    spacing_after_em: space_after,
+                    is_comment: false,
                 }));
             }
             ContentBlock::Image {
@@ -1228,6 +1280,7 @@ fn blocks_to_layout_items_inner(
                                             color,
                                             font_scale,
                                             runs,
+                                            is_comment,
                                             ..
                                         } => {
                                             if text.trim().is_empty() {
@@ -1239,6 +1292,9 @@ fn blocks_to_layout_items_inner(
                                                 color: color.clone(),
                                                 font_scale: *font_scale,
                                                 runs: runs.iter().map(map_run).collect(),
+                                                spacing_before_em: 0.0,
+                                                spacing_after_em: 0.0,
+                                                is_comment: *is_comment,
                                             })
                                         }
                                         ContentBlock::Heading {
@@ -1257,6 +1313,9 @@ fn blocks_to_layout_items_inner(
                                                 color: color.clone(),
                                                 font_scale: *font_scale,
                                                 runs: Vec::new(),
+                                                spacing_before_em: 0.0,
+                                                spacing_after_em: 0.0,
+                                                is_comment: false,
                                             })
                                         }
                                         _ => None,
@@ -1304,23 +1363,26 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
 /// `prefer_try_lock`: 预取语义——提取段用 try_write 抢 BOOKS 写锁，
 /// 被前台占用时让路返回 Ok(None)（绝不阻塞前台）；前台调用恒传 false
 /// （阻塞等待、恒返回 Some）。
+///
+/// M8-P4：返回类型改为 `Arc<Vec<PageInfo>>`，命中时 Arc::clone（~8ns）
+/// 替代整章 Vec 克隆（~数十μs），锁外取单页。
 fn process_structured_chapter(
     book_id: &str,
     chapter_index: usize,
     config: &LayoutConfig,
     chinese_convert: u8,
     prefer_try_lock: bool,
-) -> anyhow::Result<Option<Vec<crate::PageInfo>>> {
+) -> anyhow::Result<Option<Arc<Vec<crate::PageInfo>>>> {
     let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert);
 
-    // 缓存命中：零计算
-    if let Some(cached) = STRUCTURED_PAGINATION_CACHE
+    // M8-P4 缓存命中：Arc::clone 免整章克隆
+    if let Some(arc_pages) = STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
         .get(&cache_key)
         .cloned()
     {
-        return Ok(Some(cached));
+        return Ok(Some(arc_pages));
     }
 
     // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
@@ -1357,7 +1419,9 @@ fn process_structured_chapter(
     blocks_to_layout_items(&content.blocks, &mut items);
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    let engine = LayoutEngine::new(config.clone(), font_manager);
+    // M8-P4：跨章复用共享字形缓存
+    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
+    let engine = LayoutEngine::with_cache(config.clone(), font_manager, glyph_cache);
     let pages = engine.layout_items(&items, chapter_index)?;
 
     // 背景为章节级属性：逐页携带（Dart 侧按 href 去重解码一次）
@@ -1381,12 +1445,14 @@ fn process_structured_chapter(
         })
         .collect();
 
+    // M8-P4：Arc 包裹后入缓存，后续命中 Arc::clone 免克隆
+    let arc_infos = Arc::new(infos);
     STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
-        .put(cache_key, infos.clone());
+        .put(cache_key, Arc::clone(&arc_infos));
 
-    Ok(Some(infos))
+    Ok(Some(arc_infos))
 }
 
 /// 页内是否含文本项（纯图/空页判定）
@@ -1425,6 +1491,8 @@ fn structured_layout_config(
     padding_right: f32,
     padding_bottom: f32,
     font_name: String,
+    page_fill_threshold: f32,
+    show_comments: bool,
 ) -> LayoutConfig {
     LayoutConfig {
         width,
@@ -1440,6 +1508,8 @@ fn structured_layout_config(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold,
+        show_comments,
     }
 }
 
@@ -1464,6 +1534,8 @@ pub fn get_page_structured(
     font_name: String,
     anchor_char_offset: Option<usize>,
     chinese_convert: u8,
+    page_fill_threshold: f32,
+    show_comments: bool,
 ) -> anyhow::Result<crate::PageInfo> {
     let config = structured_layout_config(
         width,
@@ -1475,6 +1547,8 @@ pub fn get_page_structured(
         padding_right,
         padding_bottom,
         font_name,
+        page_fill_threshold,
+        show_comments,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
@@ -1506,6 +1580,8 @@ pub fn get_page_count_structured(
     padding_bottom: f32,
     font_name: String,
     chinese_convert: u8,
+    page_fill_threshold: f32,
+    show_comments: bool,
 ) -> anyhow::Result<usize> {
     let config = structured_layout_config(
         width,
@@ -1517,6 +1593,8 @@ pub fn get_page_count_structured(
         padding_right,
         padding_bottom,
         font_name,
+        page_fill_threshold,
+        show_comments,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
@@ -1544,6 +1622,8 @@ pub fn prefetch_structured_chapter(
     padding_bottom: f32,
     font_name: String,
     chinese_convert: u8,
+    page_fill_threshold: f32,
+    show_comments: bool,
 ) -> anyhow::Result<bool> {
     let config = structured_layout_config(
         width,
@@ -1555,6 +1635,8 @@ pub fn prefetch_structured_chapter(
         padding_right,
         padding_bottom,
         font_name,
+        page_fill_threshold,
+        show_comments,
     );
     let cache_key = StructuredPageKey::new(&book_id, chapter_index, &config, chinese_convert);
     if STRUCTURED_PAGINATION_CACHE.lock().unwrap().contains(&cache_key) {
@@ -1852,6 +1934,8 @@ pub fn get_page_cached(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
 
     // 委托统一实现：全关处理选项 = 原文行为；同样享受 options_hash 隔离的 LRU 缓存
@@ -1900,6 +1984,8 @@ pub fn get_page_count_cached(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
 
     // 委托统一实现（全关处理选项 = 原文行为）
@@ -1948,6 +2034,8 @@ pub fn get_page_cached_processed(
         font_name: font_name.clone(),
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     
     // 生成缓存键（需要包含预处理参数）
@@ -2134,6 +2222,8 @@ pub fn create_reading_session(
         font_name,
         letter_spacing: 0.0,
         paragraph_spacing: font_size * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
 
     let book_id = format!("session_{}", uuid::Uuid::new_v4());
@@ -2554,7 +2644,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None,
+            false, false, 0, Vec::new(), None, 0.9,
         )
         .expect("ch0 前台读取失败");
 
@@ -2572,7 +2662,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None,
+            false, false, 0, Vec::new(), None, 0.9,
         )
         .expect("ch1 前台读取失败");
         let hits_after = get_cache_statistics().unwrap().hits;

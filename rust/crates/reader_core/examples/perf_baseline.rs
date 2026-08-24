@@ -229,6 +229,8 @@ fn main() -> anyhow::Result<()> {
             font_name: "BenchFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         };
         let engine = LayoutEngine::new(config, font_manager);
         let mut layout_times = Vec::new();

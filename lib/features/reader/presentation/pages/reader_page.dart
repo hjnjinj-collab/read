@@ -113,6 +113,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                             .boldEnabled &&
                                         !ref.watch(readerProvider.notifier)
                                             .renderAsEpub,
+                                // M7 排版基准同源：绘制与 Rust 断行一致
+                                baseFontSize: ref.watch(
+                                    readerProvider.notifier).fontSize,
+                                baseLineHeight: ref.watch(
+                                    readerProvider.notifier).lineHeight,
                               )
                             : const Center(child: Text('No content')),
               ),

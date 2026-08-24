@@ -169,6 +169,7 @@ abstract class RustLibApi extends BaseApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required double pageFillThreshold,
   });
 
   Future<PageInfo> crateApiGetPageCached({
@@ -216,6 +217,7 @@ abstract class RustLibApi extends BaseApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required double pageFillThreshold,
   });
 
   Future<BigInt> crateApiGetPageCountCached({
@@ -248,6 +250,7 @@ abstract class RustLibApi extends BaseApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required double pageFillThreshold,
   });
 
   Future<BigInt> crateApiGetPageCountStructured({
@@ -263,6 +266,8 @@ abstract class RustLibApi extends BaseApi {
     required double paddingBottom,
     required String fontName,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   });
 
   Future<PageInfo> crateApiGetPageProcessed({
@@ -283,6 +288,7 @@ abstract class RustLibApi extends BaseApi {
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
     BigInt? anchorCharOffset,
+    required double pageFillThreshold,
   });
 
   Future<PageInfo> crateApiGetPageStructured({
@@ -300,6 +306,8 @@ abstract class RustLibApi extends BaseApi {
     required String fontName,
     BigInt? anchorCharOffset,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   });
 
   Future<String> crateApiGetPaginationCacheStats();
@@ -367,6 +375,8 @@ abstract class RustLibApi extends BaseApi {
     required double paddingBottom,
     required String fontName,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   });
 
   Future<String> crateApiProcessChapterContent({
@@ -1124,6 +1134,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required double pageFillThreshold,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1141,6 +1152,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingRight, serializer);
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 35, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1158,6 +1170,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingRight,
           paddingBottom,
           fontName,
+          pageFillThreshold,
         ],
         apiImpl: this,
       ),
@@ -1179,6 +1192,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingRight",
       "paddingBottom",
       "fontName",
+      "pageFillThreshold",
     ],
   );
 
@@ -1351,6 +1365,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingRight,
     required double paddingBottom,
     required String fontName,
+    required double pageFillThreshold,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1367,6 +1382,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingRight, serializer);
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 38, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1383,6 +1399,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingRight,
           paddingBottom,
           fontName,
+          pageFillThreshold,
         ],
         apiImpl: this,
       ),
@@ -1403,6 +1420,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingRight",
       "paddingBottom",
       "fontName",
+      "pageFillThreshold",
     ],
   );
 
@@ -1491,6 +1509,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required double pageFillThreshold,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1511,6 +1530,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(reSegment, serializer);
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1531,6 +1551,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           reSegment,
           chineseConvert,
           replaceRules,
+          pageFillThreshold,
         ],
         apiImpl: this,
       ),
@@ -1555,6 +1576,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "reSegment",
       "chineseConvert",
       "replaceRules",
+      "pageFillThreshold",
     ],
   );
 
@@ -1572,6 +1594,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingBottom,
     required String fontName,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1589,6 +1613,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
           sse_encode_u_8(chineseConvert, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
+          sse_encode_bool(showComments, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1606,6 +1632,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingBottom,
           fontName,
           chineseConvert,
+          pageFillThreshold,
+          showComments,
         ],
         apiImpl: this,
       ),
@@ -1627,6 +1655,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingBottom",
       "fontName",
       "chineseConvert",
+      "pageFillThreshold",
+      "showComments",
     ],
   );
 
@@ -1649,6 +1679,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
     BigInt? anchorCharOffset,
+    required double pageFillThreshold,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1671,6 +1702,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           sse_encode_opt_box_autoadd_usize(anchorCharOffset, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1693,6 +1725,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           chineseConvert,
           replaceRules,
           anchorCharOffset,
+          pageFillThreshold,
         ],
         apiImpl: this,
       ),
@@ -1719,6 +1752,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "chineseConvert",
       "replaceRules",
       "anchorCharOffset",
+      "pageFillThreshold",
     ],
   );
 
@@ -1738,6 +1772,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String fontName,
     BigInt? anchorCharOffset,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1757,6 +1793,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(fontName, serializer);
           sse_encode_opt_box_autoadd_usize(anchorCharOffset, serializer);
           sse_encode_u_8(chineseConvert, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
+          sse_encode_bool(showComments, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 43, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1776,6 +1814,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           fontName,
           anchorCharOffset,
           chineseConvert,
+          pageFillThreshold,
+          showComments,
         ],
         apiImpl: this,
       ),
@@ -1799,6 +1839,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "fontName",
       "anchorCharOffset",
       "chineseConvert",
+      "pageFillThreshold",
+      "showComments",
     ],
   );
 
@@ -2199,6 +2241,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double paddingBottom,
     required String fontName,
     required int chineseConvert,
+    required double pageFillThreshold,
+    required bool showComments,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2216,6 +2260,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(paddingBottom, serializer);
           sse_encode_String(fontName, serializer);
           sse_encode_u_8(chineseConvert, serializer);
+          sse_encode_f_32(pageFillThreshold, serializer);
+          sse_encode_bool(showComments, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_bool, decodeErrorData: sse_decode_AnyhowException),
@@ -2233,6 +2279,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paddingBottom,
           fontName,
           chineseConvert,
+          pageFillThreshold,
+          showComments,
         ],
         apiImpl: this,
       ),
@@ -2254,6 +2302,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paddingBottom",
       "fontName",
       "chineseConvert",
+      "pageFillThreshold",
+      "showComments",
     ],
   );
 
@@ -2683,7 +2733,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageEntryInfo dco_decode_page_entry_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11) throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12) throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return PageEntryInfo(
       text: dco_decode_opt_String(arr[0]),
       resourceHref: dco_decode_opt_String(arr[1]),
@@ -2696,6 +2746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       segments: dco_decode_list_page_seg_info(arr[8]),
       isChapterStart: dco_decode_bool(arr[9]),
       isTableFrame: dco_decode_bool(arr[10]),
+      isComment: dco_decode_bool(arr[11]),
     );
   }
 
@@ -3138,6 +3189,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_segments = sse_decode_list_page_seg_info(deserializer);
     var var_isChapterStart = sse_decode_bool(deserializer);
     var var_isTableFrame = sse_decode_bool(deserializer);
+    var var_isComment = sse_decode_bool(deserializer);
     return PageEntryInfo(
       text: var_text,
       resourceHref: var_resourceHref,
@@ -3150,6 +3202,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       segments: var_segments,
       isChapterStart: var_isChapterStart,
       isTableFrame: var_isTableFrame,
+      isComment: var_isComment,
     );
   }
 
@@ -3517,6 +3570,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_page_seg_info(self.segments, serializer);
     sse_encode_bool(self.isChapterStart, serializer);
     sse_encode_bool(self.isTableFrame, serializer);
+    sse_encode_bool(self.isComment, serializer);
   }
 
   @protected

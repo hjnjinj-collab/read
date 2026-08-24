@@ -411,7 +411,23 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 out.push(tableBlock(child, childChain));
             } else {
                 // div/section/article/body/figure 等：透明容器
-                walkBlocks(child, depth + 1, out, childChain);
+                // 本章说检测：aside / footnote 语义元素
+                var isComment = (tag === "aside")
+                    || (/footnote|note|annotation|remark/.test(child.a && (child.a["epub:type"] || child.a.type || "")))
+                    || (/footnote/.test(child.a && child.a["class"] || ""));
+                if (isComment) {
+                    // 本章说段落：透明递归产出块后逐块标记 is_comment
+                    var innerBlocks = [];
+                    walkBlocks(child, depth + 1, innerBlocks, childChain);
+                    for (var bi = 0; bi < innerBlocks.length; bi++) {
+                        if (innerBlocks[bi].type === "paragraph") {
+                            innerBlocks[bi].is_comment = true;
+                        }
+                        out.push(innerBlocks[bi]);
+                    }
+                } else {
+                    walkBlocks(child, depth + 1, out, childChain);
+                }
             }
         }
     }
@@ -710,6 +726,7 @@ mod tests {
                     vec!["body".to_string()],
                     vec!["p".to_string()],
                 ]),
+                is_comment: false,
             }
         );
     }

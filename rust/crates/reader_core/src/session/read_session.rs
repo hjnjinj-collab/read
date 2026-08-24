@@ -163,6 +163,7 @@ impl ReadSession {
             padding_bottom: self.config.padding.bottom,
             letter_spacing: self.config.letter_spacing,
             paragraph_spacing: self.config.paragraph_spacing,
+            page_fill_threshold: self.config.page_fill_threshold,
         };
         config.compute_hash()
     }
@@ -394,6 +395,8 @@ mod tests {
             font_name: "TestFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
         }
     }
 
@@ -432,6 +435,7 @@ mod tests {
             padding_bottom: config.padding.bottom,
             letter_spacing: config.letter_spacing,
             paragraph_spacing: config.paragraph_spacing,
+            page_fill_threshold: config.page_fill_threshold,
         };
 
         let hash1 = config_hash.compute_hash();

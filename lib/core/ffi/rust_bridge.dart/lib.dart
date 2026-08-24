@@ -164,6 +164,9 @@ class PageEntryInfo {
   /// 表格单元格线框矩形（x/y/width/height 即几何；绘制端描边）
   final bool isTableFrame;
 
+  /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
+  final bool isComment;
+
   const PageEntryInfo({
     this.text,
     this.resourceHref,
@@ -176,6 +179,7 @@ class PageEntryInfo {
     required this.segments,
     required this.isChapterStart,
     required this.isTableFrame,
+    required this.isComment,
   });
 
   @override
@@ -190,7 +194,8 @@ class PageEntryInfo {
       fontScale.hashCode ^
       segments.hashCode ^
       isChapterStart.hashCode ^
-      isTableFrame.hashCode;
+      isTableFrame.hashCode ^
+      isComment.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -207,7 +212,8 @@ class PageEntryInfo {
           fontScale == other.fontScale &&
           segments == other.segments &&
           isChapterStart == other.isChapterStart &&
-          isTableFrame == other.isTableFrame;
+          isTableFrame == other.isTableFrame &&
+          isComment == other.isComment;
 }
 
 /// FFI-safe page info

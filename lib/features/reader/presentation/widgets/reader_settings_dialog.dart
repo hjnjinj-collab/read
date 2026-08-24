@@ -27,6 +27,12 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _boldEnabled = true;
   bool _italicEnabled = true;
 
+  // 分页填充率门槛
+  double _pageFillThreshold = 0.9;
+
+  // 本章说显示开关
+  bool _showComments = true;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +48,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _smartParagraph = n.smartParagraph;
     _boldEnabled = n.boldEnabled;
     _italicEnabled = n.italicEnabled;
+    _pageFillThreshold = n.pageFillThreshold;
+    _showComments = n.showComments;
   }
 
   @override
@@ -119,6 +127,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
       smartParagraph: _smartParagraph,
       boldEnabled: _boldEnabled,
       italicEnabled: _italicEnabled,
+      pageFillThreshold: _pageFillThreshold,
+      showComments: _showComments,
     );
 
     if (!mounted) return;
@@ -215,6 +225,41 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   value: _reSegment,
                   onChanged: (value) {
                     setState(() => _reSegment = value);
+                  },
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '页面填充门槛：${(_pageFillThreshold * 100).round()}%',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const Text(
+                        '页面填充达到此比例后才在段落边界分页，低于则允许段落跨页',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      Slider(
+                        value: _pageFillThreshold,
+                        min: 0.50,
+                        max: 1.00,
+                        divisions: 10,
+                        label: '${(_pageFillThreshold * 100).round()}%',
+                        onChanged: (value) {
+                          setState(() => _pageFillThreshold = value);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                _buildSwitchTile(
+                  title: '显示本章说',
+                  subtitle: '段落间的注释/脚注内容以灰色小字显示',
+                  value: _showComments,
+                  onChanged: (value) {
+                    setState(() => _showComments = value);
                   },
                 ),
 

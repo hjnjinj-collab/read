@@ -203,6 +203,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_chapter_start: false,
+                is_comment: false,
             })],
             start_char_index: page_index * 100,
             end_char_index: (page_index + 1) * 100,

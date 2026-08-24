@@ -124,6 +124,10 @@ pub enum ContentBlock {
         /// CSS 匹配后剥离
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anc: Option<Vec<Vec<String>>>,
+        /// 本章说标记：JS 提取层（aside/footnote 等）或 CSS 兜底（小字号段落）
+        /// 标记为旁注/注释；布局层据此可缩字、变色或跳过绘制
+        #[serde(default)]
+        is_comment: bool,
     },
     /// 标题（h1-h6 → 1..=6）
     Heading {
@@ -217,6 +221,7 @@ impl ContentBlock {
             font_scale: None,
             runs: Vec::new(),
             anc: None,
+            is_comment: false,
         }
     }
 
@@ -268,6 +273,7 @@ impl ContentBlock {
                 font_scale,
                 runs,
                 anc,
+                is_comment,
             } => ContentBlock::Paragraph {
                 text,
                 align,
@@ -287,6 +293,7 @@ impl ContentBlock {
                     })
                     .collect(),
                 anc,
+                is_comment,
             },
             ContentBlock::Heading {
                 level,
@@ -383,6 +390,7 @@ impl ContentBlock {
                 color,
                 font_scale,
                 runs,
+                is_comment,
                 ..
             } => ContentBlock::Paragraph {
                 text,
@@ -403,6 +411,7 @@ impl ContentBlock {
                     })
                     .collect(),
                 anc: None,
+                is_comment,
             },
             ContentBlock::Heading {
                 level,
@@ -522,6 +531,7 @@ mod tests {
                         anc: Some(vec![vec!["p".into()], vec!["span".into(), "txtu2".into()]]),
                     }],
                     anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+                    is_comment: false,
                 },
                 ContentBlock::Table {
                     caption: None,
@@ -549,7 +559,7 @@ mod tests {
         // 剥离后：物化产物保留，中间链路（块级 anc 与 run anc）清空
         let stripped = back.blocks[1].clone().strip_anc();
         let ContentBlock::Paragraph {
-            color, font_scale, runs, anc, ..
+            color, font_scale, runs, anc, is_comment, ..
         } = stripped
         else {
             panic!("结构不应改变");
@@ -559,6 +569,7 @@ mod tests {
         assert_eq!(runs[0].color.as_deref(), Some("#498428"));
         assert!(runs[0].anc.is_none());
         assert!(anc.is_none());
+        assert!(!is_comment);
 
         let ContentBlock::Table { margin_top_percent, margin_left_auto, anc, rows, .. } =
             back.blocks[2].clone().strip_anc()

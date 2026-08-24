@@ -1284,6 +1284,7 @@ impl EpubParser {
                 font_scale,
                 runs,
                 anc,
+                is_comment,
             } => {
                 let ctx = Self::node_ctx_from_anc(anc.as_ref());
                 let align = align.or_else(|| Self::inherited_text_align(sheet, &ctx));
@@ -1291,6 +1292,12 @@ impl EpubParser {
                 let font_scale =
                     font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx, base_font_px));
                 let runs = Self::resolve_runs(runs, sheet, text.chars().count(), base_font_px);
+                // CSS 兜底分类：块级小字号且短段落视为旁注（footnote/annotation）。
+                // font_scale < 0.85 表示 CSS 明确声明了小于基准的字号；
+                // 字符数 < 200 过滤长文本（避免误判正文为注释）。
+                let is_comment = is_comment
+                    || (font_scale.unwrap_or(1.0) < 0.85
+                        && text.chars().count() < 200);
                 ContentBlock::Paragraph {
                     text,
                     align,
@@ -1298,6 +1305,7 @@ impl EpubParser {
                     font_scale,
                     runs,
                     anc,
+                    is_comment,
                 }
             }
             ContentBlock::Heading {
@@ -2320,6 +2328,7 @@ mod tests {
                 StyledRun { start: 2, end: 3, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into()]]) },
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2361,6 +2370,7 @@ mod tests {
                             vec!["tr".into()],
                             vec!["td".into(), "vol-title-name".into()],
                         ]),
+                        is_comment: false,
                     }],
                     anc: Some(vec![
                         vec!["body".into()],
@@ -2436,6 +2446,7 @@ mod tests {
                 mk(4, 5, vec![vec!["body"], vec!["p"], vec!["span"]]),
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2466,6 +2477,7 @@ mod tests {
                 mk(2, 3, vec![vec!["body"], vec!["p"], vec!["em", "it"]]),
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para2, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2493,6 +2505,7 @@ mod tests {
                 mk(1, 2, vec![vec!["body"], vec!["p"], vec!["b", "w4"]]),
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para3, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2540,6 +2553,7 @@ mod tests {
                 vec!["rt"],
             ])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2562,6 +2576,7 @@ mod tests {
                 vec!["rt"],
             ])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2583,6 +2598,7 @@ mod tests {
             font_scale: None,
             runs: vec![mk(vec![vec!["body"], vec!["p"], vec!["span"]])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2651,6 +2667,7 @@ mod tests {
                 vec!["tr".into()],
                 vec!["td".into()],
             ]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { font_scale, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2678,6 +2695,7 @@ mod tests {
                 run_with_class(&["c4"]),
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)

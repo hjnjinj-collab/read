@@ -140,6 +140,7 @@ Future<PageInfo> getPage({
   required double paddingRight,
   required double paddingBottom,
   required String fontName,
+  required double pageFillThreshold,
 }) => RustLib.instance.api.crateApiGetPage(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -153,6 +154,7 @@ Future<PageInfo> getPage({
   paddingRight: paddingRight,
   paddingBottom: paddingBottom,
   fontName: fontName,
+  pageFillThreshold: pageFillThreshold,
 );
 
 /// Get page count for a chapter (using new layout engine)
@@ -168,6 +170,7 @@ Future<BigInt> getPageCount({
   required double paddingRight,
   required double paddingBottom,
   required String fontName,
+  required double pageFillThreshold,
 }) => RustLib.instance.api.crateApiGetPageCount(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -180,6 +183,7 @@ Future<BigInt> getPageCount({
   paddingRight: paddingRight,
   paddingBottom: paddingBottom,
   fontName: fontName,
+  pageFillThreshold: pageFillThreshold,
 );
 
 /// Get specific page with content preprocessing (带内容预处理的分页获取)
@@ -205,6 +209,7 @@ Future<PageInfo> getPageProcessed({
   required int chineseConvert,
   required List<FfiReplaceRule> replaceRules,
   BigInt? anchorCharOffset,
+  required double pageFillThreshold,
 }) => RustLib.instance.api.crateApiGetPageProcessed(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -223,6 +228,7 @@ Future<PageInfo> getPageProcessed({
   chineseConvert: chineseConvert,
   replaceRules: replaceRules,
   anchorCharOffset: anchorCharOffset,
+  pageFillThreshold: pageFillThreshold,
 );
 
 /// Get page count with content preprocessing (带内容预处理的分页计数)
@@ -242,6 +248,7 @@ Future<BigInt> getPageCountProcessed({
   required bool reSegment,
   required int chineseConvert,
   required List<FfiReplaceRule> replaceRules,
+  required double pageFillThreshold,
 }) => RustLib.instance.api.crateApiGetPageCountProcessed(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -258,6 +265,7 @@ Future<BigInt> getPageCountProcessed({
   reSegment: reSegment,
   chineseConvert: chineseConvert,
   replaceRules: replaceRules,
+  pageFillThreshold: pageFillThreshold,
 );
 
 /// 结构化分页获取（EPUB 主路径）
@@ -280,6 +288,8 @@ Future<PageInfo> getPageStructured({
   required String fontName,
   BigInt? anchorCharOffset,
   required int chineseConvert,
+  required double pageFillThreshold,
+  required bool showComments,
 }) => RustLib.instance.api.crateApiGetPageStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -295,6 +305,8 @@ Future<PageInfo> getPageStructured({
   fontName: fontName,
   anchorCharOffset: anchorCharOffset,
   chineseConvert: chineseConvert,
+  pageFillThreshold: pageFillThreshold,
+  showComments: showComments,
 );
 
 /// 结构化分页计数（EPUB 主路径）
@@ -311,6 +323,8 @@ Future<BigInt> getPageCountStructured({
   required double paddingBottom,
   required String fontName,
   required int chineseConvert,
+  required double pageFillThreshold,
+  required bool showComments,
 }) => RustLib.instance.api.crateApiGetPageCountStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -324,6 +338,8 @@ Future<BigInt> getPageCountStructured({
   paddingBottom: paddingBottom,
   fontName: fontName,
   chineseConvert: chineseConvert,
+  pageFillThreshold: pageFillThreshold,
+  showComments: showComments,
 );
 
 /// EPUB 翻章预取：以与前台完全一致的参数预计算目标章分页并写入缓存。
@@ -345,6 +361,8 @@ Future<bool> prefetchStructuredChapter({
   required double paddingBottom,
   required String fontName,
   required int chineseConvert,
+  required double pageFillThreshold,
+  required bool showComments,
 }) => RustLib.instance.api.crateApiPrefetchStructuredChapter(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -358,6 +376,8 @@ Future<bool> prefetchStructuredChapter({
   paddingBottom: paddingBottom,
   fontName: fontName,
   chineseConvert: chineseConvert,
+  pageFillThreshold: pageFillThreshold,
+  showComments: showComments,
 );
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）

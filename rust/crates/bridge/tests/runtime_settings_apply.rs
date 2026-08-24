@@ -33,6 +33,7 @@ fn call(book_id: &str, convert: u8, rules: Vec<FfiReplaceRule>) -> PageInfo {
         convert,
         rules,
         None,
+        0.9,
     )
     .expect("get_page_processed failed")
 }
@@ -147,6 +148,7 @@ fn app_flow_rules_apply_after_update_book_cleaning() {
             enabled: true,
         }],
         Some(anchor),
+        0.9,
     )
     .expect("reload with rules failed");
 

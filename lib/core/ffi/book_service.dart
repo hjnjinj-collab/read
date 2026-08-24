@@ -148,6 +148,7 @@ class BookService {
     required double paddingRight,
     required double paddingBottom,
     String fontName = 'default',
+    double pageFillThreshold = 0.9,
   }) async {
     final rustPage = await rust_api.getPage(
       bookId: bookId,
@@ -162,6 +163,7 @@ class BookService {
       paddingRight: paddingRight,
       paddingBottom: paddingBottom,
       fontName: fontName,
+      pageFillThreshold: pageFillThreshold,
     );
 
     return _mapPage(rustPage);
@@ -180,6 +182,7 @@ class BookService {
     required double paddingRight,
     required double paddingBottom,
     String fontName = 'default',
+    double pageFillThreshold = 0.9,
   }) async {
     final count = await rust_api.getPageCount(
       bookId: bookId,
@@ -193,6 +196,7 @@ class BookService {
       paddingRight: paddingRight,
       paddingBottom: paddingBottom,
       fontName: fontName,
+      pageFillThreshold: pageFillThreshold,
     );
 
     return count.toInt();
@@ -221,6 +225,7 @@ class BookService {
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
     int? anchorCharOffset,
+    double pageFillThreshold = 0.9,
   }) async {
     final rustPage = await rust_api.getPageProcessed(
       bookId: bookId,
@@ -247,6 +252,7 @@ class BookService {
       anchorCharOffset: anchorCharOffset == null
           ? null
           : BigInt.from(anchorCharOffset),
+      pageFillThreshold: pageFillThreshold,
     );
 
     return _mapPage(rustPage);
@@ -269,6 +275,7 @@ class BookService {
     required bool reSegment,
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
+    double pageFillThreshold = 0.9,
   }) async {
     final count = await rust_api.getPageCountProcessed(
       bookId: bookId,
@@ -291,6 +298,7 @@ class BookService {
         ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
         enabled: r.enabled,
       )).toList(),
+      pageFillThreshold: pageFillThreshold,
     );
 
     return count.toInt();
@@ -335,6 +343,7 @@ class BookService {
                     .toList(),
                 isChapterStart: e.isChapterStart,
                 isTableFrame: e.isTableFrame,
+                isComment: e.isComment,
               ))
           .toList(),
       backgroundHref: page.backgroundHref,
@@ -365,6 +374,8 @@ class BookService {
     String fontName = 'default',
     int? anchorCharOffset,
     int chineseConvert = 0,
+    double pageFillThreshold = 0.9,
+    bool showComments = true,
   }) async {
     final rustPage = await rust_api.getPageStructured(
       bookId: bookId,
@@ -382,6 +393,8 @@ class BookService {
       anchorCharOffset:
           anchorCharOffset == null ? null : BigInt.from(anchorCharOffset),
       chineseConvert: chineseConvert,
+      pageFillThreshold: pageFillThreshold,
+      showComments: showComments,
     );
     return _mapPage(rustPage);
   }
@@ -400,6 +413,8 @@ class BookService {
     required double paddingBottom,
     String fontName = 'default',
     int chineseConvert = 0,
+    double pageFillThreshold = 0.9,
+    bool showComments = true,
   }) async {
     final count = await rust_api.getPageCountStructured(
       bookId: bookId,
@@ -414,6 +429,8 @@ class BookService {
       paddingBottom: paddingBottom,
       fontName: fontName,
       chineseConvert: chineseConvert,
+      pageFillThreshold: pageFillThreshold,
+      showComments: showComments,
     );
     return count.toInt();
   }
@@ -436,6 +453,8 @@ class BookService {
     required double paddingBottom,
     String fontName = 'default',
     int chineseConvert = 0,
+    double pageFillThreshold = 0.9,
+    bool showComments = true,
   }) async {
     return await rust_api.prefetchStructuredChapter(
       bookId: bookId,
@@ -450,6 +469,8 @@ class BookService {
       paddingBottom: paddingBottom,
       fontName: fontName,
       chineseConvert: chineseConvert,
+      pageFillThreshold: pageFillThreshold,
+      showComments: showComments,
     );
   }
 

@@ -47,7 +47,6 @@ impl AdvancedGlyphCache {
     ///
     /// 一次性测量多个字符，减少锁竞争
     pub fn batch_measure(&self, font_name: &str, font_size: f32, chars: &[char]) -> Vec<GlyphMetrics> {
-        let font_size_int = font_size as u32;
         let mut results = Vec::with_capacity(chars.len());
 
         // 先从缓存中获取
@@ -55,11 +54,7 @@ impl AdvancedGlyphCache {
         let mut uncached_indices = Vec::new();
 
         for (i, &ch) in chars.iter().enumerate() {
-            let key = GlyphKey {
-                ch,
-                font_size_int,
-                font_name: font_name.to_string(),
-            };
+            let key = GlyphKey::new(ch, font_size, font_name);
 
             if let Some(metrics) = self.cache.get(&key) {
                 results.push(metrics);
@@ -81,11 +76,7 @@ impl AdvancedGlyphCache {
                 for (i, &ch) in uncached_chars.iter().enumerate() {
                     let metrics = manager.measure_char(&font, ch, font_size);
 
-                    let key = GlyphKey {
-                        ch,
-                        font_size_int,
-                        font_name: font_name.to_string(),
-                    };
+                    let key = GlyphKey::new(ch, font_size, font_name);
                     self.cache.put(key, metrics);
 
                     // 更新结果
@@ -101,12 +92,7 @@ impl AdvancedGlyphCache {
 
     /// 获取单个字符的宽度
     pub fn get_char_width(&self, font_name: &str, font_size: f32, ch: char) -> f32 {
-        let font_size_int = font_size as u32;
-        let key = GlyphKey {
-            ch,
-            font_size_int,
-            font_name: font_name.to_string(),
-        };
+        let key = GlyphKey::new(ch, font_size, font_name);
 
         // 先从缓存获取
         if let Some(metrics) = self.cache.get(&key) {
@@ -117,11 +103,6 @@ impl AdvancedGlyphCache {
         let manager = self.font_manager.lock().unwrap();
         if let Ok(font) = manager.get_font(font_name) {
             let metrics = manager.measure_char(&font, ch, font_size);
-            let key = GlyphKey {
-                ch,
-                font_size_int,
-                font_name: font_name.to_string(),
-            };
             self.cache.put(key, metrics);
             metrics.width
         } else {

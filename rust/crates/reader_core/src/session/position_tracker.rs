@@ -33,6 +33,7 @@ pub struct LayoutConfigHash {
     pub padding_bottom: f32,
     pub letter_spacing: f32,
     pub paragraph_spacing: f32,
+    pub page_fill_threshold: f32,
 }
 
 impl LayoutConfigHash {
@@ -52,6 +53,7 @@ impl LayoutConfigHash {
         self.padding_bottom.to_bits().hash(&mut hasher);
         self.letter_spacing.to_bits().hash(&mut hasher);
         self.paragraph_spacing.to_bits().hash(&mut hasher);
+        self.page_fill_threshold.to_bits().hash(&mut hasher);
 
         hasher.finish()
     }
@@ -169,6 +171,7 @@ mod tests {
             padding_bottom: 20.0,
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
         };
 
         let config2 = LayoutConfigHash {
@@ -183,6 +186,7 @@ mod tests {
             padding_bottom: 20.0,
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
         };
 
         let config3 = LayoutConfigHash {
@@ -197,6 +201,7 @@ mod tests {
             padding_bottom: 20.0,
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
+            page_fill_threshold: 0.9,
         };
 
         assert_eq!(config1.compute_hash(), config2.compute_hash());

@@ -55,6 +55,8 @@ fn main() -> anyhow::Result<()> {
         font_name: "BenchFont".to_string(),
         letter_spacing: 0.0,
         paragraph_spacing: 18.0 * 0.8,
+        page_fill_threshold: 0.9,
+        show_comments: true,
     };
     let mut font_manager = layout_engine::FontManager::new();
     font_manager

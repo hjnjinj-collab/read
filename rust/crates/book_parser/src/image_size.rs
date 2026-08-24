@@ -36,6 +36,9 @@ pub fn probe_image_size(data: &[u8]) -> Option<ImageDims> {
     if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
         return probe_webp(data);
     }
+    if data.len() >= 2 && &data[..2] == b"BM" {
+        return probe_bmp(data);
+    }
     None
 }
 
@@ -153,6 +156,19 @@ fn probe_vp8_extended(data: &[u8]) -> Option<ImageDims> {
         | (u32::from(data[base + 4]) << 8)
         | (u32::from(data[base + 5]) << 16);
     sane(width + 1, height + 1)
+}
+
+/// BMP：签名"BM"(2) + 文件大小(4) + 保留(4) + 数据偏移(4) + DIB 头大小(4)
+/// + 宽(4 i32 LE) + 高(4 i32 LE)；负高表示 top-down 取绝对值
+fn probe_bmp(data: &[u8]) -> Option<ImageDims> {
+    // 最小 BMP：文件头(14) + BITMAPINFOHEADER 前 8 字节(头大小 4 + 宽 4 + 高 4)
+    if data.len() < 26 {
+        return None;
+    }
+    let width = i32::from_le_bytes(data[18..22].try_into().ok()?) as u32;
+    let height_signed = i32::from_le_bytes(data[22..26].try_into().ok()?);
+    let height = height_signed.unsigned_abs();
+    sane(width, height)
 }
 
 /// 零尺寸视为探测失败
@@ -289,8 +305,41 @@ mod tests {
     fn unknown_and_empty_input() {
         assert_eq!(probe_image_size(b""), None);
         assert_eq!(probe_image_size(b"not an image"), None);
-        // BMP 不在支持列表
-        assert_eq!(probe_image_size(b"BM\x36\x00"), None);
+    }
+
+    #[test]
+    fn bmp_header() {
+        // BM 签名 + 文件大小(4) + 保留(4) + 数据偏移(4) + DIB 头大小(4)
+        // + 宽(4 i32 LE) + 高(4 i32 LE)
+        let mut data = b"BM".to_vec();
+        data.extend_from_slice(&54u32.to_le_bytes()); // 文件大小
+        data.extend_from_slice(&[0; 4]); // 保留
+        data.extend_from_slice(&54u32.to_le_bytes()); // 数据偏移
+        data.extend_from_slice(&40u32.to_le_bytes()); // DIB 头大小
+        data.extend_from_slice(&640i32.to_le_bytes()); // 宽
+        data.extend_from_slice(&480i32.to_le_bytes()); // 高
+
+        assert_eq!(
+            probe_image_size(&data),
+            Some(ImageDims {
+                width: 640,
+                height: 480
+            })
+        );
+
+        // 负高（top-down）取绝对值
+        let mut data_topdown = data.clone();
+        data_topdown[22..26].copy_from_slice(&(-480i32).to_le_bytes());
+        assert_eq!(
+            probe_image_size(&data_topdown),
+            Some(ImageDims {
+                width: 640,
+                height: 480
+            })
+        );
+
+        // 截断数据
+        assert_eq!(probe_image_size(&data[..20]), None);
     }
 
     #[test]
