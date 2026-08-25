@@ -53,6 +53,7 @@ struct TxtLayoutSnapshot {
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: Vec<FfiReplaceRule>,
+    para_format_hash: u64,
 }
 
 static LAST_TXT_LAYOUT_SNAPSHOT: Mutex<Option<(String, TxtLayoutSnapshot)>> =
@@ -66,6 +67,7 @@ fn remember_txt_layout(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: &[FfiReplaceRule],
+    para_format_hash: u64,
 ) {
     *LAST_TXT_LAYOUT_SNAPSHOT.lock().unwrap() = Some((
         book_id.to_string(),
@@ -75,6 +77,7 @@ fn remember_txt_layout(
             re_segment,
             chinese_convert,
             replace_rules: replace_rules.to_vec(),
+            para_format_hash,
         },
     ));
 }
@@ -91,6 +94,9 @@ fn shared_tokio_runtime() -> &'static tokio::runtime::Runtime {
 /// TXT 相邻章预热：按最近一次前台排版快照重建目标章分页并写入
 /// PAGINATION_CACHE（缓存命中即零开销，副作用即目的）。
 /// 无快照或书不匹配时跳过返回 false。
+///
+/// M9.3：走 inner 变体（allow_preload_trigger=false）——预热自身严禁
+/// 再触发预热，否则形成自激级联冲刷 LRU、前台翻页退化为同步全章重排。
 fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool> {
     let snap = LAST_TXT_LAYOUT_SNAPSHOT.lock().unwrap().clone();
     let Some((snap_book, snap)) = snap else {
@@ -99,7 +105,7 @@ fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool>
     if snap_book != book_id {
         return Ok(false);
     }
-    process_and_layout_chapter(
+    process_and_layout_chapter_inner(
         book_id,
         chapter_index,
         &snap.config,
@@ -107,6 +113,8 @@ fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool>
         snap.re_segment,
         snap.chinese_convert,
         &snap.replace_rules,
+        snap.para_format_hash,
+        /*allow_preload_trigger=*/ false,
     )?;
     Ok(true)
 }
@@ -143,6 +151,8 @@ struct StructuredPageKey {
     page_fill_threshold_bits: u32,
     /// 是否显示本章说（缓存键：不同设置独立缓存）
     show_comments: bool,
+    /// M9 段落格式化设置哈希（缩进/重分段/间距变更即换键）
+    para_format_hash: u64,
 }
 
 impl StructuredPageKey {
@@ -151,6 +161,7 @@ impl StructuredPageKey {
         chapter_index: usize,
         config: &LayoutConfig,
         convert_mode: u8,
+        para_format_hash: u64,
     ) -> Self {
         Self {
             book_id: book_id.to_string(),
@@ -169,6 +180,7 @@ impl StructuredPageKey {
             convert_mode,
             page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
             show_comments: config.show_comments,
+            para_format_hash,
         }
     }
 }
@@ -177,6 +189,21 @@ impl StructuredPageKey {
 static CONTENT_CLEANING_OPTIONS: Lazy<Arc<Mutex<Option<ContentCleaningOptions>>>> = Lazy::new(|| {
     Arc::new(Mutex::new(None))
 });
+
+/// M9：全局段落格式化设置
+static PARAGRAPH_FORMAT_SETTINGS: Lazy<Mutex<reader_core::ParagraphFormatSettings>> =
+    Lazy::new(|| Mutex::new(reader_core::ParagraphFormatSettings::default()));
+
+/// M9.2：段距有效值 = 基准（字号×0.8）× 用户倍率。
+/// 仅活跃 FFI 入口（get_page_processed / get_page_count_processed /
+/// structured_layout_config）消费；遗留入口保持原值（App 未调用）。
+fn effective_paragraph_spacing(font_size: f32) -> f32 {
+    let multiplier = PARAGRAPH_FORMAT_SETTINGS
+        .lock()
+        .unwrap()
+        .paragraph_spacing_multiplier;
+    font_size * 0.8 * multiplier
+}
 
 /// Load font from file path
 pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()> {
@@ -348,6 +375,29 @@ pub fn clear_content_cleaning_options() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// M9：设置全局段落格式化参数
+///
+/// Dart 侧调用：用户在设置 UI 修改缩进/重分段模式/切分阈值时，
+/// 通过此函数同步 Rust 全局设置，随后 FFI 分页调用自动应用。
+/// 阈值钳制在 [20, 2000]，防病态输入（过小退化为逐句切分、过大等同不切）。
+pub fn set_paragraph_format_settings(
+    enable_indent: bool,
+    indent_size_chars: u8,
+    paragraph_spacing_multiplier: f32,
+    re_paragraph_mode: u8,
+    smart_split_threshold: u32,
+    aggressive_split_threshold: u32,
+) -> anyhow::Result<()> {
+    let mut settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap();
+    settings.enable_indent = enable_indent;
+    settings.indent_size_chars = indent_size_chars;
+    settings.paragraph_spacing_multiplier = paragraph_spacing_multiplier;
+    settings.re_paragraph_mode = reader_core::ReParagraphMode::from_u8(re_paragraph_mode);
+    settings.smart_split_threshold = smart_split_threshold.clamp(20, 2000) as usize;
+    settings.aggressive_split_threshold = aggressive_split_threshold.clamp(20, 2000) as usize;
+    Ok(())
+}
+
 /// 运行中更新已打开书籍的净化设置（即时生效）
 ///
 /// 更新 parser 的净化器并清空该书分页缓存；
@@ -448,7 +498,37 @@ fn process_and_layout_chapter(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: &[FfiReplaceRule],
-) -> anyhow::Result<Vec<Page>> {
+    para_format_hash: u64,
+) -> anyhow::Result<std::sync::Arc<Vec<Page>>> {
+    process_and_layout_chapter_inner(
+        book_id,
+        chapter_index,
+        config,
+        remove_duplicate_title,
+        re_segment,
+        chinese_convert,
+        replace_rules,
+        para_format_hash,
+        /*allow_preload_trigger=*/ true,
+    )
+}
+
+/// M9.3 内部变体：`allow_preload_trigger=false` 供预加载路径使用，
+/// 严禁回源时再触发预热（打断 warm→miss→trigger→warm 自激级联）。
+///
+/// M9.3：返回 `Arc<Vec<Page>>`——命中路径仅引用计数交付，免整章深克隆。
+#[allow(clippy::too_many_arguments)]
+fn process_and_layout_chapter_inner(
+    book_id: &str,
+    chapter_index: usize,
+    config: &LayoutConfig,
+    remove_duplicate_title: bool,
+    re_segment: bool,
+    chinese_convert: u8,
+    replace_rules: &[FfiReplaceRule],
+    para_format_hash: u64,
+    allow_preload_trigger: bool,
+) -> anyhow::Result<std::sync::Arc<Vec<Page>>> {
     let rules: Vec<ReplaceRule> = replace_rules.iter().cloned().map(Into::into).collect();
     let rules_hash = CacheKey::hash_replace_rules(&rules);
     let options_hash = CacheKey::hash_process_options(
@@ -456,16 +536,21 @@ fn process_and_layout_chapter(
         re_segment,
         chinese_convert,
         rules_hash,
+        para_format_hash,
     );
     let cache_key = CacheKey::with_options(book_id, chapter_index, config, options_hash);
 
-    // 缓存命中：零计算
+    // 缓存命中：Arc bump 免整章深克隆【M9.3 H2】
     if let Some(cached) = PAGINATION_CACHE.lock().unwrap().get(&cache_key).cloned() {
         return Ok(cached.pages);
     }
 
-    // 未命中：重活全部在锁外执行
-    let raw_content = get_chapter_content(book_id.to_string(), chapter_index)?;
+    // 未命中：重活全部在锁外执行（quiet 回源，是否触发预热由调用方语义决定）
+    let raw_content = if allow_preload_trigger {
+        get_chapter_content(book_id.to_string(), chapter_index)?
+    } else {
+        get_chapter_content_quiet(book_id.to_string(), chapter_index)?
+    };
     let chapter_title = {
         let books = BOOKS.read().unwrap();
         let handle = books.get(book_id)
@@ -494,16 +579,25 @@ fn process_and_layout_chapter(
     let processed =
         shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
 
+    // M9 P4：段落格式化（缩进 + 重新分段），在预处理后、布局前
+    let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    let processed = if para_settings.needs_formatting() {
+        let formatter = reader_core::ParagraphFormatter::new(para_settings);
+        formatter.format(&processed)
+    } else {
+        processed
+    };
+
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     // M8-P4：跨章复用共享字形缓存
     let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
     let engine = LayoutEngine::with_cache(config.clone(), font_manager, glyph_cache);
-    let pages = engine.layout_text(&processed, chapter_index)?;
+    let pages = std::sync::Arc::new(engine.layout_text(&processed, chapter_index)?);
 
     PAGINATION_CACHE.lock().unwrap().put(
         cache_key,
         CachedChapterPages {
-            pages: pages.clone(),
+            pages: std::sync::Arc::clone(&pages),
             total_pages: pages.len(),
             created_at: Instant::now(),
         },
@@ -609,8 +703,23 @@ pub fn get_chapters(book_id: String) -> anyhow::Result<Vec<ChapterInfo>> {
 
 /// Get chapter content
 pub fn get_chapter_content(book_id: String, chapter_index: usize) -> anyhow::Result<String> {
+    get_chapter_content_impl(book_id, chapter_index, true)
+}
+
+/// M9.3：get_chapter_content 的"安静版"——跳过 trigger_preload_async。
+/// 仅供 process_and_layout_chapter 回源使用（预加载路径严禁再触发预热，
+/// 否则形成自激级联：warm→miss→trigger→warm→…推进到全书末尾）。
+fn get_chapter_content_quiet(book_id: String, chapter_index: usize) -> anyhow::Result<String> {
+    get_chapter_content_impl(book_id, chapter_index, false)
+}
+
+fn get_chapter_content_impl(
+    book_id: String,
+    chapter_index: usize,
+    trigger_preload: bool,
+) -> anyhow::Result<String> {
     use book_parser::TxtParser;
-    
+
     // 1. 检查是否有 parser 实例（仅 TXT 格式支持净化缓存）
     let has_parser = {
         let books = BOOKS.read().unwrap();
@@ -631,23 +740,25 @@ pub fn get_chapter_content(book_id: String, chapter_index: usize) -> anyhow::Res
                 parser.ensure_cleaned_chapter_cache()?;
             }
         }
-        
+
         // 2.3 从缓存读取章节内容（只读锁）
         let content = {
             let books = BOOKS.read().unwrap();
             let handle = books.get(&book_id)
                 .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-            
+
             if let Some(ref parser) = handle.parser {
                 parser.get_chapter_content_from_cache(chapter_index)?
             } else {
                 return Err(anyhow::anyhow!("Parser not available"));
             }
         };
-        
-        // 异步触发预加载（非阻塞）
-        trigger_preload_async(book_id, chapter_index);
-        
+
+        // 异步触发预加载（非阻塞；quiet 路径跳过以打断自激级联）
+        if trigger_preload {
+            trigger_preload_async(book_id, chapter_index);
+        }
+
         Ok(content)
     } else {
         // 3. 无 parser（工厂已拒绝其他格式，此分支必为 EPUB）
@@ -672,8 +783,10 @@ pub fn get_chapter_content(book_id: String, chapter_index: usize) -> anyhow::Res
 
             match ensured {
                 Ok(cleaned) => {
-                    // 异步触发预加载（非阻塞）
-                    trigger_preload_async(book_id, chapter_index);
+                    // 异步触发预加载（非阻塞；quiet 路径跳过）
+                    if trigger_preload {
+                        trigger_preload_async(book_id, chapter_index);
+                    }
                     return Ok(cleaned);
                 }
                 Err(e) => log::warn!("EPUB 净化缓存不可用，回落逐读净化: {}", e),
@@ -693,8 +806,10 @@ pub fn get_chapter_content(book_id: String, chapter_index: usize) -> anyhow::Res
         // 应用内容净化（如果已设置）
         let cleaned_content = apply_content_cleaning(&content);
 
-        // 异步触发预加载（非阻塞）
-        trigger_preload_async(book_id, chapter_index);
+        // 异步触发预加载（非阻塞；quiet 路径跳过）
+        if trigger_preload {
+            trigger_preload_async(book_id, chapter_index);
+        }
 
         Ok(cleaned_content)
     }
@@ -770,6 +885,10 @@ fn ensure_epub_cleaned_cache(
 
 /// 异步触发预加载（在泄漏的共享 Runtime 上提交任务，无新建线程/运行时）
 fn trigger_preload_async(book_id: String, current_chapter: usize) {
+    // M9.3 测试探针：级联打断回归测试用（仅测试构建）
+    #[cfg(test)]
+    PRELOAD_TRIGGER_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     let rt_handle = get_preload_runtime().handle.clone();
     rt_handle.spawn(async move {
         // 获取总章节数
@@ -801,8 +920,11 @@ fn trigger_preload_async(book_id: String, current_chapter: usize) {
                 book_id: book_id.clone(),
             };
 
-            if let Err(e) = executor.submit(task).await {
-                log::warn!("预加载任务提交失败: {}", e);
+            // M9.3：去重提交——同章已在队列/执行中时静默跳过，
+            // 防重复任务挤占队列与分页缓存
+            match executor.try_submit_dedup(task).await {
+                Ok(_) => {}
+                Err(e) => log::warn!("预加载任务提交失败: {}", e),
             }
         }
     });
@@ -1002,6 +1124,7 @@ pub fn get_page_processed(
     replace_rules: Vec<FfiReplaceRule>,
     anchor_char_offset: Option<usize>,
     page_fill_threshold: f32,
+    para_format_hash: u64,
 ) -> anyhow::Result<PageInfo> {
     // 1. 排版配置
     let config = LayoutConfig {
@@ -1017,7 +1140,7 @@ pub fn get_page_processed(
         },
         font_name,
         letter_spacing: 0.0,
-        paragraph_spacing: font_size * 0.8,
+        paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
     };
@@ -1031,6 +1154,7 @@ pub fn get_page_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        para_format_hash,
     )?;
     remember_txt_layout(
         &book_id,
@@ -1039,6 +1163,7 @@ pub fn get_page_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        para_format_hash,
     );
 
     // 3. 页面定位：优先锚点（进度保持），否则用请求页码
@@ -1073,6 +1198,7 @@ pub fn get_page_count_processed(
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
     replace_rules: Vec<FfiReplaceRule>,
     page_fill_threshold: f32,
+    para_format_hash: u64,
 ) -> anyhow::Result<usize> {
     // 1. 排版配置
     let config = LayoutConfig {
@@ -1088,7 +1214,7 @@ pub fn get_page_count_processed(
         },
         font_name,
         letter_spacing: 0.0,
-        paragraph_spacing: font_size * 0.8,
+        paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
     };
@@ -1102,6 +1228,7 @@ pub fn get_page_count_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        para_format_hash,
     )?;
     remember_txt_layout(
         &book_id,
@@ -1110,12 +1237,150 @@ pub fn get_page_count_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        para_format_hash,
     );
 
     Ok(pages.len())
 }
 
 // ===== 结构化阅读路径（EPUB 路线2 主入口） =====
+
+/// M9.1：EPUB 路径段落格式化（重新分段 + 用户缩进覆盖）
+///
+/// 在 IR 提取之后、blocks_to_layout_items 之前调用。D10 契约保持：
+/// 文本变换与 runs 区间重写同步发生（先例 = list_prefix 的 runs 平移），
+/// 变换后 runs 锚定在最终文本上，布局层零感知。
+///
+/// - 重新分段（用户钦定语义：超长段按标点切短）：
+///   M9.2 起切点策略下沉到共享切分器 paragraph_splitter（EPUB/TXT 双路径统一，
+///   Smart >200 字 / Aggressive >100 字；闭标吸附、省略号原子、有界回退）；
+///   None 不切。仅处理顶层普通段落（注释块/嵌套块不动）。
+/// - 缩进覆盖（用户设置优先）：开启 → 用设置值替换 CSS text-indent；
+///   关闭 → 压制书自带缩进（None）。
+fn apply_paragraph_format_settings(
+    blocks: &mut Vec<book_parser::ContentBlock>,
+    settings: &reader_core::ParagraphFormatSettings,
+) {
+    use book_parser::ContentBlock;
+
+    // 模式 → 切分阈值（字，用户可调）；None = 不切。
+    // split_ranges 循环保证：切口后的剩余文本作为新段落从头计数继续检测切分
+    let split_threshold = settings.effective_split_threshold();
+
+    let indent_override = if settings.enable_indent {
+        Some(settings.indent_size_chars as f32)
+    } else {
+        None
+    };
+
+    let mut out: Vec<ContentBlock> = Vec::with_capacity(blocks.len());
+    for block in blocks.drain(..) {
+        // 仅顶层普通段落参与切分；注释块不切分（仅缩进覆盖）；其余块透传
+        let is_normal_para =
+            matches!(&block, ContentBlock::Paragraph { is_comment: false, .. });
+        if !is_normal_para {
+            let mut b = block;
+            if let ContentBlock::Paragraph {
+                indent_first_line_em: ref mut f,
+                ..
+            } = b
+            {
+                *f = indent_override;
+            }
+            out.push(b);
+            continue;
+        }
+
+        let ContentBlock::Paragraph {
+            text,
+            align,
+            color,
+            font_scale,
+            runs,
+            anc,
+            is_comment: _,
+            indent_first_line_em: _,
+            spacing_after_em,
+        } = block
+        else {
+            unreachable!("is_normal_para 已判定为 Paragraph");
+        };
+
+        // P3：用户缩进覆盖（设置优先于 CSS 物化值）
+        let indent_first_line_em = indent_override;
+
+        // P2：超长段按强标点切短（runs 区间同步裁剪/平移）
+        let mut pieces: Vec<String> = Vec::new();
+        let mut piece_runs: Vec<Vec<book_parser::StyledRun>> = Vec::new();
+        if let Some(threshold) = split_threshold {
+            let total = text.chars().count();
+            if total > threshold {
+                // M9.2：切点策略在共享切分器（区间契约：升序无缝无叠、无空片、
+                // 闭标吸附、省略号原子），此处只做文本切片与 runs 裁剪（D10 同步重写）
+                let chars: Vec<char> = text.chars().collect();
+                for (s, e) in reader_core::split_ranges(&text, threshold) {
+                    pieces.push(chars[s..e].iter().collect());
+                    piece_runs.push(clip_runs(&runs, s, e));
+                }
+            }
+        }
+        if pieces.is_empty() {
+            out.push(ContentBlock::Paragraph {
+                text,
+                align,
+                color,
+                font_scale,
+                runs,
+                anc,
+                is_comment: false,
+                indent_first_line_em,
+                spacing_after_em,
+            });
+        } else {
+            // 切分后的段：全部保留原对齐（M9.2：居中段切后不再突变左对齐），
+            // 段后间距归属末段；余段视为新段落
+            let last = pieces.len() - 1;
+            for (i, piece) in pieces.into_iter().enumerate() {
+                out.push(ContentBlock::Paragraph {
+                    text: piece,
+                    align: align.clone(),
+                    color: color.clone(),
+                    font_scale,
+                    runs: std::mem::take(&mut piece_runs[i]),
+                    anc: anc.clone(),
+                    is_comment: false,
+                    indent_first_line_em,
+                    spacing_after_em: if i == last { spacing_after_em } else { None },
+                });
+            }
+        }
+    }
+    *blocks = out;
+}
+
+/// 裁剪 runs 至字符区间 [start, end) 并平移到新块坐标（D10 同步重写）
+fn clip_runs(
+    runs: &[book_parser::StyledRun],
+    start: usize,
+    end: usize,
+) -> Vec<book_parser::StyledRun> {
+    runs.iter()
+        .filter_map(|r| {
+            let s = r.start.max(start);
+            let e = r.end.min(end);
+            (e > s).then(|| book_parser::StyledRun {
+                start: s - start,
+                end: e - start,
+                color: r.color.clone(),
+                font_scale: r.font_scale,
+                bold: r.bold,
+                italic: r.italic,
+                underline: r.underline,
+                anc: r.anc.clone(),
+            })
+        })
+        .collect()
+}
 
 /// 把章节 IR 块流映射为布局输入项（嵌套结构前序展平）
 ///
@@ -1147,6 +1412,7 @@ fn blocks_to_layout_items_inner(
                 font_scale,
                 runs,
                 is_comment,
+                indent_first_line_em,
                 ..
             } => {
                 if text.trim().is_empty() {
@@ -1178,6 +1444,7 @@ fn blocks_to_layout_items_inner(
                     runs,
                     spacing_before_em: 0.0,
                     spacing_after_em: 0.0,
+                    indent_first_line_em: *indent_first_line_em,
                     is_comment: *is_comment,
                 }));
             }
@@ -1208,6 +1475,7 @@ fn blocks_to_layout_items_inner(
                     runs: Vec::new(),
                     spacing_before_em: space_before,
                     spacing_after_em: space_after,
+                    indent_first_line_em: None,
                     is_comment: false,
                 }));
             }
@@ -1281,6 +1549,7 @@ fn blocks_to_layout_items_inner(
                                             font_scale,
                                             runs,
                                             is_comment,
+                                            indent_first_line_em: _,
                                             ..
                                         } => {
                                             if text.trim().is_empty() {
@@ -1294,6 +1563,9 @@ fn blocks_to_layout_items_inner(
                                                 runs: runs.iter().map(map_run).collect(),
                                                 spacing_before_em: 0.0,
                                                 spacing_after_em: 0.0,
+                                                // M9.2 兜底：表格单元格不做散文首行缩进
+                                                // （解析层已递归清零，此处强制防御）
+                                                indent_first_line_em: None,
                                                 is_comment: *is_comment,
                                             })
                                         }
@@ -1315,6 +1587,7 @@ fn blocks_to_layout_items_inner(
                                                 runs: Vec::new(),
                                                 spacing_before_em: 0.0,
                                                 spacing_after_em: 0.0,
+                                                indent_first_line_em: None,
                                                 is_comment: false,
                                             })
                                         }
@@ -1372,8 +1645,9 @@ fn process_structured_chapter(
     config: &LayoutConfig,
     chinese_convert: u8,
     prefer_try_lock: bool,
+    para_format_hash: u64,
 ) -> anyhow::Result<Option<Arc<Vec<crate::PageInfo>>>> {
-    let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert);
+    let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert, para_format_hash);
 
     // M8-P4 缓存命中：Arc::clone 免整章克隆
     if let Some(arc_pages) = STRUCTURED_PAGINATION_CACHE
@@ -1413,6 +1687,16 @@ fn process_structured_chapter(
         .get_chapter_content_structured_ex(chapter_index, convert_mode, config.font_size)?;
     let background = content.background.clone();
     drop(books);
+
+    // M9.1：EPUB 段落格式化（超长段切短 + 用户缩进覆盖 CSS）。
+    // 设置经 para_format_hash 入缓存键——变更即换键重排，此处读全局即可。
+    let mut content = content;
+    {
+        let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+        if para_settings.needs_formatting() {
+            apply_paragraph_format_settings(&mut content.blocks, &para_settings);
+        }
+    }
 
     // IR → 布局项 → 分页（重活在锁外）
     let mut items = Vec::with_capacity(content.blocks.len());
@@ -1507,7 +1791,7 @@ fn structured_layout_config(
         },
         font_name,
         letter_spacing: 0.0,
-        paragraph_spacing: font_size * 0.8,
+        paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
     }
@@ -1536,6 +1820,7 @@ pub fn get_page_structured(
     chinese_convert: u8,
     page_fill_threshold: f32,
     show_comments: bool,
+    para_format_hash: u64,
 ) -> anyhow::Result<crate::PageInfo> {
     let config = structured_layout_config(
         width,
@@ -1551,7 +1836,7 @@ pub fn get_page_structured(
         show_comments,
     );
     let pages =
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false, para_format_hash)?
             .expect("前台结构化分页恒返回 Some");
 
     let effective = match anchor_char_offset {
@@ -1582,6 +1867,7 @@ pub fn get_page_count_structured(
     chinese_convert: u8,
     page_fill_threshold: f32,
     show_comments: bool,
+    para_format_hash: u64,
 ) -> anyhow::Result<usize> {
     let config = structured_layout_config(
         width,
@@ -1597,7 +1883,7 @@ pub fn get_page_count_structured(
         show_comments,
     );
     let pages =
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false)?
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false, para_format_hash)?
             .expect("前台结构化分页恒返回 Some");
     Ok(pages.len())
 }
@@ -1624,6 +1910,7 @@ pub fn prefetch_structured_chapter(
     chinese_convert: u8,
     page_fill_threshold: f32,
     show_comments: bool,
+    para_format_hash: u64,
 ) -> anyhow::Result<bool> {
     let config = structured_layout_config(
         width,
@@ -1638,12 +1925,12 @@ pub fn prefetch_structured_chapter(
         page_fill_threshold,
         show_comments,
     );
-    let cache_key = StructuredPageKey::new(&book_id, chapter_index, &config, chinese_convert);
+    let cache_key = StructuredPageKey::new(&book_id, chapter_index, &config, chinese_convert, para_format_hash);
     if STRUCTURED_PAGINATION_CACHE.lock().unwrap().contains(&cache_key) {
         return Ok(true);
     }
     Ok(
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, true)?
+        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, true, para_format_hash)?
             .is_some(),
     )
 }
@@ -1947,6 +2234,7 @@ pub fn get_page_cached(
         false,
         0,
         &[],
+        0,
     )?;
 
     pages
@@ -1997,6 +2285,7 @@ pub fn get_page_count_cached(
         false,
         0,
         &[],
+        0,
     )?;
 
     Ok(pages.len())
@@ -2062,19 +2351,19 @@ pub fn get_page_cached_processed(
         
         let font_manager = FONT_MANAGER.lock().unwrap().clone();
         let engine = LayoutEngine::new(config.clone(), font_manager);
-        let pages = engine.layout_text(&content, chapter_index)?;
-        
+        let pages = std::sync::Arc::new(engine.layout_text(&content, chapter_index)?);
+
         // 存入缓存
         let mut cache = PAGINATION_CACHE.lock().unwrap();
         cache.put(
             cache_key,
             CachedChapterPages {
-                pages: pages.clone(),
+                pages: std::sync::Arc::clone(&pages),
                 total_pages: pages.len(),
                 created_at: Instant::now(),
             },
         );
-        
+
         pages
     };
     
@@ -2615,6 +2904,16 @@ pub fn compare_raw_and_processed_content(
 // preload_chapter / get_preload_queue_depth / cancel_preload——
 // 相邻章预热由 get_chapter_content 尾部自动触发（trigger_preload_async）
 
+/// M9.3 测试探针：trigger_preload_async 调用计数（级联打断回归用）
+#[cfg(test)]
+static PRELOAD_TRIGGER_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// M9.3：串行化依赖全局单槽 LAST_TXT_LAYOUT_SNAPSHOT 的预热测试
+/// （cargo test 多线程并发会互相覆盖快照导致偶发断言失败）
+#[cfg(test)]
+static PRELOAD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2623,6 +2922,7 @@ mod tests {
     /// 旧实现只读原始文本即丢弃、对缓存零贡献；本测试锁定「预热→命中」语义
     #[test]
     fn preload_txt_warm_fills_pagination_cache() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
 
         let dir = std::env::temp_dir().join(format!("txt_preload_{}", std::process::id()));
@@ -2644,7 +2944,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9,
+            false, false, 0, Vec::new(), None, 0.9, 0,
         )
         .expect("ch0 前台读取失败");
 
@@ -2662,7 +2962,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9,
+            false, false, 0, Vec::new(), None, 0.9, 0,
         )
         .expect("ch1 前台读取失败");
         let hits_after = get_cache_statistics().unwrap().hits;
@@ -2672,5 +2972,387 @@ mod tests {
         assert!(!preload_txt_warm("nonexistent-book", 0).unwrap());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preload_txt_warm_does_not_retrigger_preload() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // M9.3 级联打断回归：预加载路径（allow_preload_trigger=false）回源
+        // miss 时严禁再触发 trigger_preload_async——否则自激级联推进到全书
+        // 末尾、冲刷 LRU，前台翻页退化为同步全章重排（卡顿根因 H1）
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+        let dir = std::env::temp_dir().join(format!("txt_cascade_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let txt_path = dir.join("cascade.txt");
+        let mut content = String::new();
+        for i in 1..=3 {
+            content.push_str(&format!("第{}章 测试\n\n第{i}章的正文内容，足够触发排版。\n\n", i));
+        }
+        std::fs::write(&txt_path, &content).unwrap();
+
+        let book_id =
+            parse_txt_file(txt_path.to_string_lossy().to_string(), None).expect("TXT 导入失败");
+
+        // 前台读 ch0 建立快照（此过程允许触发预热）
+        get_page_processed(
+            book_id.clone(),
+            0,
+            0,
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+            "TestFont".to_string(),
+            false, false, 0, Vec::new(), None, 0.9, 0,
+        )
+        .expect("ch0 前台读取失败");
+
+        // 等待前台读取引发的异步预热波平息
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // 归零探针前重建快照（防并发测试窗口覆盖），随后走预热路径
+        // （ch2 未读过 → 必然 miss 回源）
+        get_page_processed(
+            book_id.clone(),
+            0,
+            0,
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+            "TestFont".to_string(),
+            false, false, 0, Vec::new(), None, 0.9, 0,
+        )
+        .expect("ch0 快照重建失败");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        PRELOAD_TRIGGER_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            preload_txt_warm(&book_id, 2).expect("预热失败"),
+            "有快照时应执行预热"
+        );
+
+        // 若存在泄漏触发，会在此窗口内异步发生
+        std::thread::sleep(std::time::Duration::from_millis(400));
+
+        assert_eq!(
+            PRELOAD_TRIGGER_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "预加载路径回源不得再触发预热（级联打断失效）"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== M9.1：EPUB 段落格式化（切短 + 缩进覆盖） =====
+
+    use book_parser::ContentBlock;
+    use reader_core::{ParagraphFormatSettings, ReParagraphMode};
+
+    fn para(text: &str) -> ContentBlock {
+        ContentBlock::paragraph(text)
+    }
+
+    fn para_text(b: &ContentBlock) -> &str {
+        match b {
+            ContentBlock::Paragraph { text, .. } => text,
+            other => panic!("应为段落，实为 {:?}", other),
+        }
+    }
+
+    fn settings(mode: ReParagraphMode, indent: bool) -> ParagraphFormatSettings {
+        ParagraphFormatSettings {
+            enable_indent: indent,
+            indent_size_chars: 2,
+            paragraph_spacing_multiplier: 1.0,
+            re_paragraph_mode: mode,
+            smart_split_threshold: reader_core::SMART_THRESHOLD,
+            aggressive_split_threshold: reader_core::AGGRESSIVE_THRESHOLD,
+        }
+    }
+
+    /// 长文本：n 句，每句恰 11 字（10 汉字 + 句号）
+    fn long_text(sentences: usize) -> String {
+        "一二三四五六七八九十。".repeat(sentences)
+    }
+
+    #[test]
+    fn epub_split_smart_over_200_chars() {
+        // 28 句 = 308 字 > Smart 阈值 200（M9.2 统一）→ 应切分
+        let text = long_text(28);
+        assert_eq!(text.chars().count(), 308);
+        let mut blocks = vec![para(&text)];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Smart, false));
+
+        assert!(blocks.len() >= 2, "超长段应被切开，实得 {} 块", blocks.len());
+        // 拼接不变量：切分不丢字不重字
+        let joined: String = blocks.iter().map(|b| para_text(b)).collect();
+        assert_eq!(joined, text, "切分后拼接必须还原原文");
+        // 每块 ≤ 阈值上界（闭标吸附允许略超，但不得翻倍）
+        for b in &blocks {
+            assert!(
+                para_text(b).chars().count() <= 200 + 60,
+                "切分块过长: {}",
+                para_text(b).chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn epub_split_aggressive_lower_threshold() {
+        // 14 句 = 154 字：Smart(200) 不切、Aggressive(100) 切
+        let text = long_text(14);
+        assert_eq!(text.chars().count(), 154);
+        let mut smart = vec![para(&text)];
+        apply_paragraph_format_settings(&mut smart, &settings(ReParagraphMode::Smart, false));
+        assert_eq!(smart.len(), 1, "154 字不应触发 Smart 切分");
+
+        let mut agg = vec![para(&text)];
+        apply_paragraph_format_settings(&mut agg, &settings(ReParagraphMode::Aggressive, false));
+        assert!(agg.len() >= 2, "154 字应触发 Aggressive 切分");
+        let joined: String = agg.iter().map(|b| para_text(b)).collect();
+        assert_eq!(joined, text);
+    }
+
+    #[test]
+    fn epub_none_mode_no_split() {
+        let text = long_text(20); // 600 字
+        let mut blocks = vec![para(&text)];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false));
+        assert_eq!(blocks.len(), 1, "None 模式不切分");
+    }
+
+    #[test]
+    fn epub_indent_override_on_off() {
+        // 开：覆盖为 Some(2)（即使 CSS 已物化 3em 也被替换）
+        let mut b = ContentBlock::Paragraph {
+            text: "测试段落".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: Some(3.0),
+            spacing_after_em: None,
+        };
+        let mut blocks = vec![b];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true));
+        match &blocks[0] {
+            ContentBlock::Paragraph {
+                indent_first_line_em, ..
+            } => assert_eq!(*indent_first_line_em, Some(2.0), "用户设置应覆盖 CSS 值"),
+            _ => unreachable!(),
+        }
+
+        // 关：压制书自带缩进 → None
+        b = ContentBlock::Paragraph {
+            text: "测试段落".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: Some(3.0),
+            spacing_after_em: None,
+        };
+        let mut blocks = vec![b];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false));
+        match &blocks[0] {
+            ContentBlock::Paragraph {
+                indent_first_line_em, ..
+            } => assert_eq!(*indent_first_line_em, None, "关闭缩进应压制 CSS 值"),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn epub_comment_block_not_split() {
+        // 注释块即使超长也不切分（仅缩进覆盖）
+        let text = long_text(20);
+        let mut b = ContentBlock::Paragraph {
+            text,
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: true,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        if let ContentBlock::Paragraph {
+            indent_first_line_em: ref mut f,
+            ..
+        } = b
+        {
+            *f = None;
+        }
+        let mut blocks = vec![b];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, true));
+        assert_eq!(blocks.len(), 1, "注释块不切分");
+        match &blocks[0] {
+            ContentBlock::Paragraph {
+                is_comment,
+                indent_first_line_em,
+                ..
+            } => {
+                assert!(*is_comment, "注释标记保持");
+                assert_eq!(*indent_first_line_em, Some(2.0), "注释块缩进照常覆盖");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn epub_split_runs_clip_and_shift() {
+        // 20 句 = 220 字，runs 覆盖 [10,150)；Aggressive(100) 切分
+        let text = long_text(20);
+        assert_eq!(text.chars().count(), 220);
+        let runs = vec![book_parser::StyledRun {
+            start: 10,
+            end: 150,
+            color: Some("#ff0000".into()),
+            font_scale: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            anc: None,
+        }];
+        let mut blocks = vec![ContentBlock::Paragraph {
+            text,
+            align: None,
+            color: None,
+            font_scale: None,
+            runs,
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        }];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, false));
+        assert!(blocks.len() >= 2);
+
+        // runs 区间必须落在各块文本范围内（锚定自洽）
+        for b in &blocks {
+            let (t, rs) = match b {
+                ContentBlock::Paragraph { text, runs, .. } => (text, runs),
+                _ => unreachable!(),
+            };
+            let len = t.chars().count();
+            for r in rs {
+                assert!(r.start <= len && r.end <= len, "run 越界: [{},{}] > {}", r.start, r.end, len);
+            }
+        }
+        // 全局覆盖不变量：所有块 runs 的原坐标拼接后仍覆盖 [10,150)
+        let mut covered: Vec<(usize, usize)> = Vec::new();
+        let mut offset = 0usize;
+        for b in &blocks {
+            if let ContentBlock::Paragraph { text, runs, .. } = b {
+                for r in runs {
+                    covered.push((offset + r.start, offset + r.end));
+                }
+                offset += text.chars().count();
+            }
+        }
+        covered.sort();
+        let merged_start = covered.first().map(|c| c.0).unwrap_or(0);
+        let merged_end = covered.last().map(|c| c.1).unwrap_or(0);
+        assert_eq!(merged_start, 10, "runs 起点应保持");
+        assert_eq!(merged_end, 150, "runs 终点应保持（裁剪不丢样式区段）");
+    }
+
+    #[test]
+    fn epub_split_preserves_align_and_glues_closer() {
+        // M9.2：居中长段切分后所有子段保留 align（回归：旧实现仅首段保留）；
+        // 闭引号 ” 吸附在前片尾部，不得悬到后一段段首
+        let mut text = "他说完了。".repeat(30); // 150 字
+        text.push('\u{201C}');
+        text.push_str(&"继续讲述。".repeat(20)); // +100 字，含开引号共 251 字
+        assert_eq!(text.chars().count(), 251);
+        let original = text.clone();
+
+        let mut blocks = vec![ContentBlock::Paragraph {
+            text,
+            align: Some(book_parser::Align::Center),
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        }];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Smart, false));
+        // 注：末片 55 字 ≥ 20%·阈值，不会触发尾段再平衡合并
+        assert!(blocks.len() >= 2, "251 字应被切开");
+        for (i, b) in blocks.iter().enumerate() {
+            match b {
+                ContentBlock::Paragraph { align, text, .. } => {
+                    assert_eq!(*align, Some(book_parser::Align::Center),
+                        "子段 {} 应保留居中对齐", i);
+                    if i > 0 {
+                        let first = text.chars().next();
+                        assert_ne!(first, Some('\u{201D}'), "子段 {} 不得以闭引号开头", i);
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        // 拼接不变量：切分不丢字不重字
+        let joined: String = blocks.iter().map(|b| para_text(b)).collect();
+        assert_eq!(joined, original);
+    }
+
+    #[test]
+    fn table_cell_indent_forced_none_in_layout_items() {
+        // M9.2 兜底层：单元格内段落即使携带 CSS 物化缩进，转 TextItem 时强制 None
+        let cell_para = ContentBlock::Paragraph {
+            text: "卷首信息".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: Some(2.0),
+            spacing_after_em: None,
+        };
+        let table = ContentBlock::Table {
+            caption: None,
+            rows: vec![vec![book_parser::TableCell {
+                header: false,
+                blocks: vec![cell_para],
+                anc: None,
+                width_em: None,
+            }]],
+            anc: None,
+            margin_top_percent: None,
+            margin_left_auto: false,
+        };
+        // 对照组：顶层段落缩进应原样透传
+        let top_para = ContentBlock::paragraph("正文段落");
+        let mut items: Vec<layout_engine::LayoutItem> = Vec::new();
+        blocks_to_layout_items(&[table, top_para], &mut items);
+
+        let mut saw_cell_text = false;
+        let mut saw_top_indent: Option<Option<f32>> = None;
+        for item in &items {
+            if let layout_engine::LayoutItem::Table(t) = item {
+                for row in &t.rows {
+                    for cell in row {
+                        for ti in &cell.items {
+                            assert_eq!(
+                                ti.indent_first_line_em, None,
+                                "单元格 TextItem 缩进必须为 None"
+                            );
+                            saw_cell_text = true;
+                        }
+                    }
+                }
+            }
+            if let layout_engine::LayoutItem::Text(ti) = item {
+                if ti.text == "正文段落" {
+                    saw_top_indent = Some(ti.indent_first_line_em);
+                }
+            }
+        }
+        assert!(saw_cell_text, "应产出表格条目");
+        assert_eq!(saw_top_indent, Some(None), "顶层无 CSS 缩进段落透传 None");
     }
 }

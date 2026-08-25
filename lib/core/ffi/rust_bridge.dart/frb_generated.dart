@@ -61,7 +61,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1767164213;
+  int get rustContentHash => 391291883;
 
   static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
     stem: 'bridge',
@@ -251,6 +251,7 @@ abstract class RustLibApi extends BaseApi {
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
     required double pageFillThreshold,
+    required BigInt paraFormatHash,
   });
 
   Future<BigInt> crateApiGetPageCountStructured({
@@ -268,6 +269,7 @@ abstract class RustLibApi extends BaseApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   });
 
   Future<PageInfo> crateApiGetPageProcessed({
@@ -289,6 +291,7 @@ abstract class RustLibApi extends BaseApi {
     required List<FfiReplaceRule> replaceRules,
     BigInt? anchorCharOffset,
     required double pageFillThreshold,
+    required BigInt paraFormatHash,
   });
 
   Future<PageInfo> crateApiGetPageStructured({
@@ -308,6 +311,7 @@ abstract class RustLibApi extends BaseApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   });
 
   Future<String> crateApiGetPaginationCacheStats();
@@ -377,6 +381,7 @@ abstract class RustLibApi extends BaseApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   });
 
   Future<String> crateApiProcessChapterContent({
@@ -394,6 +399,15 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSetBookSourceEnabled({required String sourceUrl, required bool enabled});
 
   Future<void> crateApiSetContentCleaningOptions({required ContentCleaningOptions options});
+
+  Future<void> crateApiSetParagraphFormatSettings({
+    required bool enableIndent,
+    required int indentSizeChars,
+    required double paragraphSpacingMultiplier,
+    required int reParagraphMode,
+    required int smartSplitThreshold,
+    required int aggressiveSplitThreshold,
+  });
 
   Future<void> crateApiUpdateBookCleaning({required String bookId, required ContentCleaningOptions options});
 }
@@ -1510,6 +1524,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
     required double pageFillThreshold,
+    required BigInt paraFormatHash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1531,6 +1546,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
+          sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1552,6 +1568,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           chineseConvert,
           replaceRules,
           pageFillThreshold,
+          paraFormatHash,
         ],
         apiImpl: this,
       ),
@@ -1577,6 +1594,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "chineseConvert",
       "replaceRules",
       "pageFillThreshold",
+      "paraFormatHash",
     ],
   );
 
@@ -1596,6 +1614,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1615,6 +1634,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
+          sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1634,6 +1654,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           chineseConvert,
           pageFillThreshold,
           showComments,
+          paraFormatHash,
         ],
         apiImpl: this,
       ),
@@ -1657,6 +1678,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "chineseConvert",
       "pageFillThreshold",
       "showComments",
+      "paraFormatHash",
     ],
   );
 
@@ -1680,6 +1702,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required List<FfiReplaceRule> replaceRules,
     BigInt? anchorCharOffset,
     required double pageFillThreshold,
+    required BigInt paraFormatHash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1703,6 +1726,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           sse_encode_opt_box_autoadd_usize(anchorCharOffset, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
+          sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1726,6 +1750,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           replaceRules,
           anchorCharOffset,
           pageFillThreshold,
+          paraFormatHash,
         ],
         apiImpl: this,
       ),
@@ -1753,6 +1778,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "replaceRules",
       "anchorCharOffset",
       "pageFillThreshold",
+      "paraFormatHash",
     ],
   );
 
@@ -1774,6 +1800,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1795,6 +1822,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
+          sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 43, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -1816,6 +1844,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           chineseConvert,
           pageFillThreshold,
           showComments,
+          paraFormatHash,
         ],
         apiImpl: this,
       ),
@@ -1841,6 +1870,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "chineseConvert",
       "pageFillThreshold",
       "showComments",
+      "paraFormatHash",
     ],
   );
 
@@ -2243,6 +2273,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int chineseConvert,
     required double pageFillThreshold,
     required bool showComments,
+    required BigInt paraFormatHash,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2262,6 +2293,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
+          sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_bool, decodeErrorData: sse_decode_AnyhowException),
@@ -2281,6 +2313,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           chineseConvert,
           pageFillThreshold,
           showComments,
+          paraFormatHash,
         ],
         apiImpl: this,
       ),
@@ -2304,6 +2337,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "chineseConvert",
       "pageFillThreshold",
       "showComments",
+      "paraFormatHash",
     ],
   );
 
@@ -2437,6 +2471,54 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_content_cleaning_options", argNames: ["options"]);
 
   @override
+  Future<void> crateApiSetParagraphFormatSettings({
+    required bool enableIndent,
+    required int indentSizeChars,
+    required double paragraphSpacingMultiplier,
+    required int reParagraphMode,
+    required int smartSplitThreshold,
+    required int aggressiveSplitThreshold,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(enableIndent, serializer);
+          sse_encode_u_8(indentSizeChars, serializer);
+          sse_encode_f_32(paragraphSpacingMultiplier, serializer);
+          sse_encode_u_8(reParagraphMode, serializer);
+          sse_encode_u_32(smartSplitThreshold, serializer);
+          sse_encode_u_32(aggressiveSplitThreshold, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 67, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiSetParagraphFormatSettingsConstMeta,
+        argValues: [
+          enableIndent,
+          indentSizeChars,
+          paragraphSpacingMultiplier,
+          reParagraphMode,
+          smartSplitThreshold,
+          aggressiveSplitThreshold,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSetParagraphFormatSettingsConstMeta => const TaskConstMeta(
+    debugName: "set_paragraph_format_settings",
+    argNames: [
+      "enableIndent",
+      "indentSizeChars",
+      "paragraphSpacingMultiplier",
+      "reParagraphMode",
+      "smartSplitThreshold",
+      "aggressiveSplitThreshold",
+    ],
+  );
+
+  @override
   Future<void> crateApiUpdateBookCleaning({required String bookId, required ContentCleaningOptions options}) {
     return handler.executeNormal(
       NormalTask(
@@ -2444,7 +2526,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(bookId, serializer);
           sse_encode_box_autoadd_content_cleaning_options(options, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 67, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 68, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiUpdateBookCleaningConstMeta,
@@ -2781,6 +2863,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       italic: dco_decode_bool(arr[5]),
       underline: dco_decode_bool(arr[6]),
     );
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -3251,6 +3339,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
+  }
+
+  @protected
   BigInt sse_decode_u_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getBigUint64();
@@ -3596,6 +3690,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.bold, serializer);
     sse_encode_bool(self.italic, serializer);
     sse_encode_bool(self.underline, serializer);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected

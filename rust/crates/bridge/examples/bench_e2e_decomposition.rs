@@ -3,16 +3,21 @@
 //! 运行：cargo run --release -p bridge --features js-engine \
 //!       --example bench_e2e_decomposition
 //!
-//! 三段计时（与热路径 process_and_layout_chapter 同构）：
+//! 四段计时（与热路径 process_and_layout_chapter 同构）：
 //!   ① 取章节内容（get_chapter_content，含净化缓存命中）
 //!   ② JS 预处理（ContentPreprocessor::process，空规则集）
+//!   ②.5 段落格式化（ParagraphFormatter::format，M9.3 补盲——生产热路径
+//!       在预处理与排版之间执行此阶段，此前基准完全未覆盖）
 //!   ③ 排版分页（LayoutEngine::layout_text）
 
 use std::time::Instant;
 
 use bridge::api;
 use layout_engine::{EdgeInsets, LayoutEngine, LayoutConfig};
-use reader_core::{ChineseConvertType, ContentPreprocessor, ProcessOptions};
+use reader_core::{
+    ChineseConvertType, ContentPreprocessor, ParagraphFormatSettings, ParagraphFormatter,
+    ProcessOptions, ReParagraphMode,
+};
 
 const ROUNDS: usize = 20;
 
@@ -73,7 +78,17 @@ fn main() -> anyhow::Result<()> {
 
     let mut t_fetch = Vec::with_capacity(ROUNDS);
     let mut t_pre = Vec::with_capacity(ROUNDS);
+    let mut t_format = Vec::with_capacity(ROUNDS);
     let mut t_layout = Vec::with_capacity(ROUNDS);
+    // 与生产默认设置同参（Smart+缩进开），确保 formatter 不走 fast path
+    let para_settings = ParagraphFormatSettings {
+        enable_indent: true,
+        indent_size_chars: 2,
+        paragraph_spacing_multiplier: 1.0,
+        re_paragraph_mode: ReParagraphMode::Smart,
+        ..Default::default()
+    };
+    let formatter = ParagraphFormatter::new(para_settings);
     for _ in 0..ROUNDS {
         let t0 = Instant::now();
         let content = api::get_chapter_content(book_id.clone(), chapter)?;
@@ -82,6 +97,10 @@ fn main() -> anyhow::Result<()> {
         let t0 = Instant::now();
         let processed = rt.block_on(pre.process(&content, &options))?;
         t_pre.push(t0.elapsed().as_secs_f64() * 1000.0);
+
+        let t0 = Instant::now();
+        let processed = formatter.format(&processed);
+        t_format.push(t0.elapsed().as_secs_f64() * 1000.0);
 
         let t0 = Instant::now();
         let pages = engine.layout_text(&processed, chapter)?;
@@ -98,6 +117,7 @@ fn main() -> anyhow::Result<()> {
     for (name, v) in [
         ("① 取章节内容", &t_fetch),
         ("② JS 预处理(简繁+去重标题)", &t_pre),
+        ("②.5 段落格式化(Smart+缩进)", &t_format),
         ("③ 排版分页", &t_layout),
     ] {
         println!(
@@ -108,12 +128,13 @@ fn main() -> anyhow::Result<()> {
             v.iter().cloned().fold(0.0, f64::max)
         );
     }
-    let total = avg(&t_fetch) + avg(&t_pre) + avg(&t_layout);
+    let total = avg(&t_fetch) + avg(&t_pre) + avg(&t_format) + avg(&t_layout);
     println!("{:<28} {:>8.3}ms", "合计(avg)", total);
     println!(
-        "\n占比: 取内容 {:.0}% | JS 预处理 {:.0}% | 排版 {:.0}%",
+        "\n占比: 取内容 {:.0}% | JS 预处理 {:.0}% | 段落格式化 {:.0}% | 排版 {:.0}%",
         avg(&t_fetch) / total * 100.0,
         avg(&t_pre) / total * 100.0,
+        avg(&t_format) / total * 100.0,
         avg(&t_layout) / total * 100.0
     );
 

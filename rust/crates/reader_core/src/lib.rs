@@ -27,6 +27,10 @@ pub use processing::{
     ChineseConverter, ConvertMode,
     ProcessingPipeline, PipelineConfig, PipelineData,
     ContentCleaner,
+    ParagraphFormatSettings, ReParagraphMode,
+    ParagraphFormatter,
+    split_pieces, split_ranges,
+    AGGRESSIVE_THRESHOLD, SMART_THRESHOLD,
 };
 
 pub use scheduler::{

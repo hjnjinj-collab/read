@@ -16,6 +16,7 @@ use book_parser::{
 };
 use layout_engine::{EdgeInsets, FontManager, LayoutConfig, LayoutEngine};
 use reader_core::content_preprocessor::{ContentPreprocessor, ProcessOptions};
+use reader_core::processing::{ParagraphFormatSettings, ParagraphFormatter, ReParagraphMode};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -203,6 +204,24 @@ fn main() -> anyhow::Result<()> {
         anyhow::Ok::<(String, Vec<(Duration, Duration)>)>((out, times))
     })?;
     print_report(&report("4. 内容预处理 x10", &prep_samples));
+
+    // ── 4b. 段落格式化 ×10（M9.3 补盲：热路径在预处理与排版之间）──
+    let formatter = ParagraphFormatter::new(ParagraphFormatSettings {
+        enable_indent: true,
+        indent_size_chars: 2,
+        paragraph_spacing_multiplier: 1.0,
+        re_paragraph_mode: ReParagraphMode::Smart,
+        ..Default::default()
+    });
+    let mut format_samples = Vec::new();
+    for _ in 0..10 {
+        let (_, m) = measure(|| {
+            let out = formatter.format(&processed);
+            assert!(!out.is_empty());
+        });
+        format_samples.push(m);
+    }
+    print_report(&report("4b. 段落格式化 x10 (Smart+缩进)", &format_samples));
 
     // ── 5. 排版分页 ×10 ──
     let mut font_manager = FontManager::new();

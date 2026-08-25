@@ -365,6 +365,57 @@ cargo run --release -p bridge --features js-engine --example bench_e2e_decomposi
   (aside/footnote/CSS小字号)→本章说灰字小行(is_comment 通路到 Dart)，开关
   切换锚点恒定；跨章共享 GlyphCache + Arc<Vec<PageInfo>> 单页克隆 +
   双锁合并 + Dart 页数缓存
+- **A15** **段落格式化与留白优化**（M9）：
+  *本章说检测修正*：CSS 兜底门槛收紧 0.85→0.75 + 字数 200→150 + 三重验证
+  （祖先链/类名/孤立块），消除《剑来》假阳性；
+  *底部留白智能优化*：场景 B（低填充率 <50% 长段落首行强制留当前页）+
+  场景 C（标题孤立避免——剩余空间 <标题行+2 正文行时标题推下页）；
+  *段落格式化*：ParagraphFormatter（纯 Rust，Smart/Aggressive/None 三模式）
+  在 ContentPreprocessor 后、Layout 前执行；首行缩进通过 TextItem
+  .indent_first_line_em（em 倍数）→ layout_styled_paragraph 首行减宽 +
+  layout_items 首行 x 偏移；EPUB CSS text-indent 由 resolved_text_indent 解析；
+  设置经 para_format_hash 纳入 CacheKey + StructuredPageKey，全局
+  set_paragraph_format_settings FFI 同步。
+  **M9.1 补充**：①断行禁则回退 flush 后必须清空 pieces 已发射前缀再保留
+  pulled（否则下一行重复发射整个前缀——超宽行被 Dart 缩字兜底渲染成"小字行"，
+  EPUB styled 与 TXT 双路径同源，回归测试 kinsoku_pullback_no_text_duplication）；
+  ②EPUB 路径段落格式化接入点 = process_structured_chapter 内 IR 提取后、
+  blocks_to_layout_items 前的 apply_paragraph_format_settings（超长段按强标点
+  切短 + 用户缩进覆盖 CSS，runs 区间经 clip_runs 同步裁剪/平移保持 D10 锚定
+  契约，先例 list_prefix）
+  **M9.2 补充**：③共享超长段切分器 paragraph_splitter.rs（区间契约纯函数库，
+  reader_core 不依赖 book_parser；EPUB/TXT 双路径统一，阈值 Smart/Aggressive
+  **用户可调**，默认 200/100 字，经 ParagraphFormatSettings::effective_split_threshold
+  解析、FFI setter 钳制 [20,2000]、参与 para_format_hash）：
+  强标点纯 CJK 集（ASCII 句读降级次级防"3.14"误切）、
+  次级标点有界回退（≤2×threshold，杜绝全文无上界扫描）、闭标吸附（”永不落
+  段首）、省略号原子（切口不落 …… 中间）、空尾段修复、尾段再平衡（<20%·阈值
+  且合并 ≤1.2× 才并入）；**切口后剩余内容作为新段落从头计数继续检测切分**
+  （split_ranges while 循环每轮以上一切口为新起点重建窗口）；
+  TXT 三阶段顺序铁律：合并→切分→缩进注入（切分必须在
+  缩进前，否则全角空格计入阈值且子段无法独立注入）；④表格单元格禁散文缩进：
+  解析层 clear_cell_indent 递归清零 + 转换层强制 None（text-indent 渗入单元格
+  会呈现"首行提前换行但不右移"破碎形态；List/Quote 内段落属合法缩进保留）；
+  ⑤TXT 行级分页：layout_text 删除 fill≥threshold 整段推页决策，改为算剩余
+  空间可容行数→放得下的行留下→余量推下页，仅孤行(<2行)/寡行(下页单行)轻
+  保护；page_fill_threshold 在 TXT 路径不再消费（EPUB layout_items 仍用）；
+  paragraph_spacing_multiplier 经 effective_paragraph_spacing 在三个活跃 FFI
+  配置构造点消费；Dart provider 构造期即计算默认哈希与 Rust 全局默认对齐；
+  切分阈值用户可调（ParagraphFormatSettings 字段 + FFI setter 钳制 [20,2000] +
+  设置面板滑杆 + 入 para_format_hash）
+- **A16** **TXT 翻页性能与预加载治理**（M9.3）：
+  *级联教训*：预热"真重排"路径必须与预热触发路径解耦——process_and_layout_chapter
+  拆 inner(allow_preload_trigger) 变体，get_chapter_content 拆 impl(trigger)+quiet，
+  preload_txt_warm 只走 false 支路；否则 warm→miss→trigger→warm 自激推进全书、
+  冲刷 10 章 LRU，前台翻页退化为同步全章重排；DefaultPreloadStrategy 收敛为
+  [N±1]（±2 Low 取消）；PreloadExecutor.try_submit_dedup 以 (book_id, chapter)
+  在途去重、worker 终态回收键；**oneshot sender drop 即使不发送也会唤醒 receiver**
+  ——fire-and-forget 丢弃 PreloadHandle 会误发取消信号，try_submit_dedup 内联
+  等待终态规避；*命中零克隆*：CachedChapterPages.pages 包 Arc<Vec<Page>>
+  （对齐 EPUB Arc<Vec<PageInfo>> 先例），inner 返回 Arc 引用计数交付；
+  *正则静态化*：is_chapter_marker / protect_html_tags 的现场 Regex::new 改
+  OnceLock 进程级单次编译（前者每章数千次编译是重排单价放大器）；
+  bench_e2e_decomposition 增设「②.5 段落格式化」计时段补齐基准盲区
 
 ### 10.3 工程硬约束（违反即出 Bug）
 

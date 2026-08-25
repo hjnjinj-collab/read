@@ -140,6 +140,9 @@ pub struct PreloadExecutor {
     stats: Arc<PreloadStats>,
     /// 是否已关闭
     is_shutdown: Arc<AtomicBool>,
+    /// M9.3 提交去重：queued + in-flight 的 (book_id, chapter_index)。
+    /// 提交时 insert 失败即跳过；worker 任务终态（成功/失败/超时/取消）回收键
+    inflight_keys: Arc<std::sync::Mutex<std::collections::HashSet<(String, usize)>>>,
 }
 
 impl PreloadExecutor {
@@ -168,6 +171,8 @@ impl PreloadExecutor {
         let stats = Arc::new(PreloadStats::default());
         let is_shutdown = Arc::new(AtomicBool::new(false));
         let shared_rx = Arc::new(Mutex::new(task_rx));
+        let inflight_keys: Arc<std::sync::Mutex<std::collections::HashSet<(String, usize)>>> =
+            Arc::new(std::sync::Mutex::new(Default::default()));
 
         // 启动 worker 线程
         let worker_count = config.worker_count;
@@ -176,10 +181,19 @@ impl PreloadExecutor {
             let load_fn = load_fn.clone();
             let stats = stats.clone();
             let is_shutdown = is_shutdown.clone();
+            let inflight_keys = inflight_keys.clone();
             let timeout = Duration::from_millis(config.task_timeout_ms);
 
             tokio::spawn(async move {
-                Self::worker_loop_with_book_id(shared_rx, load_fn, stats, is_shutdown, timeout).await;
+                Self::worker_loop_with_book_id(
+                    shared_rx,
+                    load_fn,
+                    stats,
+                    is_shutdown,
+                    timeout,
+                    inflight_keys,
+                )
+                .await;
             });
         }
 
@@ -189,16 +203,19 @@ impl PreloadExecutor {
             running_tasks: Arc::new(Mutex::new(HashMap::new())),
             stats,
             is_shutdown,
+            inflight_keys,
         }
     }
 
     /// Worker 线程循环（支持 book_id）
+    #[allow(clippy::too_many_arguments)]
     async fn worker_loop_with_book_id<F>(
         shared_rx: SharedReceiver,
         load_fn: Arc<F>,
         stats: Arc<PreloadStats>,
         is_shutdown: Arc<AtomicBool>,
         timeout: Duration,
+        inflight_keys: Arc<std::sync::Mutex<std::collections::HashSet<(String, usize)>>>,
     ) where
         F: Fn(&str, usize) -> Result<String> + Send + Sync + 'static,
     {
@@ -289,6 +306,13 @@ impl PreloadExecutor {
                         stats.completed_tasks.fetch_add(1, Ordering::Relaxed);
                     }
 
+                    // M9.3：任务终态（成功/失败/超时/取消全路径）回收去重键，
+                    // 允许后续对同一章节重新提交
+                    inflight_keys
+                        .lock()
+                        .unwrap()
+                        .remove(&(book_id.clone(), chapter_index));
+
                     let _ = result_tx.send(result);
                 }
                 None => {
@@ -296,6 +320,36 @@ impl PreloadExecutor {
                     break;
                 }
             }
+        }
+    }
+
+    /// 提交预加载任务（queued/in-flight 去重，内联等待终态）
+    ///
+    /// M9.3：同一 (book_id, chapter_index) 在队列中或执行中时返回 Ok(false)。
+    /// 成功入队后**等待任务完成**才返回——句柄存活至终态，避免 Drop 的取消
+    /// 信号误杀任务（oneshot sender drop 即使不发送也会唤醒 receiver，
+    /// "发射后不管"式丢弃句柄会让 select! 高概率走取消分支）。
+    /// 生产入口（trigger_preload_async）本就在后台 spawned 任务中调用，
+    /// 内联等待不阻塞前台。
+    pub async fn try_submit_dedup(&self, task: PreloadTask) -> Result<bool> {
+        let key = (task.book_id.clone(), task.chapter_index);
+        // 锁内不 await：先占键再入队
+        if !self.inflight_keys.lock().unwrap().insert(key.clone()) {
+            return Ok(false);
+        }
+        let wait_result = match self.submit(task).await {
+            Ok(handle) => handle.wait().await,
+            Err(e) => {
+                // 入队失败（队列满/已关闭）：回滚键，避免永久卡死该章节重试
+                self.inflight_keys.lock().unwrap().remove(&key);
+                return Err(e);
+            }
+        };
+        // 终态回收去重键（worker 侧已回收，此处幂等兜底）
+        self.inflight_keys.lock().unwrap().remove(&key);
+        match wait_result {
+            Ok(result) => Ok(result.success),
+            Err(_) => Err(anyhow::anyhow!("预加载任务被取消或执行器已关闭")),
         }
     }
 
@@ -524,6 +578,48 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.chapter_index, 3);
+
+        executor.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn test_submit_dedup_and_key_release() {
+        // M9.3：queued/in-flight 去重 + 任务终态回收键
+        let executor = PreloadExecutor::new_with_book_id(
+            PreloadExecutorConfig {
+                worker_count: 1,
+                task_timeout_ms: 2000,
+                ..Default::default()
+            },
+            |_book, _idx| {
+                std::thread::sleep(Duration::from_millis(80));
+                Ok("ok".to_string())
+            },
+        );
+
+        let mk = || PreloadTask {
+            chapter_index: 3,
+            priority: PreloadPriority::High,
+            book_id: "b".to_string(),
+        };
+
+        // 并发提交同键：恰有一个真正执行，另一个被在途去重跳过
+        let (r1, r2) = tokio::join!(
+            executor.try_submit_dedup(mk()),
+            executor.try_submit_dedup(mk())
+        );
+        let results = [r1.unwrap(), r2.unwrap()];
+        assert_eq!(
+            results.iter().filter(|&&ok| ok).count(),
+            1,
+            "并发同键提交应恰有一个执行、一个去重"
+        );
+
+        // 任务终态后键已回收：同章可重新提交
+        assert!(
+            executor.try_submit_dedup(mk()).await.unwrap(),
+            "终态后同章应可重新提交"
+        );
 
         executor.shutdown().await;
     }

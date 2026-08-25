@@ -226,6 +226,7 @@ class BookService {
     List<ReplaceRuleItem> replaceRules = const [],
     int? anchorCharOffset,
     double pageFillThreshold = 0.9,
+    BigInt? paraFormatHash,
   }) async {
     final rustPage = await rust_api.getPageProcessed(
       bookId: bookId,
@@ -253,6 +254,7 @@ class BookService {
           ? null
           : BigInt.from(anchorCharOffset),
       pageFillThreshold: pageFillThreshold,
+      paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
 
     return _mapPage(rustPage);
@@ -276,6 +278,7 @@ class BookService {
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
     double pageFillThreshold = 0.9,
+    BigInt? paraFormatHash,
   }) async {
     final count = await rust_api.getPageCountProcessed(
       bookId: bookId,
@@ -299,6 +302,7 @@ class BookService {
         enabled: r.enabled,
       )).toList(),
       pageFillThreshold: pageFillThreshold,
+      paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
 
     return count.toInt();
@@ -376,6 +380,7 @@ class BookService {
     int chineseConvert = 0,
     double pageFillThreshold = 0.9,
     bool showComments = true,
+    BigInt? paraFormatHash,
   }) async {
     final rustPage = await rust_api.getPageStructured(
       bookId: bookId,
@@ -395,6 +400,7 @@ class BookService {
       chineseConvert: chineseConvert,
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
+      paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
     return _mapPage(rustPage);
   }
@@ -415,6 +421,7 @@ class BookService {
     int chineseConvert = 0,
     double pageFillThreshold = 0.9,
     bool showComments = true,
+    BigInt? paraFormatHash,
   }) async {
     final count = await rust_api.getPageCountStructured(
       bookId: bookId,
@@ -431,6 +438,7 @@ class BookService {
       chineseConvert: chineseConvert,
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
+      paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
     return count.toInt();
   }
@@ -455,6 +463,7 @@ class BookService {
     int chineseConvert = 0,
     double pageFillThreshold = 0.9,
     bool showComments = true,
+    BigInt? paraFormatHash,
   }) async {
     return await rust_api.prefetchStructuredChapter(
       bookId: bookId,
@@ -471,6 +480,7 @@ class BookService {
       chineseConvert: chineseConvert,
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
+      paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
   }
 
@@ -508,6 +518,28 @@ class BookService {
   /// Clear content cleaning options (清除内容净化选项)
   Future<void> clearContentCleaningOptions() async {
     await rust_api.clearContentCleaningOptions();
+  }
+
+  /// M9-P4：设置全局段落格式化参数（缩进/段间距/重新分段/切分阈值）
+  ///
+  /// Dart 侧调用：用户在设置 UI 修改段落格式时通过此方法同步 Rust 全局
+  /// 设置，随后 FFI 分页调用自动应用。配合 paraFormatHash 作为缓存键。
+  Future<void> setParagraphFormatSettings({
+    required bool enableIndent,
+    required int indentSizeChars,
+    required double paragraphSpacingMultiplier,
+    required int reParagraphMode,
+    required int smartSplitThreshold,
+    required int aggressiveSplitThreshold,
+  }) async {
+    await rust_api.setParagraphFormatSettings(
+      enableIndent: enableIndent,
+      indentSizeChars: indentSizeChars,
+      paragraphSpacingMultiplier: paragraphSpacingMultiplier,
+      reParagraphMode: reParagraphMode,
+      smartSplitThreshold: smartSplitThreshold,
+      aggressiveSplitThreshold: aggressiveSplitThreshold,
+    );
   }
 
   /// Get default content cleaning options (获取默认净化选项)

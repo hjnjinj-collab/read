@@ -12,16 +12,14 @@ class ReaderSettingsDialog extends ConsumerStatefulWidget {
 
 class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _removeDuplicateTitle = true;
-  bool _reSegment = false;
   ChineseConvertType _chineseConvert = ChineseConvertType.none;
   final List<ReplaceRuleItem> _replaceRules = [];
   final TextEditingController _patternController = TextEditingController();
   final TextEditingController _replacementController = TextEditingController();
-  
+
   // Content cleaning settings
   bool _removeHtmlTags = true;
   bool _removeAds = true;
-  bool _smartParagraph = true;
 
   // 字形样式开关
   bool _boldEnabled = true;
@@ -33,6 +31,15 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   // 本章说显示开关
   bool _showComments = true;
 
+  // M9-P4：段落格式设置
+  bool _enableIndent = true;
+  int _indentSizeChars = 2;
+  double _paragraphSpacingMultiplier = 1.0;
+  int _reParagraphMode = 1; // 0=不处理 1=智能分段 2=强制重排
+  // M9.2：超长段切分阈值（字，用户可调）
+  int _smartSplitThreshold = 200;
+  int _aggressiveSplitThreshold = 100;
+
   @override
   void initState() {
     super.initState();
@@ -40,16 +47,20 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     // 否则再次「应用」会用本地默认值覆盖用户此前的设置
     final n = ref.read(readerProvider.notifier);
     _removeDuplicateTitle = n.removeDuplicateTitle;
-    _reSegment = n.reSegment;
     _chineseConvert = n.chineseConvert;
     _replaceRules.addAll(n.replaceRules);
     _removeHtmlTags = n.removeHtmlTags;
     _removeAds = n.removeAds;
-    _smartParagraph = n.smartParagraph;
     _boldEnabled = n.boldEnabled;
     _italicEnabled = n.italicEnabled;
     _pageFillThreshold = n.pageFillThreshold;
     _showComments = n.showComments;
+    _enableIndent = n.enableIndent;
+    _indentSizeChars = n.indentSizeChars;
+    _paragraphSpacingMultiplier = n.paragraphSpacingMultiplier;
+    _reParagraphMode = n.reParagraphMode;
+    _smartSplitThreshold = n.smartSplitThreshold;
+    _aggressiveSplitThreshold = n.aggressiveSplitThreshold;
   }
 
   @override
@@ -119,16 +130,20 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _collectPendingRule();
     await ref.read(readerProvider.notifier).applyContentProcessingSettings(
       removeDuplicateTitle: _removeDuplicateTitle,
-      reSegment: _reSegment,
       chineseConvert: _chineseConvert,
       replaceRules: List.of(_replaceRules),
       removeHtmlTags: _removeHtmlTags,
       removeAds: _removeAds,
-      smartParagraph: _smartParagraph,
       boldEnabled: _boldEnabled,
       italicEnabled: _italicEnabled,
       pageFillThreshold: _pageFillThreshold,
       showComments: _showComments,
+      enableIndent: _enableIndent,
+      indentSizeChars: _indentSizeChars,
+      paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
+      reParagraphMode: _reParagraphMode,
+      smartSplitThreshold: _smartSplitThreshold,
+      aggressiveSplitThreshold: _aggressiveSplitThreshold,
     );
 
     if (!mounted) return;
@@ -197,14 +212,6 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                     setState(() => _removeAds = value);
                   },
                 ),
-                _buildSwitchTile(
-                  title: '智能分段',
-                  subtitle: '自动优化段落间距，提升阅读体验',
-                  value: _smartParagraph,
-                  onChanged: (value) {
-                    setState(() => _smartParagraph = value);
-                  },
-                ),
 
                 const SizedBox(height: 24),
 
@@ -219,14 +226,6 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                     setState(() => _removeDuplicateTitle = value);
                   },
                 ),
-                _buildSwitchTile(
-                  title: '智能重新分段',
-                  subtitle: '优化段落分割，改善阅读体验',
-                  value: _reSegment,
-                  onChanged: (value) {
-                    setState(() => _reSegment = value);
-                  },
-                ),
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -238,7 +237,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                         style: const TextStyle(fontSize: 14),
                       ),
                       const Text(
-                        '页面填充达到此比例后才在段落边界分页，低于则允许段落跨页',
+                        '仅 EPUB 分页使用；TXT 分页已是行级精度无需此门槛',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                       Slider(
@@ -284,6 +283,146 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   onChanged: (value) {
                     setState(() => _italicEnabled = value);
                   },
+                ),
+
+                const SizedBox(height: 24),
+
+                // M9-P4：段落格式 section（首行缩进/重新分段）
+                _buildSectionHeader('段落格式'),
+                const SizedBox(height: 8),
+                _buildSwitchTile(
+                  title: '启用首行缩进',
+                  subtitle: '段落首行自动添加缩进空格',
+                  value: _enableIndent,
+                  onChanged: (value) {
+                    setState(() => _enableIndent = value);
+                  },
+                ),
+                if (_enableIndent)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '缩进大小：$_indentSizeChars 字符',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        const Text(
+                          '每段首行缩进的字符数',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Slider(
+                          value: _indentSizeChars.toDouble(),
+                          min: 0,
+                          max: 4,
+                          divisions: 4,
+                          label: '$_indentSizeChars',
+                          onChanged: (value) {
+                            setState(() => _indentSizeChars = value.round());
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      RadioListTile<int>(
+                        title: const Text('不处理'),
+                        subtitle: const Text('保留原始段落结构', style: TextStyle(fontSize: 12)),
+                        value: 0,
+                        groupValue: _reParagraphMode,
+                        onChanged: (value) {
+                          setState(() => _reParagraphMode = value!);
+                        },
+                      ),
+                      RadioListTile<int>(
+                        title: const Text('智能分段'),
+                        subtitle: const Text('识别段落边界优化排版', style: TextStyle(fontSize: 12)),
+                        value: 1,
+                        groupValue: _reParagraphMode,
+                        onChanged: (value) {
+                          setState(() => _reParagraphMode = value!);
+                        },
+                      ),
+                      RadioListTile<int>(
+                        title: const Text('强制重排'),
+                        subtitle: const Text('按换行符强制重新分段', style: TextStyle(fontSize: 12)),
+                        value: 2,
+                        groupValue: _reParagraphMode,
+                        onChanged: (value) {
+                          setState(() => _reParagraphMode = value!);
+                        },
+                      ),
+                      // M9.2：超长段切分阈值（随模式启用显示对应滑杆）
+                      if (_reParagraphMode == 1)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(
+                                '智能切分阈值：$_smartSplitThreshold 字',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(
+                                '超过该长度的段落按标点切成短段',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ),
+                            Slider(
+                              value: _smartSplitThreshold.toDouble(),
+                              min: 50,
+                              max: 500,
+                              divisions: 45,
+                              label: '$_smartSplitThreshold',
+                              onChanged: (value) {
+                                setState(() => _smartSplitThreshold = value.round());
+                              },
+                            ),
+                          ],
+                        ),
+                      if (_reParagraphMode == 2)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(
+                                '强制切分阈值：$_aggressiveSplitThreshold 字',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(
+                                '合并后超过该长度的段落按标点切开',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ),
+                            Slider(
+                              value: _aggressiveSplitThreshold.toDouble(),
+                              min: 50,
+                              max: 300,
+                              divisions: 25,
+                              label: '$_aggressiveSplitThreshold',
+                              onChanged: (value) {
+                                setState(() => _aggressiveSplitThreshold = value.round());
+                              },
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
 
                 const SizedBox(height: 24),

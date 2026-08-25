@@ -128,6 +128,14 @@ pub enum ContentBlock {
         /// 标记为旁注/注释；布局层据此可缩字、变色或跳过绘制
         #[serde(default)]
         is_comment: bool,
+        /// M9：首行缩进（em 倍数，相对基准字号；None=无缩进/继承全局设置）
+        /// EPUB 来自 CSS text-indent；TXT 由 ParagraphFormatter 注入
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        indent_first_line_em: Option<f32>,
+        /// M9：段后间距（em 倍数，叠加在 paragraph_spacing 之上；None=0）
+        /// EPUB 来自 CSS margin-bottom
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spacing_after_em: Option<f32>,
     },
     /// 标题（h1-h6 → 1..=6）
     Heading {
@@ -222,6 +230,8 @@ impl ContentBlock {
             runs: Vec::new(),
             anc: None,
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         }
     }
 
@@ -274,6 +284,8 @@ impl ContentBlock {
                 runs,
                 anc,
                 is_comment,
+                indent_first_line_em,
+                spacing_after_em,
             } => ContentBlock::Paragraph {
                 text,
                 align,
@@ -294,6 +306,8 @@ impl ContentBlock {
                     .collect(),
                 anc,
                 is_comment,
+                indent_first_line_em,
+                spacing_after_em,
             },
             ContentBlock::Heading {
                 level,
@@ -391,6 +405,8 @@ impl ContentBlock {
                 font_scale,
                 runs,
                 is_comment,
+                indent_first_line_em,
+                spacing_after_em,
                 ..
             } => ContentBlock::Paragraph {
                 text,
@@ -412,6 +428,8 @@ impl ContentBlock {
                     .collect(),
                 anc: None,
                 is_comment,
+                indent_first_line_em,
+                spacing_after_em,
             },
             ContentBlock::Heading {
                 level,
@@ -532,6 +550,8 @@ mod tests {
                     }],
                     anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
                     is_comment: false,
+                    indent_first_line_em: None,
+                    spacing_after_em: None,
                 },
                 ContentBlock::Table {
                     caption: None,

@@ -80,9 +80,20 @@ impl EpubCleanedBook {
     }
 
     /// 缓存文件路径（与 TXT 净化落盘同目录、同键格式）
+    ///
+    /// M9.1：键混入源文件大小+mtime 指纹——同路径换书/换版本不再命中旧缓存
+    /// （旧键仅 hash 路径字符串 + 配置，内容变更不感知）
     fn cache_path(source_file: &Path, config_hash: u64) -> PathBuf {
         let mut hasher = DefaultHasher::new();
         source_file.to_string_lossy().hash(&mut hasher);
+        if let Ok(meta) = std::fs::metadata(source_file) {
+            meta.len().hash(&mut hasher);
+            if let Ok(mtime) = meta.modified() {
+                if let Ok(d) = mtime.duration_since(std::time::UNIX_EPOCH) {
+                    d.as_secs().hash(&mut hasher);
+                }
+            }
+        }
         let path_hash = hasher.finish();
         std::env::temp_dir()
             .join("legado_cleaned")

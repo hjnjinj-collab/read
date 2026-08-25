@@ -1155,6 +1155,27 @@ impl EpubParser {
         }
     }
 
+    /// M9 P5：CSS text-indent 解析 → em 倍数
+    ///
+    /// 支持 em / % / px / pt 单位，% 按 em 近似（相对基准字号）
+    fn resolved_text_indent(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+        base_font_px: f32,
+    ) -> Option<f32> {
+        match Self::self_or_inherited(sheet, ctx, "text-indent") {
+            Some(crate::css_lite::DeclValue::Em(e)) => Some(e),
+            Some(crate::css_lite::DeclValue::Percent(p)) => Some(p / 100.0),
+            Some(crate::css_lite::DeclValue::Px(px)) if base_font_px > 0.0 => {
+                Some(px / base_font_px)
+            }
+            Some(crate::css_lite::DeclValue::Pt(pt)) if base_font_px > 0.0 => {
+                Some(pt * 4.0 / 3.0 / base_font_px)
+            }
+            _ => None,
+        }
+    }
+
     /// 行内标签的 UA 默认字形语义（b/strong 粗、i/em/cite 斜、a 下划线）
     fn tag_glyph_semantics(ctx: &crate::css_lite::NodeCtx) -> (bool, bool, bool) {
         match ctx.tag.as_str() {
@@ -1230,6 +1251,60 @@ impl EpubParser {
             .collect()
     }
 
+    /// 检查祖先链是否包含 aside/footer/note 等注释类元素
+    /// 
+    /// M9 P1：本章说检测三重验证之一（祖先链验证）
+    fn has_aside_ancestor(anc: &Option<Vec<Vec<String>>>) -> bool {
+        if let Some(ancestry) = anc {
+            for path in ancestry {
+                for tag in path {
+                    let tag_lower = tag.to_lowercase();
+                    if tag_lower == "aside" 
+                        || tag_lower == "footer" 
+                        || tag_lower == "note" {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 检查类名是否包含 footnote/sidenote/annotation 等注释相关词汇
+    /// 
+    /// M9 P1：本章说检测三重验证之二（类名验证）
+    fn has_note_class(anc: &Option<Vec<Vec<String>>>) -> bool {
+        if let Some(ancestry) = anc {
+            for path in ancestry {
+                // 祖先链每层格式：[tag, class1, class2, ...]
+                // 第一个元素是标签名，后续元素是类名
+                for (i, item) in path.iter().enumerate() {
+                    if i == 0 {
+                        continue; // 跳过标签名
+                    }
+                    let item_lower = item.to_lowercase();
+                    if item_lower.contains("footnote")
+                        || item_lower.contains("sidenote")
+                        || item_lower.contains("annotation")
+                        || item_lower == "note" {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 检查是否为孤立小块（前后有空行 + 居中或右对齐）
+    /// 
+    /// M9 P1：本章说检测三重验证之三（孤立小块验证）
+    /// 
+    /// 注意：当前实现无法获取前后块信息，暂时通过对齐方式判断
+    fn is_isolated_small_block(align: &Option<crate::content_ir::Align>) -> bool {
+        // 居中或右对齐的小块更可能是注释
+        matches!(align, Some(crate::content_ir::Align::Center) | Some(crate::content_ir::Align::Right))
+    }
+
     /// 对单块做 CSS 物化：图片宽度百分比/对齐/隐藏，段落与标题对齐；
     /// 容器类递归下沉。JS 输出的 align 字段已存在时以 JS 为准（预留）。
     /// `base_font_px` 为 px/pt 字号换算基准（当前排版字号）
@@ -1285,19 +1360,31 @@ impl EpubParser {
                 runs,
                 anc,
                 is_comment,
+                indent_first_line_em,
+                spacing_after_em,
             } => {
                 let ctx = Self::node_ctx_from_anc(anc.as_ref());
                 let align = align.or_else(|| Self::inherited_text_align(sheet, &ctx));
                 let color = color.or_else(|| Self::resolved_color(sheet, &ctx));
                 let font_scale =
                     font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx, base_font_px));
+                // M9 P5：CSS text-indent → indent_first_line_em
+                let indent_first_line_em = indent_first_line_em
+                    .or_else(|| Self::resolved_text_indent(sheet, &ctx, base_font_px));
                 let runs = Self::resolve_runs(runs, sheet, text.chars().count(), base_font_px);
-                // CSS 兜底分类：块级小字号且短段落视为旁注（footnote/annotation）。
-                // font_scale < 0.85 表示 CSS 明确声明了小于基准的字号；
-                // 字符数 < 200 过滤长文本（避免误判正文为注释）。
-                let is_comment = is_comment
-                    || (font_scale.unwrap_or(1.0) < 0.85
-                        && text.chars().count() < 200);
+                // M9 P1：CSS 兜底分类修正 - 收紧门槛 + 三重验证
+                // 旧逻辑（0.85/200）误判率高，导致《剑来》普通正文被标记为注释。
+                // 新逻辑：更严格门槛（0.75/150）+ 必须满足以下至少一项正向特征：
+                // 1. 祖先链包含 aside/footer/note 元素
+                // 2. 类名包含 footnote/sidenote/annotation
+                // 3. 居中或右对齐的小块（孤立注释的典型布局）
+                let char_count = text.chars().count();
+                let is_potential_comment = font_scale.unwrap_or(1.0) < 0.75
+                    && char_count < 150
+                    && (Self::has_aside_ancestor(&anc)
+                        || Self::has_note_class(&anc)
+                        || Self::is_isolated_small_block(&align));
+                let is_comment = is_comment || is_potential_comment;
                 ContentBlock::Paragraph {
                     text,
                     align,
@@ -1306,6 +1393,8 @@ impl EpubParser {
                     runs,
                     anc,
                     is_comment,
+                    indent_first_line_em,
+                    spacing_after_em,
                 }
             }
             ContentBlock::Heading {
@@ -1391,17 +1480,19 @@ impl EpubParser {
                                         header: cell.header,
                                         width_em,
                                         anc: cell.anc,
-                                        blocks: cell
-                                            .blocks
-                                            .into_iter()
-                                            .map(|b| {
-                                                Self::apply_css_to_block(
-                                                    b,
-                                                    sheet,
-                                                    base_font_px,
-                                                )
-                                            })
-                                            .collect(),
+                                        // M9.2：单元格内容物化 CSS 后递归清零散文缩进
+                                        blocks: Self::clear_cell_indent(
+                                            cell.blocks
+                                                .into_iter()
+                                                .map(|b| {
+                                                    Self::apply_css_to_block(
+                                                        b,
+                                                        sheet,
+                                                        base_font_px,
+                                                    )
+                                                })
+                                                .collect(),
+                                        ),
                                     }
                                 })
                                 .collect()
@@ -1414,6 +1505,56 @@ impl EpubParser {
             }
             other => other,
         }
+    }
+
+    /// M9.2：表格单元格内禁用散文首行缩进——递归清零单元格内容树中所有
+    /// Paragraph 的 indent_first_line_em（覆盖 Quote/List 嵌套）。
+    /// 表格是数据网格形态，`p{text-indent}` 选择器或 body 继承渗入的缩进
+    /// 只会呈现"首行提前换行但不右移"的破碎形态，故在物化源头剥离。
+    fn clear_cell_indent(
+        blocks: Vec<crate::content_ir::ContentBlock>,
+    ) -> Vec<crate::content_ir::ContentBlock> {
+        use crate::content_ir::ContentBlock;
+        blocks
+            .into_iter()
+            .map(|b| match b {
+                ContentBlock::Paragraph {
+                    text,
+                    align,
+                    color,
+                    font_scale,
+                    runs,
+                    anc,
+                    is_comment,
+                    indent_first_line_em: _,
+                    spacing_after_em,
+                } => ContentBlock::Paragraph {
+                    text,
+                    align,
+                    color,
+                    font_scale,
+                    runs,
+                    anc,
+                    is_comment,
+                    indent_first_line_em: None,
+                    spacing_after_em,
+                },
+                ContentBlock::Quote { blocks } => ContentBlock::Quote {
+                    blocks: Self::clear_cell_indent(blocks),
+                },
+                ContentBlock::List { ordered, items } => ContentBlock::List {
+                    ordered,
+                    items: items
+                        .into_iter()
+                        .map(|mut item| {
+                            item.blocks = Self::clear_cell_indent(item.blocks);
+                            item
+                        })
+                        .collect(),
+                },
+                other => other,
+            })
+            .collect()
     }
 
     /// 递归探测全部图片块的原始像素尺寸（探测失败留 None，布局按默认比）
@@ -1893,6 +2034,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn clear_cell_indent_strips_nested_paragraphs() {
+        use crate::content_ir::{ContentBlock, ListItem};
+        let p = |indent: Option<f32>| ContentBlock::Paragraph {
+            text: "单元格文本".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: indent,
+            spacing_after_em: None,
+        };
+        // 单元格内容树：直接段落 + Quote 嵌套 + List 嵌套 + 非文本块
+        let cell_tree = vec![
+            p(Some(2.0)),
+            ContentBlock::Quote {
+                blocks: vec![p(Some(2.0))],
+            },
+            ContentBlock::List {
+                ordered: false,
+                items: vec![ListItem {
+                    blocks: vec![p(Some(2.0))],
+                }],
+            },
+            ContentBlock::Rule,
+        ];
+        let cleared = EpubParser::clear_cell_indent(cell_tree);
+        let mut cleared_count = 0;
+        for b in &cleared {
+            match b {
+                ContentBlock::Paragraph {
+                    indent_first_line_em,
+                    ..
+                } => {
+                    assert_eq!(*indent_first_line_em, None, "直接子段落应清零");
+                    cleared_count += 1;
+                }
+                ContentBlock::Quote { blocks } => {
+                    for q in blocks {
+                        if let ContentBlock::Paragraph {
+                            indent_first_line_em,
+                            ..
+                        } = q
+                        {
+                            assert_eq!(*indent_first_line_em, None, "Quote 内段落应清零");
+                            cleared_count += 1;
+                        }
+                    }
+                }
+                ContentBlock::List { items, .. } => {
+                    for it in items {
+                        if let Some(ContentBlock::Paragraph {
+                            indent_first_line_em,
+                            ..
+                        }) = it.blocks.first()
+                        {
+                            assert_eq!(*indent_first_line_em, None, "List 内段落应清零");
+                            cleared_count += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(cleared_count, 3, "三处嵌套段落均应被处理");
+    }
+
+    #[test]
     fn test_html_to_text() {
         let html = r#"
         <html>
@@ -2329,6 +2539,8 @@ mod tests {
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2371,6 +2583,8 @@ mod tests {
                             vec!["td".into(), "vol-title-name".into()],
                         ]),
                         is_comment: false,
+                        indent_first_line_em: None,
+                        spacing_after_em: None,
                     }],
                     anc: Some(vec![
                         vec!["body".into()],
@@ -2447,6 +2661,8 @@ mod tests {
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2478,6 +2694,8 @@ mod tests {
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para2, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2506,6 +2724,8 @@ mod tests {
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para3, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2554,6 +2774,8 @@ mod tests {
             ])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2577,6 +2799,8 @@ mod tests {
             ])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2599,6 +2823,8 @@ mod tests {
             runs: vec![mk(vec![vec!["body"], vec!["p"], vec!["span"]])],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2668,6 +2894,8 @@ mod tests {
                 vec!["td".into()],
             ]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { font_scale, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2696,6 +2924,8 @@ mod tests {
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2710,5 +2940,138 @@ mod tests {
         );
         assert_eq!(runs[2].color.as_deref(), Some("#ff0000"));
         assert_eq!(runs[3].color, None, "未知颜色回落主题默认");
+    }
+
+    /// M9 P1：本章说检测修正测试
+    /// 测试收紧后的门槛和三重验证逻辑
+    #[test]
+    fn comment_detection_stricter_threshold() {
+        use crate::content_ir::ContentBlock;
+
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            "p.small { font-size: 14px; }"  // 14/18 = 0.778 < 0.85 但 > 0.75
+        );
+
+        // 场景 1: font_scale=0.8（14px/18px），短文本，但无正向特征 → 不应标记为注释
+        let para_normal_small = ContentBlock::Paragraph {
+            text: "这是一段小字号的正文，不应被误判为注释。".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![],
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["p".into(), "".into(), "small".into()],
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        let ContentBlock::Paragraph { is_comment, .. } =
+            EpubParser::apply_css_to_block(para_normal_small, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(!is_comment, "font_scale=0.778 > 0.75，不应标记为注释");
+
+        // 场景 2: font_scale=0.7（12.6px/18px），短文本，有 aside 祖先 → 应标记为注释
+        let sheet2 = crate::css_lite::CssStylesheet::parse(
+            "aside p { font-size: 12.6px; }"  // 12.6/18 = 0.7 < 0.75
+        );
+        let para_aside = ContentBlock::Paragraph {
+            text: "这是脚注内容".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![],
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["aside".into()],
+                vec!["p".into()],
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        let ContentBlock::Paragraph { is_comment, .. } =
+            EpubParser::apply_css_to_block(para_aside, &sheet2, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(is_comment, "font_scale=0.7 + aside 祖先 → 应标记为注释");
+
+        // 场景 3: font_scale=0.7，短文本，有 footnote 类名 → 应标记为注释
+        let sheet3 = crate::css_lite::CssStylesheet::parse(
+            "p.footnote { font-size: 12.6px; }"  // 12.6/18 = 0.7 < 0.75
+        );
+        let para_footnote_class = ContentBlock::Paragraph {
+            text: "脚注文本".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![],
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["p".into(), "footnote".into()],  // 格式：[tag, class1, class2, ...]
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        let result = EpubParser::apply_css_to_block(para_footnote_class, &sheet3, DEFAULT_BASE_FONT_PX);
+        let ContentBlock::Paragraph { is_comment, .. } = result
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(is_comment, "font_scale=0.7 + footnote 类名 → 应标记为注释");
+
+        // 场景 4: font_scale=0.7，短文本，居中对齐 → 应标记为注释
+        let sheet4 = crate::css_lite::CssStylesheet::parse(
+            "p.small { font-size: 12.6px; }"  // 12.6/18 = 0.7 < 0.75
+        );
+        let para_centered = ContentBlock::Paragraph {
+            text: "居中小字".into(),
+            align: Some(crate::content_ir::Align::Center),
+            color: None,
+            font_scale: None,
+            runs: vec![],
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["p".into(), "small".into()],  // 格式：[tag, class1, ...]
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        let ContentBlock::Paragraph { is_comment, .. } =
+            EpubParser::apply_css_to_block(para_centered, &sheet4, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(is_comment, "font_scale=0.7 + 居中对齐 → 应标记为注释");
+
+        // 场景 5: font_scale=0.7，但文本过长（>150 字符） → 不应标记为注释
+        let long_text = "这是一段很长的文本。".repeat(30); // 30 * 10 = 300 字符
+        let para_long = ContentBlock::Paragraph {
+            text: long_text,
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: vec![],
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["aside".into()],
+                vec!["p".into()],
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+        };
+        let ContentBlock::Paragraph { is_comment, .. } =
+            EpubParser::apply_css_to_block(para_long, &sheet2, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        assert!(!is_comment, "即使有 aside 祖先，超过 150 字符不应标记为注释");
     }
 }

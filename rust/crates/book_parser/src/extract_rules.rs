@@ -727,6 +727,8 @@ mod tests {
                     vec!["p".to_string()],
                 ]),
                 is_comment: false,
+                indent_first_line_em: None,
+                spacing_after_em: None,
             }
         );
     }

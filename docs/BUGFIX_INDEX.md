@@ -26,6 +26,13 @@
 | Content Hash 不匹配 | 改了 API 未重新 codegen | BUG_FIXES §11 |
 | **重开书籍报 `UNIQUE constraint failed: books.file_path`（2067）** | `insertOnConflictUpdate` 只对主键生效，身份键是 filePath UNIQUE 列 | [bugfixes/2026-08-22_书架唯一约束冲突](./bugfixes/2026-08-22_书架唯一约束冲突.md) ⭐ 需 DoUpdate(target:) |
 | **真实书籍目录标题全空/无嵌套，合成测试书正常** | roxmltree 默认拒绝带 DOCTYPE 的 XML（`XML with DTD detected`） | [bugfixes/2026-08-22_roxmltree拒绝DTD致目录全空](./bugfixes/2026-08-22_roxmltree拒绝DTD致目录全空.md) ⭐ parse_with_options(allow_dtd:true) |
+| **EPUB 普通正文被误判为本章说（灰色小字）** | CSS 兜底门槛过宽：font_scale<0.85 + 字数<200 捕获普通小字号段落 | A15：门槛收紧 0.85→0.75 + 字数 200→150 + 三重验证（祖先链/类名/孤立块） |
+| **底部留白过大（长段落推下页场景）** | 90% 阈值仅对可拆分段落有效，长段落无法容纳时整段推下页 | A15：场景 B（低填充率<50% 首行强制留当前页）+ 场景 C（标题孤立避免） |
+| **EPUB 正文行截断+下一行重复整段前缀（超宽行被 Dart 缩字渲染成"小字行"，看似本章说误标+内容重复）** | **断行禁则回退（M7-P4）flush 后未清空 pieces 已发射前缀，pulled 压在前缀之上——下一行重复发射整个前缀；EPUB styled 与 TXT 双路径同源** | M9.1：pull-back 分支 flush 后 `pieces.clear()` 再保留 pulled（layout_engine lib.rs 双路径）；回归测试 `kinsoku_pullback_no_text_duplication` + 真书探针 `jianlai_ch2_probe` 永久断言 |
+| **表格单元格内容出现"首行提前换行但不右移"的破碎缩进** | CSS text-indent 经选择器/继承渗入单元格段落，三层链路（解析物化→IR 透传→布局渲染）无一处按容器上下文过滤；表格内只裁宽度不加 x 偏移 | M9.2：解析层 `clear_cell_indent` 递归清零（epub_parser Table 分支）+ 转换层强制 None（api.rs blocks_to_layout_items）；List/Quote 内段落属合法缩进保留 |
+| **重新分段开启后超长段原样保留（TXT 尤甚）** | TXT Smart 模式只做软换行合并**从不切长段**；EPUB 切分器缺 ASCII 句读、回退扫全文无上界、cut==total 产空尾段、省略号可从中间切、闭引号悬段首、子段丢 align | M9.2：共享切分器 `paragraph_splitter.rs`（区间契约）双路径统一；阈值 Smart/Aggressive **用户可调**（默认 200/100，设置面板滑杆）；强标点纯 CJK 集+次级有界回退+闭标吸附+省略号原子+尾段再平衡；切口后剩余内容作为新段落从头计数继续切分（split_ranges while 循环不变式） |
+| **页尾长段落整段下移造成半页空白（调低填充门槛更严重）** | layout_text 决策块在 fill≥page_fill_threshold 时无条件整段推页，空白上限=1−threshold；行级续排循环虽存在但被该分支拦截 | M9.2：删除整段推页决策，改为行级精度——算剩余空间可容行数、放得下的行留下、余量推下页；仅保留孤行(<2行)/寡行(下页单行)轻保护。TXT 路径不再消费 page_fill_threshold（EPUB 仍消费） |
+| **TXT 阅读整体卡顿、越读越卡（翻页/设置面板/全局 UI 均卡）** | ①预加载自激级联：warm→miss→trigger→warm 无限推进全书、无去重无取消，10 章 LRU 被冲成滑动窗口→当前章被挤出→每次翻页同步全章重排；②命中路径每次翻页深克隆整章所有页；③is_chapter_marker 每次调用现场编译 3 个正则（每章数千次） | M9.3：①get_chapter_content 拆 impl(trigger)+quiet 封装、process_and_layout_chapter_inner(allow_preload_trigger) 参数化打断闭环 + 策略收窄 [N±1] + executor try_submit_dedup 去重（并修复 PreloadHandle Drop 自动取消误杀任务：内联等待终态）；②CachedChapterPages.pages 包 Arc（对齐 EPUB 先例），命中零克隆；③OnceLock 静态化正则（含 protect_html_tags） |
 
 ## 二、按错误信息查找
 
@@ -39,6 +46,14 @@
 | `missing field ... in initializer` | 结构体加了新字段，构造处未同步更新 |
 | EPUB 段间出现小字号行（本章说/脚注） | display:none 漏过滤 Paragraph/Heading；aside/footnote 块下沉为正文；CSS font-size<0.85 未分类 | A14：extract_rules aside 检测 + CSS 兜底 is_comment |
 | EPUB 底部留白过大且不统一 | layout_items 无填充率门槛，≥3 行即整段推下页 | A14：page_fill_threshold 默认 0.9（可调） |
+| EPUB 普通正文被标灰小字（非注释） | CSS 兜底 font_scale<0.85 门槛过宽，误判短段落正文 | A15：收紧到 0.75 + 三重验证（祖先链/类名/孤立块） |
+| 底部留白过大（长段落场景） | 90% 阈值对不可拆分长段落无效，整段推下页 | A15：场景 B（低填充率首行强制）+ 场景 C（标题孤立避免） |
+| 正文行截断+下一行超宽重复（缩字"小字行"） | 禁则回退 flush 后 pieces 前缀未清空，下次 flush 重复发射 | M9.1：pull-back 后 pieces.clear() 再保留 pulled（双路径） |
+| 表格内容首行提前换行不右移（破碎缩进） | text-indent 渗入单元格段落，布局只裁宽度不加偏移 | M9.2：解析层递归清零 + 转换层强制 None |
+| 重新分段开了但长段没切开 | TXT Smart 从不切长段；EPUB 切分器标点集/回退/吸附多处缺陷 | M9.2：共享切分器 paragraph_splitter（200/100 阈值统一） |
+| 页尾长段整段下移、半页空白 | fill≥门槛时无条件整段推页，空白上限=1−threshold | M9.2：TXT 行级分页（孤行/寡行轻保护），TXT 不再消费该门槛 |
+| TXT 越读越卡、全局 UI 卡顿 | 预加载级联冲刷 LRU + 命中整章克隆 + 正则风暴 | M9.3：断级联(quiet 回源)+收窄±1+去重；pages 包 Arc；OnceLock 正则 |
+| 预加载任务大量 cancelled/预热不生效 | PreloadHandle drop 自动发取消信号（oneshot sender drop 也唤醒 receiver） | M9.3：try_submit_dedup 内联等待终态，句柄存活到任务完成 |
 | 双引擎行重叠/截断（TXT+EPUB） | Rust ab_glyph 与 Dart sans-serif 字体不同源；Dart 硬编码字号+无防护 | A13：字体统一 + 参数同源 + 无约束排版分级兜底 |
 
 ## 三、工程约束（踩坑沉淀，写代码前先看）

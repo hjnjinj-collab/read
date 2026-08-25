@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::Instant;
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -55,17 +56,20 @@ impl CacheKey {
     /// 计算内容处理选项的哈希
     ///
     /// 任何影响页面文本的选项变更都必须反映在此哈希中。
+    /// M9：para_format_hash 纳入哈希，段落格式化设置变更即换键。
     pub fn hash_process_options(
         remove_duplicate_title: bool,
         re_segment: bool,
         chinese_convert: u8,
         replace_rules_hash: u64,
+        para_format_hash: u64,
     ) -> u64 {
         let mut hasher = DefaultHasher::new();
         remove_duplicate_title.hash(&mut hasher);
         re_segment.hash(&mut hasher);
         chinese_convert.hash(&mut hasher);
         replace_rules_hash.hash(&mut hasher);
+        para_format_hash.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -83,9 +87,12 @@ impl CacheKey {
 }
 
 /// 缓存的章节分页结果
+///
+/// M9.3：pages 包 Arc——命中路径 Arc bump 免整章深克隆
+/// （每次翻页曾克隆整章所有页的 TextLine 字符串，对齐 EPUB 侧先例）
 #[derive(Debug, Clone)]
 pub struct CachedChapterPages {
-    pub pages: Vec<Page>,
+    pub pages: Arc<Vec<Page>>,
     pub total_pages: usize,
     pub created_at: Instant,
 }
@@ -251,7 +258,7 @@ mod tests {
         
         // Put
         cache.put(key.clone(), CachedChapterPages {
-            pages: vec![],
+            pages: Arc::new(vec![]),
             total_pages: 0,
             created_at: Instant::now(),
         });
@@ -271,20 +278,20 @@ mod tests {
         let key3 = CacheKey::new("book1", 2, &config);
         
         cache.put(key1.clone(), CachedChapterPages {
-            pages: vec![],
+            pages: Arc::new(vec![]),
             total_pages: 0,
             created_at: Instant::now(),
         });
         
         cache.put(key2.clone(), CachedChapterPages {
-            pages: vec![],
+            pages: Arc::new(vec![]),
             total_pages: 0,
             created_at: Instant::now(),
         });
         
         // Cache is full, adding key3 should evict key1
         cache.put(key3.clone(), CachedChapterPages {
-            pages: vec![],
+            pages: Arc::new(vec![]),
             total_pages: 0,
             created_at: Instant::now(),
         });

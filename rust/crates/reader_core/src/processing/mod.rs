@@ -6,6 +6,9 @@ pub mod chinese_converter;
 pub mod pipeline;
 pub mod stages;
 pub mod content_cleaner;
+pub mod paragraph_format;
+pub mod paragraph_formatter;
+pub mod paragraph_splitter;
 
 #[cfg(feature = "js-engine")]
 pub use js_runtime::{JsRuntime, JsExecContext, JsRuntimeStats};
@@ -15,3 +18,6 @@ pub use chinese_converter::{ChineseConverter, ConvertMode};
 pub use pipeline::{ProcessingPipeline, PipelineConfig, PipelineData};
 pub use stages::*;
 pub use content_cleaner::ContentCleaner;
+pub use paragraph_format::{ParagraphFormatSettings, ReParagraphMode};
+pub use paragraph_formatter::ParagraphFormatter;
+pub use paragraph_splitter::{split_pieces, split_ranges, AGGRESSIVE_THRESHOLD, SMART_THRESHOLD};

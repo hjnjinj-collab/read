@@ -58,7 +58,9 @@ pub trait PreloadStrategy: Send + Sync {
 /// - Current chapter: Critical (immediate loading)
 /// - Next chapter: High (first 2 pages only)
 /// - Previous chapter: Normal (full chapter)
-/// - Next 2 chapters: Low (optional)
+///
+/// M9.3：目标集从 ±2 收敛为 [N+1, N-1]——预加载"真预热"会整章重排入缓存，
+/// 过宽窗口叠加自激触发曾把 10 槽 LRU 冲成滑动窗口（详见 BUGFIX_INDEX）。
 pub struct DefaultPreloadStrategy {
     /// How many chapters ahead to preload
     pub look_ahead: usize,
@@ -69,8 +71,10 @@ pub struct DefaultPreloadStrategy {
 impl Default for DefaultPreloadStrategy {
     fn default() -> Self {
         Self {
-            look_ahead: 2,
-            look_behind: 1,
+            // 原 2：N+2(Low) 已取消；只保 N+1(High)
+            look_ahead: 1,
+            // 原 1：N-2(Low) 已取消
+            look_behind: 0,
         }
     }
 }
@@ -120,16 +124,19 @@ mod tests {
     use std::collections::BinaryHeap;
 
     #[test]
-    fn test_default_preload_strategy() {
+    fn test_default_preload_strategy_narrowed_window() {
+        // M9.3：目标集收敛为 当前/N+1/N-1，不再有 N±2(Low)
         let strategy = DefaultPreloadStrategy::default();
         let chapters = strategy.calculate_preload_chapters(5, 10);
 
-        // Should include: current(5), next(6), prev(4), ahead(7), behind(3)
+        assert_eq!(chapters.len(), 3, "收敛后应恰含当前/N+1/N-1");
         assert!(chapters.iter().any(|&(idx, _)| idx == 5)); // Current
         assert!(chapters.iter().any(|&(idx, _)| idx == 6)); // Next
         assert!(chapters.iter().any(|&(idx, _)| idx == 4)); // Prev
-        assert!(chapters.iter().any(|&(idx, _)| idx == 7)); // Ahead
-        assert!(chapters.iter().any(|&(idx, _)| idx == 3)); // Behind
+        assert!(
+            !chapters.iter().any(|&(idx, _)| idx == 7 || idx == 3),
+            "不应再有 N±2 远端章节"
+        );
     }
 
     #[test]

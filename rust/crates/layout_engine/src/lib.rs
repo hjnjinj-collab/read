@@ -161,6 +161,9 @@ pub struct TextItem {
     pub spacing_before_em: f32,
     /// 段后间距（em 倍数；页首自动折叠）
     pub spacing_after_em: f32,
+    /// M9：首行缩进（em 倍数，相对基准字号；None=无缩进）
+    /// 布局时首行宽度减去 indent_px，首行 x 偏移 indent_px
+    pub indent_first_line_em: Option<f32>,
     /// 本章说标记（JS 提取层 aside/footnote 或 CSS 小字号兜底）
     pub is_comment: bool,
 }
@@ -282,20 +285,15 @@ impl LayoutEngine {
 
     /// Calculate pages from text content with real font metrics
     pub fn layout_text(&self, text: &str, chapter_index: usize) -> Result<Vec<Page>> {
-        let content_width = self.config.width 
-            - self.config.padding.left 
+        let content_width = self.config.width
+            - self.config.padding.left
             - self.config.padding.right;
-        let content_height = self.config.height 
-            - self.config.padding.top 
-            - self.config.padding.bottom;
-        
+        // M9.2：行级分页不再需要整页填充率，content_height 仅 EPUB 路径使用
         let line_height = self.config.font_size * self.config.line_height_multiplier;
         
         // 分页控制参数
         const MIN_LINES_PER_PAGE: usize = 3;  // 每页最少3行，避免孤行
-        // 页面填充率达到门槛后才优先在段落边界分页（与 layout_items 共用配置）
-        let paragraph_break_threshold = self.config.page_fill_threshold;
-        
+
         let mut pages = Vec::new();
         let mut current_lines = Vec::new();
         let mut current_y = self.config.padding.top;
@@ -303,40 +301,103 @@ impl LayoutEngine {
         let mut page_start_char = 0;
         let mut pending_paragraph_lines: Vec<(String, usize)> = Vec::new(); // (line_text, char_count)
         let mut is_first_line = true;  // 标记是否是章节的第一行
-        
+
+        // M9.2 行级分页辅助宏：放置一行并推进游标（预置阶段与主循环共用）。
+        // 必须定义在上述可变绑定之后（macro_rules 标识符按定义点解析）
+        macro_rules! emit_line {
+            ($line_text:expr, $line_char_count:expr) => {{
+                current_lines.push(TextLine {
+                    text: $line_text.clone(),
+                    x: self.config.padding.left,
+                    y: current_y,
+                    width: content_width,
+                    height: line_height,
+                    color: None,
+                    font_scale: None,
+                    segments: Vec::new(),
+                    is_chapter_start: is_first_line,  // 标记章节第一行
+                    is_comment: false,
+                });
+                is_first_line = false;
+                current_y += line_height;
+                char_index += $line_char_count;
+            }};
+        }
+
         // Get font for measuring
         let font = self.font_manager.get_font(&self.config.font_name)?;
-        
+
         // Split into paragraphs
         for paragraph in text.split('\n') {
             if paragraph.trim().is_empty() {
                 char_index += 1;
                 continue;
             }
-            
+
             // Layout paragraph into lines
             let para_lines = self.layout_paragraph(paragraph, content_width, font)?;
-            
+
             // 收集当前段落的所有行
             pending_paragraph_lines.clear();
             for line_text in &para_lines {
                 let line_char_count = line_text.chars().count();
                 pending_paragraph_lines.push((line_text.clone(), line_char_count));
             }
-            
-            // 尝试添加整个段落
-            let paragraph_height = para_lines.len() as f32 * line_height + self.config.paragraph_spacing;
-            let would_overflow = current_y + paragraph_height > self.config.height - self.config.padding.bottom;
-            let page_fill_ratio = (current_y - self.config.padding.top) / content_height;
-            let has_min_lines = current_lines.len() >= MIN_LINES_PER_PAGE;
-            
-            // 决策：是否在段落前分页
-            let should_break_before_paragraph = would_overflow
-                && has_min_lines
-                && page_fill_ratio >= paragraph_break_threshold;
-            
-            if should_break_before_paragraph {
-                // 在段落前分页（段落完整性优先）
+
+            // ── M9.2 行级分页决策（取代旧"整段推页"分支）──
+            //
+            // 用户钦定策略：段落容纳不下时，计算剩余空间可容纳的整行数，
+            // 放得下的行留在本页、剩余推下一页。仅保留轻量孤行/寡行保护
+            // （最多浪费 ~2 行空间），page_fill_threshold 在 TXT 路径不再参与
+            // 决策（EPUB 路径仍消费该配置）。
+            let bottom_limit = self.config.height - self.config.padding.bottom;
+            let paragraph_height =
+                pending_paragraph_lines.len() as f32 * line_height + self.config.paragraph_spacing;
+            let would_overflow = current_y + paragraph_height > bottom_limit;
+
+            let mut pre_place = 0usize;   // 预置到本页的行数
+            let mut manual_break = false; // 预置后手动翻页
+            if would_overflow && !pending_paragraph_lines.is_empty() {
+                // 本页剩余空间可容纳的整行数（+0.01 浮点容差防舍入抖动）
+                let mut lines_fit =
+                    (((bottom_limit - current_y).max(0.0) + 0.01) / line_height) as usize;
+                // 寡行保护：拆分将给下页留单行 → 本页少放一行（下页收两行）
+                if lines_fit > 0 && pending_paragraph_lines.len() - lines_fit == 1 {
+                    lines_fit -= 1;
+                }
+                // 孤行保护：本页放不下 ≥2 行且已有足够行 → 整段推下页
+                if lines_fit < 2 && current_lines.len() >= MIN_LINES_PER_PAGE {
+                    lines_fit = 0;
+                }
+                if lines_fit == 0 {
+                    if current_lines.len() >= MIN_LINES_PER_PAGE {
+                        pages.push(Page {
+                            page_index: pages.len(),
+                            chapter_index,
+                            entries: current_lines
+                                .iter()
+                                .map(|l: &TextLine| PageEntry::Text(l.clone()))
+                                .collect(),
+                            start_char_index: page_start_char,
+                            end_char_index: char_index,
+                        });
+                        current_lines.clear();
+                        current_y = self.config.padding.top;
+                        page_start_char = char_index;
+                    }
+                    // 页行数不足 MIN_LINES：交给下方行循环的强制添加分支
+                } else {
+                    pre_place = lines_fit.min(pending_paragraph_lines.len());
+                    // 行恰好全部放下（仅段距溢出）时不产生假翻页
+                    manual_break = pre_place < pending_paragraph_lines.len();
+                }
+            }
+
+            // 长段预置：前 pre_place 行留在本页
+            for (line_text, line_char_count) in pending_paragraph_lines.iter().take(pre_place) {
+                emit_line!(line_text, line_char_count);
+            }
+            if manual_break {
                 pages.push(Page {
                     page_index: pages.len(),
                     chapter_index,
@@ -347,14 +408,13 @@ impl LayoutEngine {
                     start_char_index: page_start_char,
                     end_char_index: char_index,
                 });
-
                 current_lines.clear();
                 current_y = self.config.padding.top;
                 page_start_char = char_index;
             }
-            
-            // 逐行添加段落内容
-            for (line_text, line_char_count) in &pending_paragraph_lines {
+
+            // 逐行添加段落剩余内容（跨多页的超长段由循环内断页自然处理）
+            for (line_text, line_char_count) in pending_paragraph_lines.iter().skip(pre_place) {
                 // 检查是否需要分页（强制分页，空间不足）
                 if current_y + line_height > self.config.height - self.config.padding.bottom {
                     // 只有当前页已有足够行数时才分页，否则强制添加
@@ -376,24 +436,8 @@ impl LayoutEngine {
                     }
                     // 如果当前页行数不足MIN_LINES，强制添加此行（避免过早分页）
                 }
-                
-                // 添加行
-                current_lines.push(TextLine {
-                    text: line_text.clone(),
-                    x: self.config.padding.left,
-                    y: current_y,
-                    width: content_width,
-                    height: line_height,
-                    color: None,
-                    font_scale: None,
-                    segments: Vec::new(),
-                    is_chapter_start: is_first_line,  // 标记章节第一行
-                    is_comment: false,
-                });
-                
-                is_first_line = false;  // 后续行不再是章节开头
-                current_y += line_height;
-                char_index += line_char_count;
+
+                emit_line!(line_text, line_char_count);
             }
             
             // 段落间距
@@ -487,6 +531,9 @@ impl LayoutEngine {
                     let effective_scale = if item.is_comment { 0.7 } else { para_max_scale };
                     let line_h = line_height * effective_scale;
 
+                    // M9 P5：首行缩进 px（em × 基准字号）
+                    let indent_px = item.indent_first_line_em.unwrap_or(0.0) * self.config.font_size;
+
                     // 段前间距（em → px）：页首折叠
                     let space_before = if entries.is_empty() && text_lines_on_page == 0 {
                         0.0
@@ -495,6 +542,19 @@ impl LayoutEngine {
                     };
                     current_y += space_before;
 
+                    // M9 P2 场景 C：标题孤立避免
+                    // 标题特征：font_scale > 1.0 或有段前间距（M8 标题分级设置）
+                    // 当前页已有内容且剩余空间不足以容纳标题 1 行 + 正文 2 行时，
+                    // 标题推到下一页，避免标题孤立在页底
+                    let is_heading =
+                        item.font_scale.unwrap_or(1.0) > 1.0 || item.spacing_before_em > 0.0;
+                    if is_heading && !entries.is_empty() {
+                        let remaining = bottom_limit - current_y;
+                        if remaining < line_h + 2.0 * line_height {
+                            break_page!();
+                        }
+                    }
+
                     // 段落完整性优先：整段放不下、页已有足够行数、且填充率
                     // 达到门槛时才提前翻页；未达门槛允许段落跨页拆分，
                     // 避免大面积底部留白（门槛可在 LayoutConfig 调整）
@@ -502,6 +562,8 @@ impl LayoutEngine {
                         laid.len() as f32 * line_h + self.config.paragraph_spacing;
                     let page_fill_ratio =
                         (current_y - self.config.padding.top) / content_height.max(1.0);
+                    
+                    // M8 场景 A：段落可部分容纳 + 填充率达标 → 整段推下页
                     if current_y + para_height > bottom_limit
                         && text_lines_on_page >= MIN_LINES_PER_PAGE
                         && page_fill_ratio >= self.config.page_fill_threshold
@@ -509,7 +571,96 @@ impl LayoutEngine {
                         break_page!();
                     }
 
-                    for line in laid {
+                    // M9 P2 场景 B：长段落完全无法容纳 + 前一页填充率 < 50% → 强制首行
+                    // 解决用户反馈："长段落推下页导致前一页底部留白过大"
+                    // 当页面已经有一些内容，但填充率很低时，强制将段落首行留在当前页
+                    let first_line_height = if !laid.is_empty() { line_h } else { 0.0 };
+                    if current_y + para_height > bottom_limit
+                        && !entries.is_empty()  // 当前页已有内容
+                        && page_fill_ratio < 0.5  // 但填充率低于 50%
+                        && laid.len() > 1  // 段落有多行
+                        && current_y + first_line_height <= bottom_limit  // 首行能放下
+                    {
+                        // 强制布局首行到当前页
+                        let first_line = &laid[0];
+                        if !item.is_comment || self.config.show_comments {
+                            let x = self.align_line_x(first_line.width, content_width, item.align)
+                                + indent_px; // M9 P5：首行缩进偏移
+                            let segments = Self::segments_for_line(first_line, item);
+                            char_index += first_line.char_end - first_line.char_start + first_line.newlines_before;
+                            entries.push(PageEntry::Text(TextLine {
+                                text: first_line.text.clone(),
+                                x,
+                                y: current_y,
+                                width: content_width,
+                                height: line_h,
+                                color: if item.is_comment {
+                                    Some("#888888".to_string())
+                                } else {
+                                    item.color.clone()
+                                },
+                                font_scale: if item.is_comment {
+                                    Some(0.7)
+                                } else {
+                                    (para_max_scale != 1.0).then_some(para_max_scale)
+                                },
+                                segments,
+                                is_chapter_start: char_index == 0 && page_start_char == 0,
+                                is_comment: item.is_comment,
+                            }));
+                            text_lines_on_page += 1;
+                        } else {
+                            // 隐藏模式：只累计锚点
+                            char_index += first_line.char_end - first_line.char_start + first_line.newlines_before;
+                        }
+                        
+                        // 翻页，剩余行在下一页继续
+                        break_page!();
+                        
+                        // 布局剩余行
+                        for line in laid.iter().skip(1) {
+                            if current_y + line_h > bottom_limit
+                                && text_lines_on_page >= MIN_LINES_PER_PAGE
+                            {
+                                break_page!();
+                            }
+                            if item.is_comment && !self.config.show_comments {
+                                char_index += line.char_end - line.char_start + line.newlines_before;
+                                continue;
+                            }
+                            let x = self.align_line_x(line.width, content_width, item.align);
+                            let segments = Self::segments_for_line(line, item);
+                            char_index += line.char_end - line.char_start + line.newlines_before;
+                            entries.push(PageEntry::Text(TextLine {
+                                text: line.text.clone(),
+                                x,
+                                y: current_y,
+                                width: content_width,
+                                height: line_h,
+                                color: if item.is_comment {
+                                    Some("#888888".to_string())
+                                } else {
+                                    item.color.clone()
+                                },
+                                font_scale: if item.is_comment {
+                                    Some(0.7)
+                                } else {
+                                    (para_max_scale != 1.0).then_some(para_max_scale)
+                                },
+                                segments,
+                                is_chapter_start: false,
+                                is_comment: item.is_comment,
+                            }));
+                            text_lines_on_page += 1;
+                            current_y += line_h;
+                        }
+                        let space_after = item.spacing_after_em * self.config.font_size;
+                        current_y += space_after.max(self.config.paragraph_spacing);
+                        char_index += 1; // newline
+                        continue;  // 跳过下面的正常布局逻辑
+                    }
+
+                    for (line_idx, line) in laid.into_iter().enumerate() {
                         if current_y + line_h > bottom_limit
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
                         {
@@ -520,7 +671,9 @@ impl LayoutEngine {
                             char_index += line.char_end - line.char_start + line.newlines_before;
                             continue;
                         }
-                        let x = self.align_line_x(line.width, content_width, item.align);
+                        // M9 P5：首行 x 偏移 indent_px
+                        let x = self.align_line_x(line.width, content_width, item.align)
+                            + if line_idx == 0 { indent_px } else { 0.0 };
                         let segments = Self::segments_for_line(&line, item);
                         char_index += line.char_end - line.char_start + line.newlines_before;
                         entries.push(PageEntry::Text(TextLine {
@@ -728,6 +881,7 @@ impl LayoutEngine {
                     // ③ 行尾禁则——上一行末尾是开括号类 ⇒ 移入下行。
                     // 拖带过程持续维持「不产生新的词中断裂」。
                     let mut pulled: Vec<&str> = Vec::new();
+                    let mut pulled_ew: Vec<f32> = Vec::new();
                     let mut pulled_w = 0.0f32;
                     loop {
                         if pieces.is_empty() || pulled.len() >= 16 {
@@ -741,22 +895,28 @@ impl LayoutEngine {
                             .unwrap_or(ch);
                         if is_word_char(head_c) && tail_word {
                             let p = pieces.pop().unwrap();
+                            let ew = eff_widths.pop().unwrap_or(0.0);
                             pulled.insert(0, p);
-                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            pulled_ew.insert(0, ew);
+                            pulled_w += ew;
                             continue;
                         }
                         if pulled.is_empty() && head_forbidden {
                             let p = pieces.pop().unwrap();
+                            let ew = eff_widths.pop().unwrap_or(0.0);
                             pulled.insert(0, p);
-                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            pulled_ew.insert(0, ew);
+                            pulled_w += ew;
                             continue;
                         }
                         if pulled.is_empty()
                             && tail_c.map_or(false, |c| LINE_END_FORBIDDEN.contains(&c))
                         {
                             let p = pieces.pop().unwrap();
+                            let ew = eff_widths.pop().unwrap_or(0.0);
                             pulled.insert(0, p);
-                            pulled_w += eff_widths.pop().unwrap_or(0.0);
+                            pulled_ew.insert(0, ew);
+                            pulled_w += ew;
                             continue;
                         }
                         break;
@@ -768,9 +928,13 @@ impl LayoutEngine {
                         current_width = 0.0;
                     } else {
                         finished.push(pieces.concat());
-                        for p in pulled.drain(..) {
-                            pieces.push(p);
-                        }
+                        // M9.1 修复：清空已发射前缀后仅保留拉回片段——
+                        // 原实现把 pulled 压在未清空的前缀之上，导致下一行
+                        // 重复发射整个前缀（EPUB/TXT 双路径同源 bug）
+                        pieces.clear();
+                        pieces.extend(pulled.drain(..));
+                        eff_widths.clear();
+                        eff_widths.extend(pulled_ew);
                         current_width = pulled_w;
                     }
                 } else {
@@ -914,8 +1078,16 @@ impl LayoutEngine {
         let mut line_start = 0usize;
         let mut gi = 0usize;
         let mut pending_newlines = 0usize;
+        // M9 P5：首行缩进——首行可用宽度减去 indent_px
+        let indent_px = item.indent_first_line_em.unwrap_or(0.0) * self.config.font_size;
+        let mut first_line = indent_px > 0.01;
+        let mut effective_max_width = if first_line {
+            (max_width - indent_px).max(1.0)
+        } else {
+            max_width
+        };
         // M7 安全余量：吸收 Dart/Skia 相对 ab_glyph 的正向测量偏差
-        let eps = Self::line_fill_epsilon(max_width);
+        let eps = Self::line_fill_epsilon(effective_max_width);
 
         macro_rules! flush_line {
             ($flushed_len:expr) => {{
@@ -927,6 +1099,11 @@ impl LayoutEngine {
                     newlines_before: pending_newlines,
                 });
                 pending_newlines = 0;
+                // M9 P5：首行已结束，后续行恢复满宽
+                if first_line {
+                    first_line = false;
+                    effective_max_width = max_width;
+                }
             }};
         }
 
@@ -951,7 +1128,7 @@ impl LayoutEngine {
             let w_eff =
                 self.get_char_width_scaled(ch, font, scale) + self.config.letter_spacing;
 
-            if current_width + w_eff > max_width - eps && !pieces.is_empty() {
+            if current_width + w_eff > effective_max_width - eps && !pieces.is_empty() {
                 let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
                 let word_boundary = is_word_char(ch)
                     && pieces
@@ -1008,9 +1185,11 @@ impl LayoutEngine {
                     }
                     flush_line!(line_chars);
                     line_start += line_chars;
-                    for (g0, c0, w0) in pulled {
-                        pieces.push((g0, c0, w0));
-                    }
+                    // M9.1 修复：清空已发射前缀后仅保留拉回片段——
+                    // 原实现把 pulled 压在未清空的前缀之上，导致下一行
+                    // 重复发射整个前缀（EPUB/TXT 双路径同源 bug）
+                    pieces.clear();
+                    pieces.extend(pulled);
                     line_chars = pulled_chars;
                     current_width = pulled_w;
                 } else {
@@ -1524,6 +1703,7 @@ mod tests {
             runs: Vec::new(),
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
+            indent_first_line_em: None,
             is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
@@ -1574,6 +1754,7 @@ mod tests {
             ],
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
+            indent_first_line_em: None,
             is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
@@ -1617,6 +1798,7 @@ mod tests {
             }],
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
+            indent_first_line_em: None,
             is_comment: false,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
@@ -1651,6 +1833,7 @@ mod tests {
             runs: Vec::new(),
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
+            indent_first_line_em: None,
             is_comment: false,
         };
         let font = engine
@@ -1703,6 +1886,7 @@ mod tests {
                 runs: Vec::new(),
                 spacing_before_em: 0.0,
                 spacing_after_em: 0.0,
+                indent_first_line_em: None,
                 is_comment: false,
             };
             let lines = engine
@@ -1759,6 +1943,7 @@ mod tests {
                 runs: Vec::new(),
                 spacing_before_em: 0.0,
                 spacing_after_em: 0.0,
+                indent_first_line_em: None,
                 is_comment: false,
             }],
         };
@@ -1835,6 +2020,7 @@ mod tests {
                 runs: Vec::new(),
                 spacing_before_em: 0.0,
                 spacing_after_em: 0.0,
+                indent_first_line_em: None,
                 is_comment: false,
             }],
         };
@@ -1994,6 +2180,582 @@ mod tests {
             "auto 表应贴内容区右缘：x={} 预期={}",
             min_x,
             expected_left
+        );
+    }
+
+    // ===== M9 P2：底部留白智能优化 =====
+
+    /// 辅助：创建标题项（带字号倍率 + 段前间距）
+    fn heading_item(text: &str, scale: f32) -> TextItem {
+        TextItem {
+            text: text.to_string(),
+            font_scale: Some(scale),
+            spacing_before_em: 0.6,
+            spacing_after_em: 0.3,
+            ..Default::default()
+        }
+    }
+
+    /// 辅助：创建长文本段落（指定字符数，内容为重复"测试"）
+    fn long_text_item(char_count: usize) -> TextItem {
+        let text: String = "测试".repeat(char_count / 2 + 1);
+        TextItem {
+            text,
+            ..Default::default()
+        }
+    }
+
+    /// 辅助：统计页面中的文本行数
+    fn count_text_lines(page: &Page) -> usize {
+        page.entries
+            .iter()
+            .filter(|e| matches!(e, PageEntry::Text(_)))
+            .count()
+    }
+
+    /// P2 场景 B：低填充率（<50%）时长段落首行强制留在当前页，
+    /// 避免前一页大面积底部留白
+    #[test]
+    fn items_scene_b_long_para_first_line_forced_at_low_fill() {
+        let (engine, _config) = create_test_engine();
+
+        // 3 个短段落（每段 1 行 ≈ 14 字 < 280px 内容宽）
+        // 填充率：(3 * (24+8) - 8) / 380 = 88/380 ≈ 23%  < 50%
+        let short = LayoutItem::text("短段落测试一二三四五六七八");
+        let items = vec![
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            // 长段落：300+ 字 → 18+ 行，无法整段容纳
+            LayoutItem::Text(long_text_item(300)),
+        ];
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2, "长段落应跨页");
+
+        // 场景 B 触发：page 0 末尾应有长段落首行
+        let page0_lines = count_text_lines(&pages[0]);
+        // 3 短段落行 + 1 长段落首行 = 4 行
+        assert_eq!(
+            page0_lines, 4,
+            "场景 B 应将长段落首行留在 page 0（3 短 + 1 长 = 4），实际 {}",
+            page0_lines
+        );
+
+        // page 1 应有长段落的剩余行
+        let page1_lines = count_text_lines(&pages[1]);
+        assert!(
+            page1_lines > 1,
+            "page 1 应有长段落剩余行，实际 {}",
+            page1_lines
+        );
+    }
+
+    /// P2 场景 B 反向：高填充率（>=50%）时长段落正常拆分跨页，
+    /// 不触发首行强制
+    #[test]
+    fn items_scene_b_long_para_normal_split_at_high_fill() {
+        let (engine, _config) = create_test_engine();
+
+        // 7 个短段落：填充率 ≈ 59%
+        // (7 * (24+8) - 8) / 380 = 216/380 ≈ 57%  > 50%
+        let short = LayoutItem::text("短段落测试一二三四五六七八");
+        let items = vec![
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            short.clone(),
+            // 长段落
+            LayoutItem::Text(long_text_item(300)),
+        ];
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2, "长段落应跨页");
+
+        // 场景 B 不触发：page 0 应有 7 短段落 + 多行长段落（正常拆分）
+        let page0_lines = count_text_lines(&pages[0]);
+        assert!(
+            page0_lines > 8,
+            "高填充率时正常拆分：page 0 应有 >8 行（7 短 + 多长），实际 {}",
+            page0_lines
+        );
+    }
+
+    /// P2 场景 C：标题孤立避免——剩余空间不足标题+2 行时推到下一页
+    #[test]
+    fn items_scene_c_heading_isolation_avoidance() {
+        let (engine, _config) = create_test_engine();
+
+        // 10 个短段落填充至 current_y ≈ 330
+        // (10 * 32 - 8) + 10 = 322, current_y = 330
+        let short = LayoutItem::text("短段落测试一二三四五六七八");
+        let heading = LayoutItem::Text(heading_item("第一章 测试标题", 1.4));
+        let items: Vec<LayoutItem> = (0..10)
+            .map(|_| short.clone())
+            .chain(std::iter::once(heading))
+            .collect();
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2, "标题应被推到下一页");
+
+        // page 0 不应以标题结尾（标题被 Scene C 推走）
+        let page0_last = pages[0].entries.last();
+        let last_is_heading = page0_last.map_or(false, |e| match e {
+            PageEntry::Text(l) => l.font_scale == Some(1.4),
+            _ => false,
+        });
+        assert!(
+            !last_is_heading,
+            "Scene C：标题不应孤立在 page 0 末尾"
+        );
+
+        // page 1 应以标题开始
+        let page1_first = pages[1].entries.first();
+        let first_is_heading = page1_first.map_or(false, |e| match e {
+            PageEntry::Text(l) => l.font_scale == Some(1.4),
+            _ => false,
+        });
+        assert!(
+            first_is_heading,
+            "Scene C：标题应在 page 1 顶部"
+        );
+    }
+
+    /// P2 场景 C 反向：空间充足时标题不推页
+    #[test]
+    fn items_scene_c_heading_fits_when_space_sufficient() {
+        let (engine, _config) = create_test_engine();
+
+        // 3 个短段落：current_y ≈ 106，剩余空间充足
+        let short = LayoutItem::text("短段落测试一二三四五六七八");
+        let heading = LayoutItem::Text(heading_item("第一章 测试标题", 1.4));
+        let items = vec![short.clone(), short.clone(), short.clone(), heading];
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+
+        // 空间充足：标题应在 page 0（同页）
+        assert_eq!(
+            pages.len(),
+            1,
+            "空间充足时不应分页，实际 {} 页",
+            pages.len()
+        );
+
+        let has_heading = pages[0].entries.iter().any(|e| match e {
+            PageEntry::Text(l) => l.font_scale == Some(1.4),
+            _ => false,
+        });
+        assert!(has_heading, "标题应在 page 0");
+    }
+
+    /// P2 综合：多种段落长度混合布局，非末页底部留白 <15%
+    #[test]
+    fn items_mixed_layout_whitespace_under_15_percent() {
+        let (engine, config) = create_test_engine();
+        let bottom_limit = config.height - config.padding.bottom;
+        let content_height = config.height - config.padding.top - config.padding.bottom;
+        let max_whitespace = content_height * 0.15; // 15% 阈值
+
+        // 混合段落：短（1 行）、中（3 行）、长（5 行），模拟真实章节
+        let p1 = LayoutItem::text("短段一二三四五六七");
+        let p3 = LayoutItem::Text(long_text_item(48)); // ~3 行
+        let p5 = LayoutItem::Text(long_text_item(82)); // ~5 行
+
+        let items: Vec<LayoutItem> = vec![
+            p1.clone(), p3.clone(), p5.clone(),
+            p1.clone(), p3.clone(), p5.clone(),
+            p1.clone(), p3.clone(), p5.clone(),
+            p1.clone(), p3.clone(), p5.clone(),
+            p1.clone(), p3.clone(),
+        ];
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() > 1, "应有多页");
+
+        // 验证非末页底部留白 < 15%
+        for i in 0..pages.len().saturating_sub(1) {
+            let page = &pages[i];
+            if page.entries.is_empty() {
+                continue;
+            }
+            let last_bottom = page
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    PageEntry::Text(l) => Some(l.y + l.height),
+                    _ => None,
+                })
+                .fold(0.0f32, f32::max);
+
+            let whitespace = bottom_limit - last_bottom;
+            assert!(
+                whitespace < max_whitespace,
+                "page {} 底部留白 {:.1}px 超过 15%（{:.1}px）",
+                i,
+                whitespace,
+                max_whitespace
+            );
+        }
+    }
+
+    // ===== M9 P5：首行缩进渲染 =====
+
+    /// P5：首行缩进——首行 x 偏移 indent_px，后续行 x=padding.left
+    #[test]
+    fn items_first_line_indent_offsets_x() {
+        let (engine, config) = create_test_engine();
+        let indent_em = 2.0f32; // 2em
+        let indent_px = indent_em * config.font_size; // 2 × 16 = 32px
+
+        let item = TextItem {
+            text: "首行缩进测试这是一段很长很长的文本用来确保产生多行".to_string(),
+            indent_first_line_em: Some(indent_em),
+            ..Default::default()
+        };
+        let pages = engine.layout_items(&[LayoutItem::Text(item)], 0).unwrap();
+        assert_eq!(pages.len(), 1);
+
+        let texts: Vec<&TextLine> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.len() > 1, "应产生多行");
+
+        // 首行 x = padding.left + indent_px
+        let expected_first_x = config.padding.left + indent_px;
+        assert!(
+            (texts[0].x - expected_first_x).abs() < 1.0,
+            "首行 x 应为 {}（padding.left + indent_px），实际 {}",
+            expected_first_x,
+            texts[0].x
+        );
+
+        // 后续行 x = padding.left（无缩进）
+        for (i, line) in texts.iter().enumerate().skip(1) {
+            assert!(
+                (line.x - config.padding.left).abs() < 1.0,
+                "第 {} 行 x 应为 {}（padding.left），实际 {}",
+                i + 1,
+                config.padding.left,
+                line.x
+            );
+        }
+    }
+
+    /// P5：无缩进时布局与 M8 一致（x = padding.left）
+    #[test]
+    fn items_no_indent_matches_m8_layout() {
+        let (engine, config) = create_test_engine();
+
+        let item = TextItem {
+            text: "无缩进段落测试这是一段很长很长的文本".to_string(),
+            indent_first_line_em: None,
+            ..Default::default()
+        };
+        let pages = engine.layout_items(&[LayoutItem::Text(item)], 0).unwrap();
+        let texts: Vec<&TextLine> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+
+        // 所有行 x = padding.left
+        for (i, line) in texts.iter().enumerate() {
+            assert!(
+                (line.x - config.padding.left).abs() < 1.0,
+                "第 {} 行 x 应为 {}，实际 {}",
+                i + 1,
+                config.padding.left,
+                line.x
+            );
+        }
+    }
+
+    /// P5：首行缩进减小首行可用宽度（首行容纳更少字符）
+    #[test]
+    fn items_indent_reduces_first_line_capacity() {
+        let (engine, _config) = create_test_engine();
+
+        // 同一文本，有缩进 vs 无缩进，首行字符数应不同
+        let text = "首行缩进对比测试这是一段很长很长的文本内容啊".to_string();
+
+        let no_indent = LayoutItem::Text(TextItem {
+            text: text.clone(),
+            indent_first_line_em: None,
+            ..Default::default()
+        });
+        let with_indent = LayoutItem::Text(TextItem {
+            text,
+            indent_first_line_em: Some(2.0),
+            ..Default::default()
+        });
+
+        let pages_no = engine.layout_items(&[no_indent], 0).unwrap();
+        let pages_indent = engine.layout_items(&[with_indent], 0).unwrap();
+
+        let no_first = &pages_no[0].entries[0];
+        let indent_first = &pages_indent[0].entries[0];
+
+        // 有缩进的首行应更短（容纳更少字符）
+        match (no_first, indent_first) {
+            (PageEntry::Text(no_line), PageEntry::Text(indent_line)) => {
+                assert!(
+                    indent_line.text.chars().count() <= no_line.text.chars().count(),
+                    "有缩进首行字符数应 ≤ 无缩进首行（{} ≤ {}）",
+                    indent_line.text.chars().count(),
+                    no_line.text.chars().count()
+                );
+            }
+            _ => panic!("应为文本行"),
+        }
+    }
+
+    /// M9.1 回归：禁则回退不得重复/丢失文本（真书《剑来》段落15，129 字）
+    ///
+    /// 根因：pull-back 分支 flush 后未清空 pieces 的已发射前缀，pulled 压在
+    /// 前缀之上，下一行重复发射整个前缀（EPUB styled / TXT 双路径同源）。
+    /// 本测试用真书文本 + 探针同参（内容宽 360、字号 18、缩进 2em），
+    /// 行边界恰好命中「、」行首禁则触发回退路径。
+    #[test]
+    fn kinsoku_pullback_no_text_duplication() {
+        // 用探针精确条件：400×800、字号18、padding 20（内容宽 360）
+        let mut font_manager = FontManager::new();
+        let _ = font_manager.load_font_from_file("TestFont".to_string(), "C:/Windows/Fonts/simsun.ttc");
+        let config = LayoutConfig {
+            width: 400.0,
+            height: 800.0,
+            font_size: 18.0,
+            line_height_multiplier: 1.5,
+            padding: EdgeInsets { left: 20.0, top: 20.0, right: 20.0, bottom: 20.0 },
+            font_name: "TestFont".to_string(),
+            letter_spacing: 0.0,
+            paragraph_spacing: 8.0,
+            page_fill_threshold: 0.9,
+            show_comments: true,
+        };
+        let engine = LayoutEngine::new(config, font_manager);
+        let text = "暮色里，小镇名叫泥瓶巷的僻静地方，有个孤苦伶仃的清瘦少年。此时，他正按照习俗，一手持蜡烛，一手持桃枝，照耀房梁、墙壁、木床等处，用桃枝敲敲打打，试图借此驱赶蛇蝎、蜈蚣等。他嘴里念念有词，是这座小镇祖祖辈辈传下来的老话：二月二，烛照梁，桃打墙，人间蛇虫无处藏。".to_string();
+        assert_eq!(text.chars().count(), 129);
+
+        let item = LayoutItem::Text(TextItem {
+            text: text.clone(),
+            indent_first_line_em: Some(2.0),
+            ..Default::default()
+        });
+        let pages = engine.layout_items(&[item], 0).unwrap();
+
+        // 不变量 1：行文本拼接 == 原文（无重复无丢失）
+        let joined: String = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(joined, text, "行拼接必须还原原文（禁则回退不得重复/丢失）");
+
+        // 不变量 2：任一行不得超出内容宽（超宽行会触发 Dart 端缩字兜底）
+        let content_w = 360.0;
+        for e in &pages[0].entries {
+            if let PageEntry::Text(l) = e {
+                let n = l.text.chars().count() as f32;
+                assert!(
+                    n * 18.0 <= content_w * 1.02,
+                    "行宽超限：{} 字符 × 18px > 内容宽",
+                    l.text
+                );
+            }
+        }
+    }
+
+    // ===== M9.2 TXT 行级分页测试 =====
+    //
+    // 基线引擎：300×400、字号16、行高24、padding10、段距8
+    // → 内容区 280×380，每页至多 15 行（floor(380/24)），底边 y=390。
+
+    /// 构造恰好折行为 target_lines 行的填充段（按实际字体度量搜索字数）
+    fn text_with_lines(engine: &LayoutEngine, target_lines: usize, filler: char) -> String {
+        let font = engine.font_manager.get_font(&engine.config.font_name).unwrap();
+        let cw = engine.config.width - engine.config.padding.left - engine.config.padding.right;
+        for n in 1..20000 {
+            let text: String = std::iter::repeat(filler).take(n).collect();
+            let lines = engine.layout_paragraph(&text, cw, font).unwrap().len();
+            if lines >= target_lines {
+                assert_eq!(lines, target_lines, "单字增减跳过了目标行数");
+                return text;
+            }
+        }
+        panic!("无法构造 {} 行文本", target_lines);
+    }
+
+    fn page_text_lines(page: &Page) -> Vec<&TextLine> {
+        page.entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn txt_long_para_line_level_split_fills_bottom() {
+        // 长段落跨页续排：首页吃满到底边，底部留白 < 1 行高
+        let (engine, config) = create_test_engine();
+        let bottom = config.height - config.padding.bottom;
+        let lh = config.font_size * config.line_height_multiplier;
+        let input = text_with_lines(&engine, 40, '甲');
+        let pages = engine.layout_text(&input, 0).unwrap();
+
+        assert!(pages.len() >= 3, "40 行应跨 ≥3 页，实得 {}", pages.len());
+        for (i, page) in pages.iter().enumerate() {
+            if i + 1 == pages.len() {
+                continue; // 末页允许留白
+            }
+            let lines = page_text_lines(page);
+            assert!(!lines.is_empty());
+            let last_bottom = lines.last().unwrap().y + lines.last().unwrap().height;
+            let gap = bottom - last_bottom;
+            assert!(
+                gap >= -0.01 && gap < lh,
+                "第 {} 页底部留白 {} 应 ∈ [0, 行高)",
+                i,
+                gap
+            );
+        }
+    }
+
+    #[test]
+    fn txt_widow_pull_back_leaves_two_lines() {
+        // 寡行保护：拆分将给下页留 1 行 → 本页少放一行，下页收两行
+        let (engine, _) = create_test_engine();
+        let para = text_with_lines(&engine, 16, '甲'); // 整页容 15 行，16 行差 1
+        let pages = engine.layout_text(&para, 0).unwrap();
+
+        assert_eq!(pages.len(), 2);
+        let p0 = page_text_lines(&pages[0]).len();
+        let p1 = page_text_lines(&pages[1]).len();
+        assert_eq!(p0, 14, "寡行控制应本页少放一行");
+        assert_eq!(p1, 2, "下页应至少两行");
+    }
+
+    #[test]
+    fn txt_orphan_avoided_when_lt2_fit() {
+        // 孤行保护：页尾仅剩 1 行空间且页已 ≥3 行 → 下一段整段推页
+        let (engine, _) = create_test_engine();
+        let a = text_with_lines(&engine, 14, '甲'); // 占满 14 行后剩 1 行空间
+        let b = text_with_lines(&engine, 5, '乙');
+        let input = format!("{}\n{}", a, b);
+        let pages = engine.layout_text(&input, 0).unwrap();
+
+        assert!(pages.len() >= 2);
+        let p0 = page_text_lines(&pages[0]);
+        assert_eq!(p0.len(), 14, "第一页应只有 A 的 14 行");
+        assert!(p0.iter().all(|l| l.text.starts_with('甲')), "B 不得出现在第一页");
+        let p1_first = &page_text_lines(&pages[1])[0];
+        assert!(p1_first.text.starts_with('乙'), "B 应从新页开始");
+    }
+
+    #[test]
+    fn txt_exact_fit_no_extra_break() {
+        // 恰好放满一页的段：不产生多余翻页/假空尾页
+        let (engine, _) = create_test_engine();
+        let para = text_with_lines(&engine, 15, '甲'); // floor(380/24)=15 恰满
+        let pages = engine.layout_text(&para, 0).unwrap();
+        assert_eq!(pages.len(), 1, "15 行应恰好一页");
+        assert_eq!(page_text_lines(&pages[0]).len(), 15);
+    }
+
+    #[test]
+    fn txt_line_level_ignores_fill_threshold_slider() {
+        // M9.2 核心：门槛调低（旧实现会在 fill≥0.5 时整段推页留 188px 空白）
+        // 新策略无视门槛行级拆分——长段在剩余空间放置尽可能多的行
+        let (mut engine, mut cfg) = create_test_engine();
+        cfg.page_fill_threshold = 0.5;
+        engine.config.page_fill_threshold = 0.5;
+
+        let short = "第一段落。";
+        let long = text_with_lines(&engine, 20, '甲');
+        let input = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}", short, short, short, short, short, short, long);
+        let pages = engine.layout_text(&input, 0).unwrap();
+
+        assert!(pages.len() >= 2);
+        let p0 = page_text_lines(&pages[0]);
+        // 6 短行 + 剩余 188px 可容 floor(188/24)=7 行长段行
+        assert_eq!(p0.len(), 13, "6 短行 + 7 行长段应同页（实得 {}）", p0.len());
+        assert_eq!(p0.iter().filter(|l| l.text.starts_with('甲')).count(), 7);
+        // 余下 13 行到第二页
+        let p1 = page_text_lines(&pages[1]);
+        assert_eq!(p1.iter().filter(|l| l.text.starts_with('甲')).count(), 13);
+    }
+
+    #[test]
+    fn txt_anchor_continuity_across_manual_split() {
+        // 字符锚点不变式：页间 end==下一页 start；每页跨度==Σ行字符数；
+        // is_chapter_start 仅全书首行
+        let (engine, _) = create_test_engine();
+        let input = text_with_lines(&engine, 40, '甲');
+        let total_chars = input.chars().count();
+        let pages = engine.layout_text(&input, 0).unwrap();
+        assert!(pages.len() >= 3);
+
+        let mut covered = 0usize;
+        for (i, window) in pages.windows(2).enumerate() {
+            assert_eq!(
+                window[0].end_char_index, window[1].start_char_index,
+                "第 {} 页与次页锚点必须无缝衔接",
+                i
+            );
+        }
+        for (i, page) in pages.iter().enumerate() {
+            let span: usize = page_text_lines(page).iter().map(|l| l.text.chars().count()).sum();
+            // 段尾换行计入其所在页的 end 锚点：单段输入时仅末页 +1
+            let newline_tail = if i + 1 == pages.len() { 1 } else { 0 };
+            assert_eq!(
+                page.end_char_index - page.start_char_index,
+                span + newline_tail,
+                "第 {} 页锚点跨度应等于行字符和(+段尾换行)",
+                i
+            );
+            covered += span;
+            for (j, l) in page_text_lines(page).iter().enumerate() {
+                let expect_start = i == 0 && j == 0;
+                assert_eq!(l.is_chapter_start, expect_start, "章节起始标记错位");
+            }
+        }
+        assert_eq!(covered, total_chars, "全部行字符数应还原原文");
+    }
+
+    #[test]
+    fn txt_spacing_once_after_continuation() {
+        // 跨页续排后段间距只加一次：续排末行与下一段首行的 y 差 = 行高+段距
+        let (engine, config) = create_test_engine();
+        let lh = config.font_size * config.line_height_multiplier;
+        let spacing = config.paragraph_spacing;
+        let long = text_with_lines(&engine, 20, '甲');
+        let input = format!("{}\n末段。", long);
+        let pages = engine.layout_text(&input, 0).unwrap();
+        assert!(pages.len() >= 2);
+
+        let p1 = page_text_lines(&pages[1]);
+        assert!(p1.len() >= 2, "续排页应有长段余行 + 末段");
+        let gap = p1[p1.len() - 1].y - p1[p1.len() - 2].y;
+        assert!(
+            (gap - (lh + spacing)).abs() < 0.01,
+            "续排末行→下段首行间距应为 行高+段距（{}），实得 {}",
+            lh + spacing,
+            gap
         );
     }
 }

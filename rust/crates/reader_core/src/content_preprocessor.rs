@@ -327,13 +327,14 @@ impl ContentPreprocessor {
     /// Protect HTML tags by replacing them with unique placeholders.
     /// This prevents replace rules from corrupting HTML structure.
     fn protect_html_tags(content: &str) -> (String, HashMap<String, String>) {
+        use std::sync::OnceLock;
+        static HTML_TAG_REGEX: OnceLock<Regex> = OnceLock::new();
         let mut html_map = HashMap::new();
         let mut counter: usize = 0;
 
-        let html_regex = match Regex::new(r"<[^>]+>") {
-            Ok(re) => re,
-            Err(_) => return (content.to_string(), html_map),
-        };
+        // 静态字面量模式必然编译成功（原 Err 兜底为死分支，已删）
+        let html_regex =
+            HTML_TAG_REGEX.get_or_init(|| Regex::new(r"<[^>]+>").expect("<[^>]+> 编译必胜"));
 
         let protected = html_regex.replace_all(content, |caps: &regex::Captures| {
             let placeholder = format!("__HTML_PH_{}__", counter);

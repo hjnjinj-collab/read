@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1767164213;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 391291883;
 
 // Section: executor
 
@@ -1618,6 +1618,7 @@ fn wire__crate__api__get_page_count_processed_impl(
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
+            let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1639,6 +1640,7 @@ fn wire__crate__api__get_page_count_processed_impl(
                             api_chinese_convert,
                             api_replace_rules,
                             api_page_fill_threshold,
+                            api_para_format_hash,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1683,6 +1685,7 @@ fn wire__crate__api__get_page_count_structured_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
+            let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1702,6 +1705,7 @@ fn wire__crate__api__get_page_count_structured_impl(
                             api_chinese_convert,
                             api_page_fill_threshold,
                             api_show_comments,
+                            api_para_format_hash,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1751,6 +1755,7 @@ fn wire__crate__api__get_page_processed_impl(
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
             let api_anchor_char_offset = <Option<usize>>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
+            let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1774,6 +1779,7 @@ fn wire__crate__api__get_page_processed_impl(
                             api_replace_rules,
                             api_anchor_char_offset,
                             api_page_fill_threshold,
+                            api_para_format_hash,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1820,6 +1826,7 @@ fn wire__crate__api__get_page_structured_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
+            let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1841,6 +1848,7 @@ fn wire__crate__api__get_page_structured_impl(
                             api_chinese_convert,
                             api_page_fill_threshold,
                             api_show_comments,
+                            api_para_format_hash,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2491,6 +2499,7 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
+            let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2510,6 +2519,7 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
                             api_chinese_convert,
                             api_page_fill_threshold,
                             api_show_comments,
+                            api_para_format_hash,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2734,6 +2744,53 @@ fn wire__crate__api__set_content_cleaning_options_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::set_content_cleaning_options(api_options)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__set_paragraph_format_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_paragraph_format_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_enable_indent = <bool>::sse_decode(&mut deserializer);
+            let api_indent_size_chars = <u8>::sse_decode(&mut deserializer);
+            let api_paragraph_spacing_multiplier = <f32>::sse_decode(&mut deserializer);
+            let api_re_paragraph_mode = <u8>::sse_decode(&mut deserializer);
+            let api_smart_split_threshold = <u32>::sse_decode(&mut deserializer);
+            let api_aggressive_split_threshold = <u32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::set_paragraph_format_settings(
+                            api_enable_indent,
+                            api_indent_size_chars,
+                            api_paragraph_spacing_multiplier,
+                            api_re_paragraph_mode,
+                            api_smart_split_threshold,
+                            api_aggressive_split_threshold,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )
@@ -3219,6 +3276,13 @@ impl SseDecode for crate::PageSegInfo {
     }
 }
 
+impl SseDecode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for u64 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3362,7 +3426,10 @@ fn pde_ffi_dispatcher_primary_impl(
         66 => {
             wire__crate__api__set_content_cleaning_options_impl(port, ptr, rust_vec_len, data_len)
         }
-        67 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
+        67 => {
+            wire__crate__api__set_paragraph_format_settings_impl(port, ptr, rust_vec_len, data_len)
+        }
+        68 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3948,6 +4015,13 @@ impl SseEncode for crate::PageSegInfo {
         <bool>::sse_encode(self.bold, serializer);
         <bool>::sse_encode(self.italic, serializer);
         <bool>::sse_encode(self.underline, serializer);
+    }
+}
+
+impl SseEncode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 
