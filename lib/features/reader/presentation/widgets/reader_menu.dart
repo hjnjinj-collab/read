@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../providers/reader_provider.dart';
+import '../widgets/page_turn/page_turn_types.dart';
 import 'chapter_list_dialog.dart';
 import 'reader_settings_dialog.dart';
 
 class ReaderMenu extends ConsumerWidget {
   final VoidCallback onClose;
+  final PageTurnMode? pageTurnMode;
+  final ValueChanged<PageTurnMode>? onPageTurnModeChanged;
 
   const ReaderMenu({
     Key? key,
     required this.onClose,
+    this.pageTurnMode,
+    this.onPageTurnModeChanged,
   }) : super(key: key);
 
   @override
@@ -109,6 +114,35 @@ class ReaderMenu extends ConsumerWidget {
                 ],
               ),
             ),
+
+            const Divider(height: 1),
+
+            // P5: 翻页模式选择
+            if (onPageTurnModeChanged != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.swap_horiz, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('翻页方式:', style: TextStyle(fontSize: 14)),
+                    const SizedBox(width: 12),
+                    _PageTurnModeChip(
+                      label: '卷曲',
+                      mode: PageTurnMode.simulation,
+                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                      onSelected: onPageTurnModeChanged!,
+                    ),
+                    const SizedBox(width: 8),
+                    _PageTurnModeChip(
+                      label: '滚动',
+                      mode: PageTurnMode.verticalScroll,
+                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                      onSelected: onPageTurnModeChanged!,
+                    ),
+                  ],
+                ),
+              ),
 
             const Divider(height: 1),
 
@@ -288,6 +322,30 @@ class _BookmarkListDialogState extends ConsumerState<BookmarkListDialog> {
           child: const Text('关闭'),
         ),
       ],
+    );
+  }
+}
+
+class _PageTurnModeChip extends StatelessWidget {
+  final String label;
+  final PageTurnMode mode;
+  final PageTurnMode currentMode;
+  final ValueChanged<PageTurnMode> onSelected;
+
+  const _PageTurnModeChip({
+    required this.label,
+    required this.mode,
+    required this.currentMode,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = mode == currentMode;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (_) => onSelected(mode),
     );
   }
 }

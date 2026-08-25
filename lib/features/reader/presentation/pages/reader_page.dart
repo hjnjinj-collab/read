@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/models/simple_models.dart';
 import '../providers/reader_provider.dart';
 import '../providers/reader_render_state.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
-import '../widgets/reader_page_widget.dart';
+import '../widgets/page_turn_composer.dart';
 import '../widgets/reader_menu.dart';
 
 class ReaderPage extends ConsumerStatefulWidget {
@@ -25,23 +26,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     with WidgetsBindingObserver {
   bool _showMenu = false;
 
-  // ── P2: 滑动手势状态 ──
+  /// P4: 翻页模式（默认仿真卷曲；P5 从设置读取）
+  PageTurnMode _pageTurnMode = PageTurnMode.simulation;
 
+  // ── P2: 滑动手势状态 ──
   bool _isDragging = false;
   double _dragStartX = 0;
   double _dragStartY = 0;
   double _dragLastX = 0;
   double _dragLastY = 0;
-  /// 用于速度计算：记录最近一次 move 的时间戳
   int _dragLastTimestampMs = 0;
-  /// 松手瞬间的速度（px/s），正=向右/下
   double _releaseVelocityX = 0;
+
+  /// P4: 翻页合成器的 key，用于调用其方法
+  final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Open book after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final size = MediaQuery.of(context).size;
       ref.read(readerProvider.notifier).setScreenSize(size.width, size.height);
@@ -58,9 +61,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   @override
   void didChangeMetrics() {
-    // 窗口缩放/拖拽：布局参数必须跟随，否则按旧宽断行的文本与
-    // 图片会溢出新画布（截图验证过的错位根因）。
-    // 不经 MediaQuery.of(context)——observer 回调里取物理尺寸换算更可靠
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final size = view.physicalSize / view.devicePixelRatio;
     ref.read(readerProvider.notifier).onWindowResized(size.width, size.height);
@@ -72,7 +72,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
-  // ── P2: 手势处理 ──
+  // ── P2+P4: 手势处理（驱动 PageTurnComposer） ──
 
   void _onPointerDown(PointerDownEvent event) {
     _isDragging = true;
@@ -90,7 +90,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final now = event.timeStamp.inMilliseconds;
     final dt = now - _dragLastTimestampMs;
     if (dt > 0) {
-      // 瞬时速度（px/s），用于松手时判定
       _releaseVelocityX =
           (event.position.dx - _dragLastX) / (dt / 1000.0);
     }
@@ -98,11 +97,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _dragLastY = event.position.dy;
     _dragLastTimestampMs = now;
 
-    // 发布 viewport 到 render store（驱动后续动画层）
+    // P4: 首次移动时确定方向并通知 composer 开始拖拽
+    final dx = _dragLastX - _dragStartX;
+    final dy = _dragLastY - _dragStartY;
+    final distance = dx.abs();
+
+    // 超过启动阈值才开始动画（避免微抖误触发）
+    if (distance > 8.0 && _composerKey.currentState?.isIdle == true) {
+      final direction = dx > 0 ? PageDirection.prev : PageDirection.next;
+      // 竖向意图压倒横向时不启动
+      if (dy.abs() <= distance * 1.5) {
+        _composerKey.currentState?.startDrag(direction);
+      }
+    }
+
+    // 持续更新进度
+    if (_composerKey.currentState?.isIdle == false) {
+      final screenWidth = MediaQuery.of(context).size.width;
+      final progress = (distance / screenWidth).clamp(0.0, 1.0);
+      _composerKey.currentState?.updateDrag(progress);
+    }
+
+    // 同时更新 viewport（供后续高级动画使用）
     final size = MediaQuery.of(context).size;
-    final direction = _determineDirection(
-      event.position.dx - _dragStartX,
-    );
     ref.read(readerRenderStoreProvider).publishViewport(
       width: size.width,
       height: size.height,
@@ -110,7 +127,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       startY: _dragStartY,
       touchX: event.position.dx,
       touchY: event.position.dy,
-      direction: direction,
+      direction: dx > 0 ? PageDirection.prev : PageDirection.next,
       isAnimationRunning: true,
     );
   }
@@ -120,14 +137,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _isDragging = false;
 
     final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
 
-    // 发布 viewport 最终状态（动画结束）
+    // 发布 viewport 最终状态
     ref.read(readerRenderStoreProvider).publishViewport(
       width: screenWidth,
-      height: screenHeight,
+      height: MediaQuery.of(context).size.height,
       startX: _dragStartX,
       startY: _dragStartY,
       touchX: _dragLastX,
@@ -136,7 +152,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       isAnimationRunning: false,
     );
 
-    // 委托纯函数判定手势意图（已覆盖 9 个测试用例）
+    // P4: 如果 composer 正在拖拽，判定并执行动画
+    if (_composerKey.currentState?.isIdle == false) {
+      final result = resolveGesture(
+        dx: dx,
+        dy: dy,
+        velocityX: _releaseVelocityX,
+        screenWidth: screenWidth,
+      );
+      final shouldTurn = result.decision == GestureDecision.turnPage;
+      _composerKey.currentState?.endDrag(shouldTurn: shouldTurn);
+      return;
+    }
+
+    // 否则走点击判定
     final result = resolveGesture(
       dx: dx,
       dy: dy,
@@ -147,37 +176,35 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     switch (result.decision) {
       case GestureDecision.verticalIntent:
       case GestureDecision.snapBack:
-        // 不处理 / 回弹（无动画时页面已显示，无需额外操作）
         break;
       case GestureDecision.tap:
         _handleTapAt(_dragStartX, screenWidth);
         break;
       case GestureDecision.turnPage:
         if (result.direction == PageDirection.prev) {
-          ref.read(readerProvider.notifier).previousPage();
+          _composerKey.currentState?.tapTurn(PageDirection.prev);
         } else if (result.direction == PageDirection.next) {
-          ref.read(readerProvider.notifier).nextPage();
+          _composerKey.currentState?.tapTurn(PageDirection.next);
         }
         break;
     }
   }
 
-  /// 根据水平偏移判定翻页方向（viewport 用）
-  PageDirection _determineDirection(double dx) {
-    if (dx > 0) return PageDirection.prev; // 右滑 = 上一页
-    if (dx < 0) return PageDirection.next; // 左滑 = 下一页
-    return PageDirection.none;
-  }
-
-  /// 点击区域判定（与原逻辑一致：左30%上一页，右30%下一页，中40%菜单）
   void _handleTapAt(double tapX, double screenWidth) {
     if (tapX < screenWidth * 0.3) {
-      ref.read(readerProvider.notifier).previousPage();
+      _composerKey.currentState?.tapTurn(PageDirection.prev);
     } else if (tapX > screenWidth * 0.7) {
-      ref.read(readerProvider.notifier).nextPage();
+      _composerKey.currentState?.tapTurn(PageDirection.next);
     } else {
       _toggleMenu();
     }
+  }
+
+  /// P5: 切换翻页模式
+  void _setPageTurnMode(PageTurnMode mode) {
+    setState(() {
+      _pageTurnMode = mode;
+    });
   }
 
   @override
@@ -185,11 +212,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final state = ref.watch(readerProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5DC), // Beige background
+      backgroundColor: const Color(0xFFF5F5DC),
       body: SafeArea(
         child: Stack(
           children: [
-            // Main reading area — P2: Listener 处理原始指针事件（tap + drag 统一）
+            // P4: 阅读区域用 Listener + PageTurnComposer
             Listener(
               onPointerDown: _onPointerDown,
               onPointerMove: _onPointerMove,
@@ -209,29 +236,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             ),
                           )
                         : state.currentPage != null
-                            ? ReaderPageWidget(
-                                pageInfo: state.currentPage!,
-                                applyBold: ref.watch(
-                                    readerProvider.notifier).boldEnabled,
-                                applyItalic: ref.watch(
-                                    readerProvider.notifier).italicEnabled,
-                                // TXT 章节标题加粗对齐：粗体开关开启且非 EPUB
-                                applyTitleBold:
-                                    ref.watch(readerProvider.notifier)
-                                            .boldEnabled &&
-                                        !ref.watch(readerProvider.notifier)
-                                            .renderAsEpub,
-                                // M7 排版基准同源：绘制与 Rust 断行一致
-                                baseFontSize: ref.watch(
-                                    readerProvider.notifier).fontSize,
-                                baseLineHeight: ref.watch(
-                                    readerProvider.notifier).lineHeight,
+                            ? _PageTurnComposerBridge(
+                                key: _composerKey,
+                                currentPage: state.currentPage!,
+                                mode: _pageTurnMode,
                               )
                             : const Center(child: Text('No content')),
               ),
             ),
 
-            // Top status bar (always visible)
+            // Top status bar
             Positioned(
               top: 0,
               left: 0,
@@ -271,7 +285,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               ),
             ),
 
-            // Bottom menu (conditional)
+            // Bottom menu
             if (_showMenu)
               Positioned(
                 bottom: 0,
@@ -279,11 +293,61 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 right: 0,
                 child: ReaderMenu(
                   onClose: () => setState(() => _showMenu = false),
+                  pageTurnMode: _pageTurnMode,
+                  onPageTurnModeChanged: _setPageTurnMode,
                 ),
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 桥接 Widget：暴露 PageTurnComposer 的方法给 ReaderPage
+///
+/// 通过 GlobalKey 调用，避免 ReaderPage 直接持有 composer State。
+class _PageTurnComposerBridge extends StatefulWidget {
+  final PageInfo currentPage;
+  final PageTurnMode mode;
+
+  const _PageTurnComposerBridge({
+    super.key,
+    required this.currentPage,
+    required this.mode,
+  });
+
+  @override
+  State<_PageTurnComposerBridge> createState() => _PageTurnComposerBridgeState();
+}
+
+class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
+  final _composerKey = GlobalKey<PageTurnComposerState>();
+
+  bool get isIdle => _composerKey.currentState?.isIdle ?? true;
+
+  void startDrag(PageDirection direction) {
+    _composerKey.currentState?.onDragStart(direction);
+  }
+
+  void updateDrag(double progress) {
+    _composerKey.currentState?.onDragUpdate(progress);
+  }
+
+  void endDrag({required bool shouldTurn}) {
+    _composerKey.currentState?.onDragEnd(shouldTurn: shouldTurn);
+  }
+
+  void tapTurn(PageDirection direction) {
+    _composerKey.currentState?.onTapTurn(direction);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PageTurnComposer(
+      key: _composerKey,
+      currentPage: widget.currentPage,
+      mode: widget.mode,
     );
   }
 }
