@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/reader_provider.dart';
+import '../providers/reader_render_state.dart';
+import '../widgets/page_turn/page_turn_gesture.dart';
+import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/reader_page_widget.dart';
 import '../widgets/reader_menu.dart';
 
@@ -21,6 +24,18 @@ class ReaderPage extends ConsumerStatefulWidget {
 class _ReaderPageState extends ConsumerState<ReaderPage>
     with WidgetsBindingObserver {
   bool _showMenu = false;
+
+  // ── P2: 滑动手势状态 ──
+
+  bool _isDragging = false;
+  double _dragStartX = 0;
+  double _dragStartY = 0;
+  double _dragLastX = 0;
+  double _dragLastY = 0;
+  /// 用于速度计算：记录最近一次 move 的时间戳
+  int _dragLastTimestampMs = 0;
+  /// 松手瞬间的速度（px/s），正=向右/下
+  double _releaseVelocityX = 0;
 
   @override
   void initState() {
@@ -57,19 +72,110 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
-  void _handleTap(TapUpDetails details) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final tapX = details.globalPosition.dx;
+  // ── P2: 手势处理 ──
 
-    // Divide screen into 3 zones: left (previous), middle (menu), right (next)
+  void _onPointerDown(PointerDownEvent event) {
+    _isDragging = true;
+    _dragStartX = event.position.dx;
+    _dragStartY = event.position.dy;
+    _dragLastX = event.position.dx;
+    _dragLastY = event.position.dy;
+    _dragLastTimestampMs = event.timeStamp.inMilliseconds;
+    _releaseVelocityX = 0;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!_isDragging) return;
+
+    final now = event.timeStamp.inMilliseconds;
+    final dt = now - _dragLastTimestampMs;
+    if (dt > 0) {
+      // 瞬时速度（px/s），用于松手时判定
+      _releaseVelocityX =
+          (event.position.dx - _dragLastX) / (dt / 1000.0);
+    }
+    _dragLastX = event.position.dx;
+    _dragLastY = event.position.dy;
+    _dragLastTimestampMs = now;
+
+    // 发布 viewport 到 render store（驱动后续动画层）
+    final size = MediaQuery.of(context).size;
+    final direction = _determineDirection(
+      event.position.dx - _dragStartX,
+    );
+    ref.read(readerRenderStoreProvider).publishViewport(
+      width: size.width,
+      height: size.height,
+      startX: _dragStartX,
+      startY: _dragStartY,
+      touchX: event.position.dx,
+      touchY: event.position.dy,
+      direction: direction,
+      isAnimationRunning: true,
+    );
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    if (!_isDragging) return;
+    _isDragging = false;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final dx = _dragLastX - _dragStartX;
+    final dy = _dragLastY - _dragStartY;
+
+    // 发布 viewport 最终状态（动画结束）
+    ref.read(readerRenderStoreProvider).publishViewport(
+      width: screenWidth,
+      height: screenHeight,
+      startX: _dragStartX,
+      startY: _dragStartY,
+      touchX: _dragLastX,
+      touchY: _dragLastY,
+      direction: PageDirection.none,
+      isAnimationRunning: false,
+    );
+
+    // 委托纯函数判定手势意图（已覆盖 9 个测试用例）
+    final result = resolveGesture(
+      dx: dx,
+      dy: dy,
+      velocityX: _releaseVelocityX,
+      screenWidth: screenWidth,
+    );
+
+    switch (result.decision) {
+      case GestureDecision.verticalIntent:
+      case GestureDecision.snapBack:
+        // 不处理 / 回弹（无动画时页面已显示，无需额外操作）
+        break;
+      case GestureDecision.tap:
+        _handleTapAt(_dragStartX, screenWidth);
+        break;
+      case GestureDecision.turnPage:
+        if (result.direction == PageDirection.prev) {
+          ref.read(readerProvider.notifier).previousPage();
+        } else if (result.direction == PageDirection.next) {
+          ref.read(readerProvider.notifier).nextPage();
+        }
+        break;
+    }
+  }
+
+  /// 根据水平偏移判定翻页方向（viewport 用）
+  PageDirection _determineDirection(double dx) {
+    if (dx > 0) return PageDirection.prev; // 右滑 = 上一页
+    if (dx < 0) return PageDirection.next; // 左滑 = 下一页
+    return PageDirection.none;
+  }
+
+  /// 点击区域判定（与原逻辑一致：左30%上一页，右30%下一页，中40%菜单）
+  void _handleTapAt(double tapX, double screenWidth) {
     if (tapX < screenWidth * 0.3) {
-      // Left zone - previous page
       ref.read(readerProvider.notifier).previousPage();
     } else if (tapX > screenWidth * 0.7) {
-      // Right zone - next page
       ref.read(readerProvider.notifier).nextPage();
     } else {
-      // Middle zone - toggle menu
       _toggleMenu();
     }
   }
@@ -83,9 +189,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       body: SafeArea(
         child: Stack(
           children: [
-            // Main reading area
-            GestureDetector(
-              onTapUp: _handleTap,
+            // Main reading area — P2: Listener 处理原始指针事件（tap + drag 统一）
+            Listener(
+              onPointerDown: _onPointerDown,
+              onPointerMove: _onPointerMove,
+              onPointerUp: _onPointerUp,
               child: Container(
                 color: Colors.transparent,
                 child: state.isLoading
