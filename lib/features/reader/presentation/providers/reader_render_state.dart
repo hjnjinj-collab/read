@@ -1,7 +1,16 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/simple_models.dart';
 import '../widgets/page_turn/page_turn_types.dart';
+
+/// 全局 ReaderRenderStateStore 实例（P1 接线层）
+///
+/// ReaderNotifier 通过此 provider 获取 store 并发布三页结构态；
+/// 动画层通过此 provider 读取 viewport 并驱动渲染。
+final readerRenderStoreProvider = Provider<ReaderRenderStateStore>(
+  (ref) => ReaderRenderStateStore(),
+);
 
 /// 只读渲染页面包装：identity + revision 语义
 ///

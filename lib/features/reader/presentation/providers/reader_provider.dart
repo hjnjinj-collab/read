@@ -5,6 +5,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/ffi/book_service.dart';
 import '../services/book_image_store.dart';
+import 'reader_render_state.dart';
 
 /// 全局数据库实例（drift，进程内单例）
 final appDatabaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
@@ -12,11 +13,13 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 class ReaderNotifier extends Notifier<ReadingState> {
   late final BookService _bookService;
   late final AppDatabase _db;
+  late final ReaderRenderStateStore _renderStore;
 
   @override
   ReadingState build() {
     _bookService = ref.read(bookServiceProvider);
     _db = ref.read(appDatabaseProvider);
+    _renderStore = ref.read(readerRenderStoreProvider);
     // M9.2：构造期即按默认值计算段落格式哈希，与 Rust 全局默认
     // （Smart+缩进开）对齐——消除"Rust 已按默认排版、Dart 却挂
     // hash=0 缓存键"的启动错位（设置无持久化，重启两侧同回默认）
@@ -209,6 +212,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// Open a book file
   Future<void> openBook(String filePath, String bookName) async {
     state = state.copyWith(isLoading: true, error: null);
+    // P1：发布 loading 状态到 render store
+    _renderStore.publishStructure(isLoading: true, message: '正在打开书籍…');
 
     try {
       // 构建导入级净化选项（结构净化在导入时一次完成，
@@ -341,6 +346,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         currentPageIndex: page.pageIndex,
       );
 
+      // P1 接线层：发布三页结构态到 render store（fire-and-forget，
+      // 当前页已就绪可渲染，邻居页加载不阻塞 UI）
+      _publishRenderStructureAsync(page);
+
       // EPUB 翻章预取（M6）：当前章已渲染，后台预计算下一章分页入缓存，
       // 翻章零延迟。fire-and-forget：失败/被前台让路均静默不影响阅读
       _prefetchNextChapterEpub();
@@ -364,6 +373,113 @@ class ReaderNotifier extends Notifier<ReadingState> {
       }
     } catch (e) {
       state = state.copyWith(error: e.toString());
+    }
+  }
+
+  /// P1 接线层：异步加载邻居页并发布三页结构态到 render store
+  ///
+  /// 当前页已在 state 中，这里并行加载 prev/next 页后一次性发布。
+  /// 失败静默（邻居页缺失不影响当前页渲染）。
+  Future<void> _publishRenderStructureAsync(PageInfo currentPage) async {
+    try {
+      final chapterIndex = state.currentChapterIndex;
+      final pageIndex = state.currentPageIndex;
+
+      // 并行加载前后页
+      final results = await Future.wait([
+        _loadNeighborPage(chapterIndex, pageIndex - 1), // prev
+        _loadNeighborPage(chapterIndex, pageIndex + 1), // next
+      ]);
+
+      _renderStore.publishStructure(
+        previousPage: results[0],
+        currentPage: currentPage,
+        nextPage: results[1],
+        durPageIndex: pageIndex,
+      );
+    } catch (_) {
+      // 邻居页加载失败，仅发布当前页
+      _renderStore.publishStructure(
+        currentPage: currentPage,
+        durPageIndex: state.currentPageIndex,
+      );
+    }
+  }
+
+  /// 安全加载相邻页：越界或异常返回 null
+  Future<PageInfo?> _loadNeighborPage(
+    int chapterIndex,
+    int pageIndex,
+  ) async {
+    try {
+      if (pageIndex < 0) {
+        // 跨章到上一章末页
+        if (chapterIndex <= 0) return null;
+        final prevChapter = chapterIndex - 1;
+        final count = await _pageCountOf(prevChapter);
+        if (count <= 0) return null;
+        return await _loadSinglePage(prevChapter, count - 1);
+      }
+
+      final count = await _pageCountOf(chapterIndex);
+      if (pageIndex >= count) {
+        // 跨章到下一章首页
+        if (chapterIndex >= state.chapters.length - 1) return null;
+        return await _loadSinglePage(chapterIndex + 1, 0);
+      }
+
+      return await _loadSinglePage(chapterIndex, pageIndex);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 加载单页（复用 _loadCurrentPage 的参数管线，但不修改 state）
+  Future<PageInfo> _loadSinglePage(int chapterIndex, int pageIndex) async {
+    if (_isEpub) {
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
+          : _chineseConvert == ChineseConvertType.t2s ? 2
+          : 0;
+      return _bookService.getPageStructured(
+        state.bookId!,
+        chapterIndex,
+        pageIndex,
+        width: _screenWidth,
+        height: _screenHeight,
+        fontSize: _fontSize,
+        lineHeightMultiplier: _lineHeight,
+        paddingLeft: _paddingHorizontal,
+        paddingTop: _paddingVertical,
+        paddingRight: _paddingHorizontal,
+        paddingBottom: _paddingVertical,
+        chineseConvert: chineseConvertCode,
+        pageFillThreshold: _pageFillThreshold,
+        showComments: _showComments,
+        paraFormatHash: _paraFormatHash,
+      );
+    } else {
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
+          : _chineseConvert == ChineseConvertType.t2s ? 2
+          : 0;
+      return _bookService.getPageProcessed(
+        state.bookId!,
+        chapterIndex,
+        pageIndex,
+        width: _screenWidth,
+        height: _screenHeight,
+        fontSize: _fontSize,
+        lineHeightMultiplier: _lineHeight,
+        paddingLeft: _paddingHorizontal,
+        paddingTop: _paddingVertical,
+        paddingRight: _paddingHorizontal,
+        paddingBottom: _paddingVertical,
+        removeDuplicateTitle: _removeDuplicateTitle,
+        reSegment: false,
+        chineseConvert: chineseConvertCode,
+        replaceRules: _replaceRules,
+        pageFillThreshold: _pageFillThreshold,
+        paraFormatHash: _paraFormatHash,
+      );
     }
   }
 
@@ -627,6 +743,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     BookImageStore.instance.clear();
     _invalidatePageCountCache(); // M8-P4：关书清页数缓存
     state = const ReadingState();
+    // P1：清空三页渲染状态
+    _renderStore.publishStructure(
+      isLoading: false,
+    );
   }
 }
 
