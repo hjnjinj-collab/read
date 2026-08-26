@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../../../../core/models/simple_models.dart';
@@ -301,13 +303,13 @@ class CurlPainter extends CustomPainter {
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
     paintContent(canvas, revealPage);
-    // 折缝铰链阴影（沿主折缝曲线，向露出区衰减）
-    _drawFoldEdgeShadow(
+    // 折缝宽域投影（向露出区衰减）
+    _drawFoldWash(
       canvas,
-      foldCurve,
+      p,
+      page,
       revealArea,
-      alphaScale: 0.6,
-      widthScale: 0.8,
+      intoFlap: false,
     );
     canvas.restore();
 
@@ -336,13 +338,13 @@ class CurlPainter extends CustomPainter {
       canvas.transform(foldMirrorMatrix(p).storage);
       paintContent(canvas, foldingPage);
       canvas.restore();
-      // 折缝铰链阴影（沿主折缝曲线，向翻面内部衰减）
-      _drawFoldEdgeShadow(
+      // 折缝宽域曲面明暗（向翻面内部衰减至触点）
+      _drawFoldWash(
         canvas,
-        foldCurve,
+        p,
+        page,
         backFace,
-        alphaScale: 1.0,
-        widthScale: 1.0,
+        intoFlap: true,
       );
       canvas.restore();
     }
@@ -381,41 +383,59 @@ class CurlPainter extends CustomPainter {
     );
   }
 
-  /// 折边铰链阴影：沿两条贝塞尔折边做同心描边渐变——暗芯贴曲线、
-  /// 向外快速衰减（指数式观感），天然跟随折边曲率。
+  /// 折缝宽域明暗：旋转坐标系（原点 vertex1、x 轴沿镜像轴法向）内
+  /// 绘制垂直于折缝的线性渐变。
   ///
-  /// （替代沿镜像轴锚定的直线渐变带：可见折边是贝塞尔曲线，两端
-  /// 偏离轴最多 dis/2，直线带与折边脱节产生「贴上去的灰条」感）
+  /// 翻面侧（intoFlap）：折缝黑@0.28 → dis/5 处 0.10 → 触点全透明——
+  /// 垂直平分线性质保证触点（翻面最远点）到镜像轴距离恰为 dis/2，
+  /// 渐变终点天然落在翻面最远端：恢复曲面光影且尖端无叠帧堆黑
+  /// （替代同心描边：描边在窄楔形尖端全部叠加，组合透明度 ≈0.9 必然
+  /// 堆成黑斑）。x<0（折缝曲线两端偏离轴的月牙）钳位取折缝值。
   ///
-  /// 每档描边以折边为中心向两侧各渗半宽，裁剪后可见部分为贴边的
-  /// 单侧渐变；多档叠加在折边处合成近黑暗芯。
-  static const List<(double, int)> _foldShadowStops = [
-    (7, 0xB3),
-    (16, 0x80),
-    (28, 0x4D),
-    (44, 0x26),
-    (62, 0x0F),
-  ];
-
-  void _drawFoldEdgeShadow(
+  /// 露出区侧：折缝黑@0.20 → dis/2 全透明（折起页在下方页上的投影）。
+  void _drawFoldWash(
     Canvas canvas,
-    Path edgeShadow,
+    CurlPoints p,
+    Size page,
     Path clipArea, {
-    required double alphaScale,
-    required double widthScale,
+    required bool intoFlap,
   }) {
+    final angle = math.atan2(
+      p.ctrl1.dx - p.corner.dx,
+      p.ctrl2.dy - p.corner.dy,
+    );
+    final maxLen = page.longestSide * 1.5;
     canvas.save();
     canvas.clipPath(clipArea);
-    for (final (w, a) in _foldShadowStops) {
-      canvas.drawPath(
-        edgeShadow,
-        Paint()
-          ..color = Colors.black.withValues(alpha: (a / 255) * alphaScale)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = w * widthScale
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    canvas.translate(p.vertex1.dx, p.vertex1.dy);
+    canvas.rotate(angle);
+    final Rect rect;
+    final LinearGradient gradient;
+    if (intoFlap) {
+      rect = Rect.fromLTWH(-p.dis / 2, 0, p.dis, maxLen);
+      gradient = LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        stops: const [0.0, 0.5, 0.7, 1.0],
+        colors: [
+          Colors.black.withValues(alpha: 0.28),
+          Colors.black.withValues(alpha: 0.28),
+          Colors.black.withValues(alpha: 0.10),
+          Colors.transparent,
+        ],
+      );
+    } else {
+      rect = Rect.fromLTWH(-p.dis / 2, 0, p.dis / 2, maxLen);
+      gradient = LinearGradient(
+        begin: Alignment.centerRight,
+        end: Alignment.centerLeft,
+        colors: [
+          Colors.black.withValues(alpha: 0.20),
+          Colors.transparent,
+        ],
       );
     }
+    canvas.drawRect(rect, Paint()..shader = gradient.createShader(rect));
     canvas.restore();
   }
 
