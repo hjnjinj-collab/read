@@ -385,9 +385,9 @@ class CurlPainter extends CustomPainter {
   /// 角点与触点到轴等距（dis/2），渐变横跨整个露出区，光影笼罩下一页
   /// 全部内容。窄描边只贴折缝，两个问题同时消除。
   static const List<(double, int)> _revealShadowStops = [
-    (8, 0x73),
-    (20, 0x40),
-    (36, 0x1A),
+    (8, 0x99),
+    (22, 0x59),
+    (42, 0x2E),
   ];
 
   void _drawRevealShadow(
