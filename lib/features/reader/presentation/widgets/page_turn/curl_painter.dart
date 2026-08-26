@@ -266,12 +266,18 @@ class CurlPainter extends CustomPainter {
 
     final pageRectPath = Path()..addRect(Offset.zero & page);
 
-    // 折边曲线（两条二次贝塞尔）——铰链阴影与正面软阴影共用：
-    // 阴影沿此曲线衰减，与可见折边完全贴合
-    final edgeShadow = Path()
+    // 主折缝曲线（贝塞尔1：start1→ctrl1→end1）——铰链阴影/正面软阴影/折痕高光共用。
+    // 注意：绝不能把 end1→end2 直线连进描边路径——那是弦线而非真实折边
+    // （真实边界经触点 T：end1→T→end2），沿弦线描边会在翻面内部画出
+    // 一条与折缝不平行的直线黑影
+    final foldCurve = Path()
+      ..moveTo(p.start1.dx, p.start1.dy)
+      ..quadraticBezierTo(p.ctrl1.dx, p.ctrl1.dy, p.end1.dx, p.end1.dy);
+    // 第二折缝曲线（贝塞尔2：end2→ctrl2→start2）——仅正面侧软阴影
+    final frontFoldCurves = Path()
       ..moveTo(p.start1.dx, p.start1.dy)
       ..quadraticBezierTo(p.ctrl1.dx, p.ctrl1.dy, p.end1.dx, p.end1.dy)
-      ..lineTo(p.end2.dx, p.end2.dy)
+      ..moveTo(p.end2.dx, p.end2.dy)
       ..quadraticBezierTo(p.ctrl2.dx, p.ctrl2.dy, p.start2.dx, p.start2.dy);
 
     // ① 正面剩余区：被折走的页（与空闲帧同一渲染函数，像素一致）
@@ -295,10 +301,10 @@ class CurlPainter extends CustomPainter {
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
     paintContent(canvas, revealPage);
-    // 折缝铰链阴影（沿折边曲线，向露出区衰减）
+    // 折缝铰链阴影（沿主折缝曲线，向露出区衰减）
     _drawFoldEdgeShadow(
       canvas,
-      edgeShadow,
+      foldCurve,
       revealArea,
       alphaScale: 0.6,
       widthScale: 0.8,
@@ -330,10 +336,10 @@ class CurlPainter extends CustomPainter {
       canvas.transform(foldMirrorMatrix(p).storage);
       paintContent(canvas, foldingPage);
       canvas.restore();
-      // 折缝铰链阴影（沿折边曲线，向翻面内部衰减）
+      // 折缝铰链阴影（沿主折缝曲线，向翻面内部衰减）
       _drawFoldEdgeShadow(
         canvas,
-        edgeShadow,
+        foldCurve,
         backFace,
         alphaScale: 1.0,
         widthScale: 1.0,
@@ -341,12 +347,12 @@ class CurlPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // ④ 正面边缘软阴影：沿折边两条二次曲线描边 + 高斯模糊，
+    // ④ 正面边缘软阴影：沿两条折缝曲线描边 + 高斯模糊，
     //    裁到正面剩余区使模糊只向正面渗透
     canvas.save();
     canvas.clipPath(frontVisible);
     canvas.drawPath(
-      edgeShadow,
+      frontFoldCurves,
       Paint()
         ..color = Colors.black.withValues(alpha: 0.30)
         ..style = PaintingStyle.stroke
@@ -354,6 +360,16 @@ class CurlPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
     );
     canvas.restore();
+
+    // ⑤ 折痕高光：折缝处细白线（纸张弯折的受光面，参考卷曲实现的
+    //    fold-highlight——暗铰链 + 细高光使折缝读作真实物理折痕）
+    canvas.drawPath(
+      foldCurve,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.40)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
 
     // 触点附近的小暗斑（手指按压感）
     canvas.drawCircle(
