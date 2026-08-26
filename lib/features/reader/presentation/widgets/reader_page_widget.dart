@@ -92,7 +92,48 @@ class PagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
+    PageContentRenderer.paintPage(
+      canvas,
+      pageInfo,
+      size: size,
+      onImageNeeded: onImageNeeded,
+      applyBold: applyBold,
+      applyItalic: applyItalic,
+      applyTitleBold: applyTitleBold,
+      baseFontSize: baseFontSize,
+      baseLineHeight: baseLineHeight,
+    );
+  }
 
+  @override
+  bool shouldRepaint(PagePainter oldDelegate) {
+    return oldDelegate.pageInfo != pageInfo ||
+        oldDelegate.applyBold != applyBold ||
+        oldDelegate.applyItalic != applyItalic ||
+        oldDelegate.applyTitleBold != applyTitleBold ||
+        oldDelegate.baseFontSize != baseFontSize ||
+        oldDelegate.baseLineHeight != baseLineHeight;
+  }
+}
+
+/// 页面内容渲染器：供 PagePainter 与翻页动画 CurlPainter 共用
+///
+/// 从 PagePainter 提取的纯绘制逻辑——给定画布与页面数据直接绘制，
+/// 不持有任何 Widget 状态。动画期间目标页未挂载为 Widget，由本渲染器
+/// 按帧绘制到裁切区域内（对齐 legado Android 每帧直绘的做法）。
+class PageContentRenderer {
+  /// 绘制背景与 entries（不含纸色底——调用方按需自绘）
+  static void paintPage(
+    Canvas canvas,
+    PageInfo pageInfo, {
+    required Size size,
+    required VoidCallback onImageNeeded,
+    bool applyBold = true,
+    bool applyItalic = true,
+    bool applyTitleBold = false,
+    double baseFontSize = 18.0,
+    double baseLineHeight = 1.5,
+  }) {
     // 整页背景：严格按 CSS background-size 语义绘制——
     // - cover/缺省：等比铺满窗口、溢出部分按 background-position 锚点裁切
     // - contain：完整显示
@@ -102,7 +143,7 @@ class PagePainter extends CustomPainter {
     if (bgHref != null) {
       final bg = BookImageStore.instance.get(bgHref);
       if (bg != null) {
-        _paintBackground(canvas, bg, Offset.zero & size);
+        _paintBackground(canvas, bg, Offset.zero & size, pageInfo);
       } else {
         BookImageStore.instance.ensureLoaded(bgHref, onImageNeeded);
       }
@@ -243,7 +284,12 @@ class PagePainter extends CustomPainter {
   }
 
   /// 背景铺放：严格 CSS background-size 语义 + position 锚点
-  void _paintBackground(Canvas canvas, ui.Image image, Rect rect) {
+  static void _paintBackground(
+    Canvas canvas,
+    ui.Image image,
+    Rect rect,
+    PageInfo pageInfo,
+  ) {
     final mode = pageInfo.backgroundSize;
 
     // stretch：拉伸铺满（允许变形，对应 background-size:100% 100%）
@@ -270,15 +316,5 @@ class PagePainter extends CustomPainter {
       alignment: Alignment(x, y),
       filterQuality: FilterQuality.medium,
     );
-  }
-
-  @override
-  bool shouldRepaint(PagePainter oldDelegate) {
-    return oldDelegate.pageInfo != pageInfo ||
-        oldDelegate.applyBold != applyBold ||
-        oldDelegate.applyItalic != applyItalic ||
-        oldDelegate.applyTitleBold != applyTitleBold ||
-        oldDelegate.baseFontSize != baseFontSize ||
-        oldDelegate.baseLineHeight != baseLineHeight;
   }
 }

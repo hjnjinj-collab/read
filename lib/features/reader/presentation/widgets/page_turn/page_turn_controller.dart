@@ -60,6 +60,11 @@ abstract class PageTurnAnimationController {
     await _controller.animateWith(simulation);
   }
 
+  /// 停止当前动画（dispose 前必须调用，避免销毁正在 tick 的控制器断言失败）
+  void stop() {
+    _controller.stop();
+  }
+
   /// 子类提供动画曲线实现
   ///
   /// [from] 当前进度，[to] 目标进度（0.0=未翻，1.0=翻完）

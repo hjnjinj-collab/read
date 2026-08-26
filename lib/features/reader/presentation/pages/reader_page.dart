@@ -73,13 +73,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   // ── P2+P4: 手势处理（驱动 PageTurnComposer） ──
+  // 全部使用 event.localPosition：与 CurlPainter 绘制坐标系一致
 
   void _onPointerDown(PointerDownEvent event) {
     _isDragging = true;
-    _dragStartX = event.position.dx;
-    _dragStartY = event.position.dy;
-    _dragLastX = event.position.dx;
-    _dragLastY = event.position.dy;
+    _dragStartX = event.localPosition.dx;
+    _dragStartY = event.localPosition.dy;
+    _dragLastX = event.localPosition.dx;
+    _dragLastY = event.localPosition.dy;
     _dragLastTimestampMs = event.timeStamp.inMilliseconds;
     _releaseVelocityX = 0;
   }
@@ -87,17 +88,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   void _onPointerMove(PointerMoveEvent event) {
     if (!_isDragging) return;
 
+    final local = event.localPosition;
     final now = event.timeStamp.inMilliseconds;
     final dt = now - _dragLastTimestampMs;
     if (dt > 0) {
       _releaseVelocityX =
-          (event.position.dx - _dragLastX) / (dt / 1000.0);
+          (local.dx - _dragLastX) / (dt / 1000.0);
     }
-    _dragLastX = event.position.dx;
-    _dragLastY = event.position.dy;
+    _dragLastX = local.dx;
+    _dragLastY = local.dy;
     _dragLastTimestampMs = now;
 
-    // P4: 首次移动时确定方向并通知 composer 开始拖拽
+    // 首次移动时确定方向并通知 composer 开始拖拽
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
     final distance = dx.abs();
@@ -107,15 +109,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       final direction = dx > 0 ? PageDirection.prev : PageDirection.next;
       // 竖向意图压倒横向时不启动
       if (dy.abs() <= distance * 1.5) {
-        _composerKey.currentState?.startDrag(direction);
+        _composerKey.currentState?.startDrag(direction, Offset(_dragStartX, _dragStartY));
       }
     }
 
-    // 持续更新进度
+    // 持续更新进度 + 实时触点
     if (_composerKey.currentState?.isIdle == false) {
       final screenWidth = MediaQuery.of(context).size.width;
       final progress = (distance / screenWidth).clamp(0.0, 1.0);
-      _composerKey.currentState?.updateDrag(progress);
+      _composerKey.currentState?.updateDrag(progress, Offset(_dragLastX, _dragLastY));
     }
 
     // 同时更新 viewport（供后续高级动画使用）
@@ -125,8 +127,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       height: size.height,
       startX: _dragStartX,
       startY: _dragStartY,
-      touchX: event.position.dx,
-      touchY: event.position.dy,
+      touchX: local.dx,
+      touchY: local.dy,
       direction: dx > 0 ? PageDirection.prev : PageDirection.next,
       isAnimationRunning: true,
     );
@@ -152,26 +154,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       isAnimationRunning: false,
     );
 
-    // P4: 如果 composer 正在拖拽，判定并执行动画
-    if (_composerKey.currentState?.isIdle == false) {
-      final result = resolveGesture(
-        dx: dx,
-        dy: dy,
-        velocityX: _releaseVelocityX,
-        screenWidth: screenWidth,
-      );
-      final shouldTurn = result.decision == GestureDecision.turnPage;
-      _composerKey.currentState?.endDrag(shouldTurn: shouldTurn);
-      return;
-    }
-
-    // 否则走点击判定
+    // 单次手势判定（此前重复计算两遍，已合并）
     final result = resolveGesture(
       dx: dx,
       dy: dy,
       velocityX: _releaseVelocityX,
       screenWidth: screenWidth,
     );
+
+    // composer 正在拖拽 → 由其执行收尾动画
+    if (_composerKey.currentState?.isIdle == false) {
+      _composerKey.currentState?.endDrag(
+        shouldTurn: result.decision == GestureDecision.turnPage,
+      );
+      return;
+    }
 
     switch (result.decision) {
       case GestureDecision.verticalIntent:
@@ -326,12 +323,12 @@ class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
 
   bool get isIdle => _composerKey.currentState?.isIdle ?? true;
 
-  void startDrag(PageDirection direction) {
-    _composerKey.currentState?.onDragStart(direction);
+  void startDrag(PageDirection direction, Offset localTouch) {
+    _composerKey.currentState?.onDragStart(direction, localTouch);
   }
 
-  void updateDrag(double progress) {
-    _composerKey.currentState?.onDragUpdate(progress);
+  void updateDrag(double progress, Offset localTouch) {
+    _composerKey.currentState?.onDragUpdate(progress, localTouch);
   }
 
   void endDrag({required bool shouldTurn}) {
