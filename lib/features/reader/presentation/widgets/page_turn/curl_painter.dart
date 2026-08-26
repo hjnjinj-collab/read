@@ -211,16 +211,15 @@ class CurlPainter extends CustomPainter {
   /// 翻页方向（决定固定折角）
   final PageDirection direction;
 
-  /// 自动播放阶段进度；拖拽阶段传 null（直接用 [touch]）
+  /// 自动播放阶段进度；拖拽阶段传 null。
+  /// 仅用于收尾淡入层门控（≥0.7 渐显目标页），触点插值由 composer 完成
   final double? autoProgress;
 
-  /// 自动播放插值起点
-  final Offset autoFrom;
-
-  /// 自动播放插值终点（翻完=角点微过冲处；回弹=手势起始点）
-  final Offset autoTo;
-
   static const Color _paperColor = Color(0xFFF5F1E8);
+
+  /// 纸背底色（正面纸色加深 ~8%，legado backgroundMeanColor 等价物：
+  /// 背面先铺不透明底再画镜像，读感为独立实心纸张）
+  static const Color _paperBackColor = Color(0xFFE9E3D5);
 
   CurlPainter({
     required this.currentImage,
@@ -230,8 +229,6 @@ class CurlPainter extends CustomPainter {
     required this.touch,
     required this.direction,
     required this.autoProgress,
-    required this.autoFrom,
-    required this.autoTo,
   });
 
   @override
@@ -241,14 +238,8 @@ class CurlPainter extends CustomPainter {
 
     final corner = cornerForDirection(direction, page);
 
-    // 自动播放阶段：触点沿 autoFrom→autoTo 按 progress 插值
-    Offset effTouch = touch;
-    final ap = autoProgress;
-    if (ap != null) {
-      effTouch =
-          Offset.lerp(autoFrom, autoTo, ap.clamp(0.0, 1.0)) ?? autoFrom;
-    }
-    final p = calcCurlPoints(effTouch, corner, page);
+    // 触点已由 composer 完成插值（拖拽=实时手指；自动=起止锚点映射）
+    final p = calcCurlPoints(touch, corner, page);
 
     // ── path0：被折走的区域（从正面剪掉）──
     final path0 = Path()
@@ -288,6 +279,8 @@ class CurlPainter extends CustomPainter {
     canvas.restore();
 
     // ③ 背面折叠区：path1 = vertex→vertex2→end2→T→end1；clip = path0∩path1
+    //    legado 配方（drawCurrentBackArea L273-335）：
+    //    不透明纸背底色 → 镜像当前页 → 折缝渐变阴影条
     final path1 = Path()
       ..moveTo(p.vertex1.dx, p.vertex1.dy)
       ..lineTo(p.vertex2.dx, p.vertex2.dy)
@@ -300,21 +293,20 @@ class CurlPainter extends CustomPainter {
     if (!backFace.getBounds().isEmpty) {
       canvas.save();
       canvas.clipPath(backFace);
-      // 沿折痕线（start1→start2）的纯反射镜像出纸背：
-      // 单位法向量保证正交（无拉伸），轴取折痕保证镜像位置正确
+      // ① 不透明纸背底色：实心纸质感，不透下层内容
+      canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
+      // ② 沿折痕线（start1→start2）的纯反射镜像出纸背：
+      //    单位法向量保证正交（无拉伸），轴取折痕保证镜像位置正确
       final m = reflectionAboutCrease(p.start1, p.start2);
       canvas.translate(p.start1.dx, p.start1.dy);
       canvas.transform(m.storage);
       canvas.translate(-p.start1.dx, -p.start1.dy);
       _drawCurrent(canvas, page);
       canvas.restore();
-      // 暗化纸背
+      // ③ 折缝阴影条：0x33→0xB0 黑（legado L110 配色），贴折缝最深
       canvas.save();
       canvas.clipPath(backFace);
-      canvas.drawRect(
-        Offset.zero & page,
-        Paint()..color = Colors.black.withValues(alpha: 0.22),
-      );
+      _drawBackFoldShadow(canvas, p, page);
       canvas.restore();
     }
 
@@ -345,6 +337,24 @@ class CurlPainter extends CustomPainter {
         ..color = Colors.black.withValues(alpha: 0.08)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
     );
+
+    // ⑤ 收尾淡入层：自动扫过末段（≥70%）以渐增不透明度铺满目标页。
+    //    保证 progress=1.0 末帧 = 100% 干净目标页 = 定格帧——无论折叠
+    //    几何残留多少当前页切片都被盖住，从机制上消灭「末帧闪回当前页」。
+    //    （对齐 legado 末帧与换页后像素一致的性质）
+    final ap = autoProgress;
+    if (ap != null && ap >= 0.7) {
+      final opacity = ((ap - 0.7) / 0.3).clamp(0.0, 1.0);
+      if (opacity > 0) {
+        canvas.saveLayer(
+          Offset.zero & page,
+          Paint()..color = Colors.white.withValues(alpha: opacity),
+        );
+        canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
+        paintContent(canvas, targetPage);
+        canvas.restore();
+      }
+    }
   }
 
   /// 当前页绘制：优先用快照位图，未就绪则直绘回退
@@ -386,6 +396,37 @@ class CurlPainter extends CustomPainter {
     canvas.restore();
   }
 
+  /// 背面折缝阴影条（legado folder-shadow，L278-333）：
+  /// 宽 f3 = min(|avg(start1.x,ctrl1.x)−ctrl1.x|, |avg(start2.y,ctrl2.y)−ctrl2.y|)，
+  /// 色 0x33→0xB0 黑，贴折缝处最深、向纸背内部渐浅
+  void _drawBackFoldShadow(Canvas canvas, CurlPoints p, Size page) {
+    final angle = math.atan2(
+      p.ctrl1.dx - p.corner.dx,
+      p.ctrl2.dy - p.corner.dy,
+    );
+    final f3 = math.min(
+      ((p.start1.dx + p.ctrl1.dx) / 2 - p.ctrl1.dx).abs(),
+      ((p.start2.dy + p.ctrl2.dy) / 2 - p.ctrl2.dy).abs(),
+    );
+    final stripW = (f3 <= 0 ? p.dis / 4 : f3).clamp(8.0, 160.0);
+    final maxLen = page.longestSide * 1.5;
+    canvas.save();
+    canvas.translate(p.start1.dx, p.start1.dy);
+    canvas.rotate(angle);
+    // 旋转坐标系中折缝为 x=0，纸背内部在 +x 侧：
+    // 折缝处最深（0xB0），向内渐浅（0x33）
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, stripW, maxLen),
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: const [Color(0xB0333333), Color(0x33333333)],
+        ).createShader(Rect.fromLTWH(0, 0, stripW, maxLen)),
+    );
+    canvas.restore();
+  }
+
   @override
   bool shouldRepaint(CurlPainter oldDelegate) {
     return oldDelegate.currentImage != currentImage ||
@@ -393,8 +434,6 @@ class CurlPainter extends CustomPainter {
         oldDelegate.targetPage != targetPage ||
         oldDelegate.touch != touch ||
         oldDelegate.autoProgress != autoProgress ||
-        oldDelegate.autoFrom != autoFrom ||
-        oldDelegate.autoTo != autoTo ||
         oldDelegate.direction != direction;
   }
 }

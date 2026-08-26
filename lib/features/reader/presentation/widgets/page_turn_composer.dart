@@ -65,6 +65,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 当前自动播放方向：true=正向翻完，false=回弹
   bool _autoIsTurn = true;
 
+  /// 自动动画起始时的控制器进度（触点插值映射 [from→1] 或 [from→0] 用）
+  double _autoFromProgress = 0;
+
   /// 翻页提交后的定格页：动画末帧与目标页内容一致，定格显示它直到
   /// state 真正切换到新页（didUpdateWidget 撤除），消除旧页闪现
   PageInfo? _settledTarget;
@@ -199,6 +202,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final controller = _turnController;
     if (controller == null) return;
     _autoIsTurn = shouldTurn;
+    _autoFromProgress = controller.progress;
     if (shouldTurn) {
       await controller.animateTurn();
       _commitPageTurn();
@@ -240,10 +244,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   @override
   void didUpdateWidget(PageTurnComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // state 已切换到新页（pageIndex 对上）→ 撤定格，无缝交还正常渲染
+    // state 已切换到新页 → 撤定格，无缝交还正常渲染。
+    // 快速路径：preloaded 直采用同一实例，identical 必然命中；
+    // 兜底路径：跨章 FFI 换新实例时按 pageIndex 对齐
     if (_settledTarget != null &&
-        widget.currentPage != oldWidget.currentPage &&
-        widget.currentPage.pageIndex == _settledTarget!.pageIndex) {
+        (identical(widget.currentPage, _settledTarget) ||
+            (widget.currentPage != oldWidget.currentPage &&
+                widget.currentPage.pageIndex ==
+                    _settledTarget!.pageIndex))) {
       _settledTarget = null;
       if (mounted) setState(() {});
     }
@@ -273,17 +281,34 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final progress = _turnController!.progress;
     final size = MediaQuery.of(context).size;
     final autoActive = _turnController!.isAnimating;
+    final autoProgress = autoActive ? progress : null;
     final notifier = ref.watch(readerProvider.notifier);
 
-    // 自动阶段锚点：
-    //   翻完 → 从松手位置向角点微过冲收拢（折面塌平）
-    //   回弹 → 从松手位置回到手势起始点
-    final corner = cornerForDirection(_turnDirection, size);
-    final Offset autoTo;
-    if (_autoIsTurn) {
-      autoTo = corner + (corner - _releaseTouch) * 0.12;
-    } else {
-      autoTo = _dragFirstTouch;
+    // 自动阶段触点插值（legado onAnimStart L226-237 终点语义）：
+    //   翻完 → 触点扫过整页（NEXT 终点 (-w,h)），折叠吞没全页后交换；
+    //     收尾由 CurlPainter 的淡入层保证末帧 = 100% 干净目标页
+    //   回弹 → 从松手位置回到手势起始点（legado cancel 缩回语义）
+    // 映射从起始进度 _autoFromProgress 归一化，避免松手瞬间折叠跳变
+    Offset effTouch = _lastTouchLocal;
+    if (autoProgress != null) {
+      final from = _autoFromProgress.clamp(0.0, 1.0);
+      final double t;
+      if (_autoIsTurn) {
+        t = ((autoProgress - from) / (1.0 - from)).clamp(0.0, 1.0);
+      } else {
+        t = from <= 0.001
+            ? 1.0
+            : ((from - autoProgress) / from).clamp(0.0, 1.0);
+      }
+      final Offset sweepTarget;
+      if (_autoIsTurn) {
+        sweepTarget = _turnDirection == PageDirection.next
+            ? Offset(-size.width * 0.25, size.height * 0.90)
+            : Offset(size.width * 1.25, size.height * 0.90);
+      } else {
+        sweepTarget = _dragFirstTouch;
+      }
+      effTouch = Offset.lerp(_releaseTouch, sweepTarget, t)!;
     }
 
     void paintContent(Canvas canvas, PageInfo page) {
@@ -308,11 +333,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           currentPage: widget.currentPage,
           targetPage: _targetPage!,
           paintContent: paintContent,
-          touch: _lastTouchLocal,
+          touch: effTouch,
           direction: _turnDirection,
-          autoProgress: autoActive ? progress : null,
-          autoFrom: _releaseTouch,
-          autoTo: autoTo,
+          autoProgress: autoProgress,
         ),
       ),
     );
