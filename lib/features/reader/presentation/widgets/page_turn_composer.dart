@@ -53,6 +53,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 当前页快照（拖拽开始捕获；null 时 CurlPainter 回退直绘）
   ui.Image? _currentSnap;
 
+  /// 快照归属页：与当前页不一致的快照是陈旧内容，拖拽开始时废弃
+  PageInfo? _snapPage;
+
   /// 实时触点（本地坐标，拖拽期间更新）
   Offset _lastTouchLocal = Offset.zero;
 
@@ -96,6 +99,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       _directFlip(direction);
       return;
     }
+    // 目标==可见页说明 model 尚未跟上 state（翻页提交窗口期）→
+    // 延迟启动：reader_page 在后续指针移动时会重试 startDrag
+    // （isIdle 仍为 true），邻居结构发布落地后自然恢复
+    if (identical(target, widget.currentPage)) return;
 
     _turnDirection = direction;
     _targetPage = target;
@@ -104,8 +111,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
 
-    _captureCurrentSnapshot();
-
+    _prepareSnapshot();
     _replaceController();
     setState(() {});
   }
@@ -133,6 +139,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       _directFlip(direction);
       return;
     }
+    // 同 onDragStart：提交窗口期目标==可见页时延迟启动
+    if (identical(target, widget.currentPage)) return;
 
     final size = MediaQuery.of(context).size;
     // 合成起手触点：next 从右缘中下起手，prev 从左缘
@@ -147,7 +155,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = start;
     _lastTouchLocal = start;
 
-    _captureCurrentSnapshot();
+    _prepareSnapshot();
     _replaceController();
     setState(() {});
 
@@ -183,15 +191,30 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     );
   }
 
+  /// 拖拽开始前的快照准备：归属页不符的快照是上一轮翻页的陈旧内容，
+  /// 直接废弃——捕获完成的异步窗口内 CurlPainter 回退直绘当前页
+  /// （与空闲帧像素一致，无闪现）；快照常备时（预捕获命中）零开销
+  void _prepareSnapshot() {
+    if (!identical(_snapPage, widget.currentPage)) {
+      _currentSnap?.dispose();
+      _currentSnap = null;
+      _snapPage = null;
+    }
+    _captureCurrentSnapshot();
+  }
+
   Future<void> _captureCurrentSnapshot() async {
     final ctx = _pageBoundaryKey.currentContext;
     if (ctx == null) return;
     final ro = ctx.findRenderObject();
     if (ro is! RenderRepaintBoundary || !ro.attached) return;
+    // 边界此刻显示的页（定格优先）即快照内容归属
+    final snapPage = _settledTarget ?? widget.currentPage;
     try {
       final img = await ro.toImage(pixelRatio: 1.0);
       _currentSnap?.dispose();
       _currentSnap = img;
+      _snapPage = snapPage;
     } catch (_) {
       // 快照失败不致命：CurlPainter 回退到内容直绘
     }
@@ -253,7 +276,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
                 widget.currentPage.pageIndex ==
                     _settledTarget!.pageIndex))) {
       _settledTarget = null;
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+        // 新当前页已上屏 → 帧末预捕获快照：快速连翻时拖拽开始
+        // 快照常备，不落入直绘回退窗口
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _captureCurrentSnapshot();
+        });
+      }
     }
   }
 
@@ -302,9 +332,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       }
       final Offset sweepTarget;
       if (_autoIsTurn) {
+        // legado 精确终点语义（onAnimStart L226-237）：触点扫到折痕轴
+        // 恰落对侧页缘——NEXT(-w,h)→轴落 x=0，PREV(2w,h)→轴落 x=w，
+        // 末帧折叠几何吞没整页，无当前页残缝（淡入层仅数值兜底）
         sweepTarget = _turnDirection == PageDirection.next
-            ? Offset(-size.width * 0.25, size.height * 0.90)
-            : Offset(size.width * 1.25, size.height * 0.90);
+            ? Offset(-size.width, size.height)
+            : Offset(size.width * 2, size.height);
       } else {
         sweepTarget = _dragFirstTouch;
       }

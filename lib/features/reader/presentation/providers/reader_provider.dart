@@ -391,6 +391,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
         _loadNeighborPage(chapterIndex, pageIndex + 1), // next
       ]);
 
+      // 异步期间状态已前进 → 本批邻居已过期，直接丢弃。
+      // 否则在途发布后落地会把结构态回写覆盖成旧页
+      // （model.current=旧页、可见页=新页），后续拖拽会取到
+      // 「目标页==可见页」的陈旧索引，卷曲把当前页翻给当前页。
+      if (!identical(state.currentPage, currentPage)) return;
+
       _renderStore.publishStructure(
         previousPage: results[0],
         currentPage: currentPage,

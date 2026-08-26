@@ -3,6 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:legado_flutter/features/reader/presentation/widgets/page_turn/curl_painter.dart';
 import 'package:legado_flutter/features/reader/presentation/widgets/page_turn/page_turn_types.dart';
 
+/// 仿射矩阵作用于点（storage 列主序：[m00,m01,.., m10,m11,.., tx,ty,..]）
+Offset applyM(Matrix4 m, Offset p) => Offset(
+      m.storage[0] * p.dx + m.storage[4] * p.dy + m.storage[12],
+      m.storage[1] * p.dx + m.storage[5] * p.dy + m.storage[13],
+    );
+
 void main() {
   const page = Size(400, 800);
 
@@ -202,6 +208,60 @@ void main() {
       );
       expect(p.ctrl1.dx.isFinite, isTrue);
       expect(p.end1.dx.isFinite, isTrue);
+    });
+  });
+
+  group('foldMirrorMatrix', () {
+    // 折叠的定义性质：角点关于「触点-角点垂直平分线」的镜像 = 触点。
+    // 轴取过 ctrl1——对齐 legado f8/f9 矩阵的铰链语义。
+    test('角点经镜像矩阵变换后落在触点（含出界触点与回拉触点）', () {
+      final touches = [
+        const Offset(250, 500), // 页内普通拖拽
+        const Offset(30, 780), // 触发 start1 出界回拉
+        const Offset(-400, 800), // 横扫终点（触点出页外，无回拉）
+        const Offset(120, 300),
+      ];
+      for (final touch in touches) {
+        final p = calcCurlPoints(touch, const Offset(400, 800), page);
+        final c = applyM(foldMirrorMatrix(p), const Offset(400, 800));
+        expect(c.dx, closeTo(p.touch.dx, 1e-6), reason: 'touch=$touch');
+        expect(c.dy, closeTo(p.touch.dy, 1e-6), reason: 'touch=$touch');
+      }
+    });
+
+    test('轴上点为不动点：ctrl1 与触点-角点中点经镜像不变', () {
+      final p = calcCurlPoints(
+        const Offset(250, 500),
+        const Offset(400, 800),
+        page,
+      );
+      final m = foldMirrorMatrix(p);
+
+      final c1 = applyM(m, p.ctrl1);
+      expect(c1.dx, closeTo(p.ctrl1.dx, 1e-6));
+      expect(c1.dy, closeTo(p.ctrl1.dy, 1e-6));
+
+      final mid = Offset(
+        (p.touch.dx + p.corner.dx) / 2,
+        (p.touch.dy + p.corner.dy) / 2,
+      );
+      final cm = applyM(m, mid);
+      expect(cm.dx, closeTo(mid.dx, 1e-6));
+      expect(cm.dy, closeTo(mid.dy, 1e-6));
+    });
+
+    test('与旧轴（start1→start2）方向平行但枢轴不同：镜像偏移可观测', () {
+      // 锁死回归：轴必须过 ctrl1 而非 start1（两者横向相差
+      // (corner.x−ctrl1.x)/2，用错枢轴会导致镜面内容与折缝不衔接）
+      final p = calcCurlPoints(
+        const Offset(250, 500),
+        const Offset(400, 800),
+        page,
+      );
+      expect(p.ctrl1.dx, isNot(closeTo(p.start1.dx, 0.1)));
+      final c = applyM(foldMirrorMatrix(p), const Offset(400, 800));
+      // 若误用 start1 枢轴，镜像角点会横向偏移约 (corner.x−ctrl1.x)
+      expect(c.dx, closeTo(p.touch.dx, 1e-6));
     });
   });
 }

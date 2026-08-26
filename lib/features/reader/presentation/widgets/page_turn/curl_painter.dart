@@ -91,6 +91,27 @@ Matrix4 reflectionAboutCrease(Offset a, Offset b) {
   ]);
 }
 
+/// 真实折叠轴镜像矩阵（含枢轴平移，纯函数可单测）
+///
+/// 轴 = 触点-角点垂直平分线：ctrl1 到角点/触点等距
+/// （|ctrl1−corner|² = |ctrl1−touch|² 可证），故「过 ctrl1 且垂直于
+/// corner−touch」的直线即垂直平分线。对齐 legado drawCurrentBackArea
+/// 的 mMatrixArray(f8,f9) + pre/postTranslate(ctrl1)——折缝为轴上
+/// 不动点，正/背面内容在折缝处像素连续（用 start1→start2 做轴会
+/// 横向偏移 (corner.x−ctrl1.x)/2，镜面内容与折缝不衔接）。
+/// 方向取 ⊥(corner−touch) 而非 ctrl1→mid：横扫终点 (-w,h) 处
+/// ctrl1 与中点重合，后者零向量退化。
+Matrix4 foldMirrorMatrix(CurlPoints p) {
+  final dx = p.corner.dx - p.touch.dx;
+  final dy = p.corner.dy - p.touch.dy;
+  final axisEnd = Offset(p.ctrl1.dx - dy, p.ctrl1.dy + dx);
+  final r = reflectionAboutCrease(p.ctrl1, axisEnd);
+  return Matrix4.identity()
+    ..translateByDouble(p.ctrl1.dx, p.ctrl1.dy, 0, 1)
+    ..multiply(r)
+    ..translateByDouble(-p.ctrl1.dx, -p.ctrl1.dy, 0, 1);
+}
+
 /// 主几何计算——legado calcPoints 移植
 ///
 /// 含「start1 出屏时按相似三角形把触点拉回屏内再重算」的兜底。
@@ -295,12 +316,10 @@ class CurlPainter extends CustomPainter {
       canvas.clipPath(backFace);
       // ① 不透明纸背底色：实心纸质感，不透下层内容
       canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
-      // ② 沿折痕线（start1→start2）的纯反射镜像出纸背：
-      //    单位法向量保证正交（无拉伸），轴取折痕保证镜像位置正确
-      final m = reflectionAboutCrease(p.start1, p.start2);
-      canvas.translate(p.start1.dx, p.start1.dy);
-      canvas.transform(m.storage);
-      canvas.translate(-p.start1.dx, -p.start1.dy);
+      // ② 沿真实折痕轴（过 ctrl1 的触点-角点垂直平分线）纯反射镜像出
+      //    纸背：单位法向量保证正交（无拉伸），铰链轴保证折缝处
+      //    正/背面内容像素连续（legado f8/f9 矩阵等价实现）
+      canvas.transform(foldMirrorMatrix(p).storage);
       _drawCurrent(canvas, page);
       canvas.restore();
       // ③ 折缝阴影条：0x33→0xB0 黑（legado L110 配色），贴折缝最深
@@ -338,13 +357,13 @@ class CurlPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
     );
 
-    // ⑤ 收尾淡入层：自动扫过末段（≥70%）以渐增不透明度铺满目标页。
-    //    保证 progress=1.0 末帧 = 100% 干净目标页 = 定格帧——无论折叠
-    //    几何残留多少当前页切片都被盖住，从机制上消灭「末帧闪回当前页」。
-    //    （对齐 legado 末帧与换页后像素一致的性质）
+    // ⑤ 收尾淡入层（数值兜底）：横扫终点已保证折叠几何末帧吞没整页
+    //    （next=(-w,h) 轴落 x=0 / prev=(2w,h) 轴落 x=w），此处仅在
+    //    仿真终值残留亚像素残缝时（≥95%）铺满目标页，保证末帧 =
+    //    100% 干净目标页。阈值之下的混合期不可见，不会叠字闪烁。
     final ap = autoProgress;
-    if (ap != null && ap >= 0.7) {
-      final opacity = ((ap - 0.7) / 0.3).clamp(0.0, 1.0);
+    if (ap != null && ap >= 0.95) {
+      final opacity = ((ap - 0.95) / 0.05).clamp(0.0, 1.0);
       if (opacity > 0) {
         canvas.saveLayer(
           Offset.zero & page,
