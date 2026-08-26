@@ -1,7 +1,4 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/simple_models.dart';
@@ -15,9 +12,12 @@ import 'reader_page_widget.dart';
 /// P4 翻页合成 Widget — 管理动画生命周期 + 双页渲染
 ///
 /// 三种呈现：
-/// - 空闲：RepaintBoundary 包裹的当前页（供快照捕获）
+/// - 空闲：当前页实时渲染（ReaderPageWidget，与动画共用 PageContentRenderer）
 /// - simulation 激活：CurlPainter 四层卷曲绘制（贝塞尔折面 + 镜像纸背 + 阴影）
 /// - verticalScroll 激活：Y 轴平移滑页
+///
+/// 无快照架构：空闲帧与动画帧由同一渲染函数逐帧直绘，像素级一致，
+/// 起始/完成闪现、背面错位等快照时序 bug 无存在基础
 class PageTurnComposer extends ConsumerStatefulWidget {
   final PageInfo currentPage;
   final PageTurnMode mode;
@@ -50,12 +50,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   // ── 卷曲状态 ──
 
-  /// 被折走的页快照（NEXT 时为当前页，PREV 时为上一页）
-  ui.Image? _foldingPageSnap;
-
-  /// 露出的页快照（NEXT 时为下一页，PREV 时为当前页）
-  ui.Image? _revealPageSnap;
-
   /// 实时触点（本地坐标，拖拽期间更新）
   Offset _lastTouchLocal = Offset.zero;
 
@@ -75,21 +69,16 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// state 真正切换到新页（didUpdateWidget 撤除），消除旧页闪现
   PageInfo? _settledTarget;
 
-  /// 空闲态当前页的绘制边界（快照源）
-  final _pageBoundaryKey = GlobalKey();
-
   @override
   void dispose() {
     _turnController?.stop();
     _turnController?.dispose();
-    _foldingPageSnap?.dispose();
-    _revealPageSnap?.dispose();
     super.dispose();
   }
 
   // ── 公开方法：由 ReaderPage 经 Bridge 调用 ──
 
-  /// 拖拽开始：确定方向、取出目标页、捕获快照、创建动画控制器
+  /// 拖拽开始：确定方向、取出目标页、创建动画控制器
   void onDragStart(PageDirection direction, Offset localTouch) {
     // F1 守卫：动画播放中忽略新请求（防 dispose 正在 tick 的控制器）
     if (_turnController?.isAnimating == true) return;
@@ -112,7 +101,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
 
-    _prepareSnapshot();
     _replaceController();
     setState(() {});
   }
@@ -156,7 +144,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = start;
     _lastTouchLocal = start;
 
-    _prepareSnapshot();
     _replaceController();
     setState(() {});
 
@@ -190,63 +177,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       vsync: this,
       onProgressUpdate: (_) => setState(() {}),
     );
-  }
-
-  /// 拖拽开始前捕获两张快照：被折走的页 + 露出的页
-  void _prepareSnapshot() {
-    // 释放旧快照
-    _foldingPageSnap?.dispose();
-    _revealPageSnap?.dispose();
-    _foldingPageSnap = null;
-    _revealPageSnap = null;
-    
-    // 异步捕获双快照
-    _captureBothSnapshots();
-  }
-
-  /// 捕获被折走的页和露出的页快照
-  Future<void> _captureBothSnapshots() async {
-    // 捕获被折走的页（动画开始时的可见页）
-    _foldingPageSnap = await _capturePageSnapshot(widget.currentPage);
-    
-    // 捕获露出的页（目标页）
-    if (_targetPage != null) {
-      _revealPageSnap = await _capturePageSnapshot(_targetPage!);
-    }
-  }
-
-  /// 捕获单个页面的快照
-  Future<ui.Image?> _capturePageSnapshot(PageInfo page) async {
-    final ctx = _pageBoundaryKey.currentContext;
-    if (ctx == null) return null;
-    final ro = ctx.findRenderObject();
-    if (ro is! RenderRepaintBoundary || !ro.attached) return null;
-    
-    // 检查是否需要临时切换显示内容
-    final needsSwitch = !identical(page, widget.currentPage) && 
-                        !identical(page, _settledTarget);
-    
-    if (needsSwitch) {
-      // 临时显示目标页，等待一帧后捕获
-      _settledTarget = page;
-      if (mounted) setState(() {});
-      await Future.delayed(Duration.zero);
-    }
-    
-    try {
-      final img = await ro.toImage(pixelRatio: 1.0);
-      if (needsSwitch) {
-        _settledTarget = null;
-        if (mounted) setState(() {});
-      }
-      return img;
-    } catch (_) {
-      if (needsSwitch) {
-        _settledTarget = null;
-        if (mounted) setState(() {});
-      }
-      return null;
-    }
   }
 
   /// 自动播放：翻完→提交翻页；回弹→复位。返回后控制器已复位/清理。
@@ -287,11 +217,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _isActive = false;
     _targetPage = null;
     _turnDirection = PageDirection.none;
-    // 释放双快照
-    _foldingPageSnap?.dispose();
-    _foldingPageSnap = null;
-    _revealPageSnap?.dispose();
-    _revealPageSnap = null;
     _turnController?.stop();
     _turnController?.dispose();
     _turnController = null;
@@ -320,11 +245,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   Widget build(BuildContext context) {
     if (!_isActive || _turnController == null || _targetPage == null) {
       // 空闲态：定格页优先（翻页提交间隙），否则当前页
-      // （RepaintBoundary 供快照捕获）
-      return RepaintBoundary(
-        key: _pageBoundaryKey,
-        child: _buildPage(_settledTarget ?? widget.currentPage),
-      );
+      return _buildPage(_settledTarget ?? widget.currentPage);
     }
 
     if (widget.mode == PageTurnMode.verticalScroll) {
@@ -342,8 +263,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final notifier = ref.watch(readerProvider.notifier);
 
     // 自动阶段触点插值（legado onAnimStart L226-237 终点语义）：
-    //   翻完 → 触点扫过整页（NEXT 终点 (-w,h)），折叠吞没全页后交换；
-    //     收尾由 CurlPainter 的淡入层保证末帧 = 100% 干净目标页
+    //   翻完 → 触点扫过整页（NEXT 终点 (-w,h)），折叠吞没全页后交换，
+    //     末帧折叠几何 = 100% 干净目标页
     //   回弹 → 从松手位置回到手势起始点（legado cancel 缩回语义）
     // 映射从起始进度 _autoFromProgress 归一化，避免松手瞬间折叠跳变
     Offset effTouch = _lastTouchLocal;
@@ -361,7 +282,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       if (_autoIsTurn) {
         // legado 精确终点语义（onAnimStart L226-237）：触点扫到折痕轴
         // 恰落对侧页缘——NEXT(-w,h)→轴落 x=0，PREV(2w,h)→轴落 x=w，
-        // 末帧折叠几何吞没整页，无当前页残缝（淡入层仅数值兜底）
+        // 末帧折叠几何吞没整页，无当前页残缝
         sweepTarget = _turnDirection == PageDirection.next
             ? Offset(-size.width, size.height)
             : Offset(size.width * 2, size.height);
@@ -389,8 +310,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       child: CustomPaint(
         size: Size.infinite,
         painter: CurlPainter(
-          foldingPageImage: _foldingPageSnap,
-          revealPageImage: _revealPageSnap,
           foldingPage: widget.currentPage,
           revealPage: _targetPage!,
           paintContent: paintContent,

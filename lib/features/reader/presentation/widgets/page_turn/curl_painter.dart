@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -214,16 +213,10 @@ CurlPoints calcCurlPoints(Offset touchIn, Offset corner, Size page) {
 // ══════════════════════════════════════════════════════════════
 
 class CurlPainter extends CustomPainter {
-  /// 被折走的页快照（正面剩余区 + 背面镜像同源）
-  final ui.Image? foldingPageImage;
-
-  /// 露出的页快照（目标页露出区）
-  final ui.Image? revealPageImage;
-
-  /// 被折走的页数据（快照失败时直绘回退）
+  /// 被折走的页数据（正面剩余区 + 背面镜像同源，每帧直绘）
   final PageInfo foldingPage;
 
-  /// 露出的页数据（快照失败时直绘回退）
+  /// 露出的页数据（每帧直绘）
   final PageInfo revealPage;
 
   /// 页面内容渲染回调（复用 PageContentRenderer，由 composer 注入绘制参数）
@@ -245,8 +238,6 @@ class CurlPainter extends CustomPainter {
   static const Color _paperBackColor = Color(0xFFE9E3D5);
 
   CurlPainter({
-    required this.foldingPageImage,
-    required this.revealPageImage,
     required this.foldingPage,
     required this.revealPage,
     required this.paintContent,
@@ -277,12 +268,12 @@ class CurlPainter extends CustomPainter {
 
     final pageRectPath = Path()..addRect(Offset.zero & page);
 
-    // ① 正面剩余区：被折走的页
+    // ① 正面剩余区：被折走的页（与空闲帧同一渲染函数，像素一致）
     final frontVisible =
         Path.combine(PathOperation.difference, pageRectPath, path0);
     canvas.save();
     canvas.clipPath(frontVisible);
-    _drawFoldingPage(canvas, page);
+    paintContent(canvas, foldingPage);
     canvas.restore();
 
     // ② 目标页露出区：五边形 start1→v1→v2→start2→corner ∩ path0
@@ -297,14 +288,14 @@ class CurlPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-    _drawRevealPage(canvas, page);
+    paintContent(canvas, revealPage);
     // 折缝投影带：沿 crease 方向的渐变，宽度 dis/4
     _drawCreaseShadow(canvas, p, page);
     canvas.restore();
 
     // ③ 背面折叠区：path1 = vertex→vertex2→end2→T→end1；clip = path0∩path1
     //    legado 配方（drawCurrentBackArea L273-335）：
-    //    不透明纸背底色 → 镜像被折走的页（与正面同源）→ 折缝渐变阴影条
+    //    不透明纸背底色 → 镜像被折走的页（与正面同源同帧）→ 折缝渐变阴影条
     final path1 = Path()
       ..moveTo(p.vertex1.dx, p.vertex1.dy)
       ..lineTo(p.vertex2.dx, p.vertex2.dy)
@@ -319,10 +310,13 @@ class CurlPainter extends CustomPainter {
       canvas.clipPath(backFace);
       // ① 不透明纸背底色：实心纸质感，不透下层内容
       canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
-      // ② 镜像被折走的页：内层 save/transform/restore，与正面同源
+      // ② 镜像被折走的页：内层 save/transform/restore 保证变换只作用于
+      //    内容绘制，外层 clip 始终有效；与正面同一帧同一函数绘同一页，
+      //    镜像轴（过 ctrl1 的触点-角点垂直平分线）为不动点 → 折缝处
+      //    正/背面内容像素连续（legado f8/f9 矩阵等价实现）
       canvas.save();
       canvas.transform(foldMirrorMatrix(p).storage);
-      _drawFoldingPage(canvas, page);
+      paintContent(canvas, foldingPage);
       canvas.restore();
       // ③ 折缝阴影条（仍在同一个外层 save 下，clip 持续有效）
       _drawBackFoldShadow(canvas, p, page);
@@ -356,31 +350,6 @@ class CurlPainter extends CustomPainter {
         ..color = Colors.black.withValues(alpha: 0.08)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
     );
-  }
-
-  /// 当前页绘制：优先用快照位图，未就绪则直绘回退
-  /// 绘制被折走的页：优先用快照，未就绪则直绘回退
-  void _drawFoldingPage(Canvas canvas, Size page) {
-    final img = foldingPageImage;
-    if (img != null) {
-      final src = Rect.fromLTWH(
-          0, 0, img.width.toDouble(), img.height.toDouble());
-      canvas.drawImageRect(img, src, Offset.zero & page, Paint());
-    } else {
-      paintContent(canvas, foldingPage);
-    }
-  }
-
-  /// 绘制露出的页：优先用快照，未就绪则直绘回退
-  void _drawRevealPage(Canvas canvas, Size page) {
-    final img = revealPageImage;
-    if (img != null) {
-      final src = Rect.fromLTWH(
-          0, 0, img.width.toDouble(), img.height.toDouble());
-      canvas.drawImageRect(img, src, Offset.zero & page, Paint());
-    } else {
-      paintContent(canvas, revealPage);
-    }
   }
 
   /// 折缝投影带：canvas 平移到 start1、旋转 crease 方向角、
@@ -443,9 +412,7 @@ class CurlPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CurlPainter oldDelegate) {
-    return oldDelegate.foldingPageImage != foldingPageImage ||
-        oldDelegate.revealPageImage != revealPageImage ||
-        oldDelegate.foldingPage != foldingPage ||
+    return oldDelegate.foldingPage != foldingPage ||
         oldDelegate.revealPage != revealPage ||
         oldDelegate.touch != touch ||
         oldDelegate.autoProgress != autoProgress ||
