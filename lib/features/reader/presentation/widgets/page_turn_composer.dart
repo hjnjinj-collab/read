@@ -258,6 +258,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _isActive = false;
     _targetPage = null;
     _turnDirection = PageDirection.none;
+    // settle 完成立即清空快照：消除旧页快照在定格撤除窗口期被误用
+    _currentSnap?.dispose();
+    _currentSnap = null;
+    _snapPage = null;
     _turnController?.stop();
     _turnController?.dispose();
     _turnController = null;

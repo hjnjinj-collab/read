@@ -316,15 +316,24 @@ class CurlPainter extends CustomPainter {
       canvas.clipPath(backFace);
       // ① 不透明纸背底色：实心纸质感，不透下层内容
       canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
-      // ② 沿真实折痕轴（过 ctrl1 的触点-角点垂直平分线）纯反射镜像出
-      //    纸背：单位法向量保证正交（无拉伸），铰链轴保证折缝处
-      //    正/背面内容像素连续（legado f8/f9 矩阵等价实现）
-      canvas.transform(foldMirrorMatrix(p).storage);
-      _drawCurrent(canvas, page);
-      canvas.restore();
-      // ③ 折缝阴影条：0x33→0xB0 黑（legado L110 配色），贴折缝最深
-      canvas.save();
-      canvas.clipPath(backFace);
+      // ② 镜像内容：内层 save/transform/restore 保证变换只作用于内容
+      //    绘制，外层 clip 始终有效（消除「两个卷筒」现象）
+      final img = currentImage;
+      if (img != null) {
+        canvas.save();
+        canvas.transform(foldMirrorMatrix(p).storage);
+        final src = Rect.fromLTWH(
+            0, 0, img.width.toDouble(), img.height.toDouble());
+        canvas.drawImageRect(img, src, Offset.zero & page, Paint());
+        canvas.restore();
+      } else {
+        // 直绘回退：同样需要内层 save/transform/restore
+        canvas.save();
+        canvas.transform(foldMirrorMatrix(p).storage);
+        paintContent(canvas, currentPage);
+        canvas.restore();
+      }
+      // ③ 折缝阴影条（仍在同一个外层 save 下，clip 持续有效）
       _drawBackFoldShadow(canvas, p, page);
       canvas.restore();
     }
@@ -356,24 +365,6 @@ class CurlPainter extends CustomPainter {
         ..color = Colors.black.withValues(alpha: 0.08)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
     );
-
-    // ⑤ 收尾淡入层（数值兜底）：横扫终点已保证折叠几何末帧吞没整页
-    //    （next=(-w,h) 轴落 x=0 / prev=(2w,h) 轴落 x=w），此处仅在
-    //    仿真终值残留亚像素残缝时（≥95%）铺满目标页，保证末帧 =
-    //    100% 干净目标页。阈值之下的混合期不可见，不会叠字闪烁。
-    final ap = autoProgress;
-    if (ap != null && ap >= 0.95) {
-      final opacity = ((ap - 0.95) / 0.05).clamp(0.0, 1.0);
-      if (opacity > 0) {
-        canvas.saveLayer(
-          Offset.zero & page,
-          Paint()..color = Colors.white.withValues(alpha: opacity),
-        );
-        canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-        paintContent(canvas, targetPage);
-        canvas.restore();
-      }
-    }
   }
 
   /// 当前页绘制：优先用快照位图，未就绪则直绘回退
