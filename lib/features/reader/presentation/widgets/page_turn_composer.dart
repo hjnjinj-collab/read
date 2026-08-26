@@ -268,11 +268,15 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     //   回弹 → 从松手位置回到手势起始点（legado cancel 缩回语义）
     // 映射从起始进度 _autoFromProgress 归一化，避免松手瞬间折叠跳变
     Offset effTouch = _lastTouchLocal;
+    // 折缝光影随自动收尾线性淡出：末帧光影归零，与干净定格页无缝衔接
+    // （回弹时折叠仍可见，光影保持）
+    var washScale = 1.0;
     if (autoProgress != null) {
       final from = _autoFromProgress.clamp(0.0, 1.0);
       final double t;
       if (_autoIsTurn) {
         t = ((autoProgress - from) / (1.0 - from)).clamp(0.0, 1.0);
+        washScale = 1.0 - t;
       } else {
         t = from <= 0.001
             ? 1.0
@@ -316,6 +320,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           touch: effTouch,
           direction: _turnDirection,
           autoProgress: autoProgress,
+          washScale: washScale,
         ),
       ),
     );

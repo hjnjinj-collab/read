@@ -231,6 +231,10 @@ class CurlPainter extends CustomPainter {
   /// 自动播放阶段进度；拖拽阶段传 null。
   final double? autoProgress;
 
+  /// 折缝光影缩放（0~1）：自动翻完收尾时线性淡出，末帧光影归零，
+  /// 与干净定格页无缝衔接（否则收尾瞬间光影「啪」地消失）
+  final double washScale;
+
   static const Color _paperColor = Color(0xFFF5F1E8);
 
   /// 纸背底色（正面纸色加深 ~8%，legado backgroundMeanColor 等价物：
@@ -244,6 +248,7 @@ class CurlPainter extends CustomPainter {
     required this.touch,
     required this.direction,
     required this.autoProgress,
+    required this.washScale,
   });
 
   @override
@@ -303,14 +308,8 @@ class CurlPainter extends CustomPainter {
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
     paintContent(canvas, revealPage);
-    // 折缝宽域投影（向露出区衰减）
-    _drawFoldWash(
-      canvas,
-      p,
-      page,
-      revealArea,
-      intoFlap: false,
-    );
+    // 折缝投影（沿主折缝曲线窄描边——不随轴蔓延到触点区）
+    _drawRevealShadow(canvas, foldCurve, revealArea, washScale);
     canvas.restore();
 
     // ③ 背面折叠区：path1 = vertex→vertex2→end2→T→end1；clip = path0∩path1
@@ -339,67 +338,94 @@ class CurlPainter extends CustomPainter {
       paintContent(canvas, foldingPage);
       canvas.restore();
       // 折缝宽域曲面明暗（向翻面内部衰减至触点）
-      _drawFoldWash(
-        canvas,
-        p,
-        page,
-        backFace,
-        intoFlap: true,
-      );
+      _drawFoldWash(canvas, p, page, backFace, washScale);
       canvas.restore();
     }
 
     // ④ 正面边缘软阴影：沿两条折缝曲线描边 + 高斯模糊，
     //    裁到正面剩余区使模糊只向正面渗透
-    canvas.save();
-    canvas.clipPath(frontVisible);
-    canvas.drawPath(
-      frontFoldCurves,
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.30)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 14
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
-    );
-    canvas.restore();
+    if (washScale > 0.01) {
+      canvas.save();
+      canvas.clipPath(frontVisible);
+      canvas.drawPath(
+        frontFoldCurves,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.30 * washScale)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 14
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+      canvas.restore();
 
-    // ⑤ 折痕高光：折缝处细白线（纸张弯折的受光面，参考卷曲实现的
-    //    fold-highlight——暗铰链 + 细高光使折缝读作真实物理折痕）
-    canvas.drawPath(
-      foldCurve,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.40)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
+      // ⑤ 折痕高光：折缝处细白线（纸张弯折的受光面，参考卷曲实现的
+      //    fold-highlight——暗铰链 + 细高光使折缝读作真实物理折痕）
+      canvas.drawPath(
+        foldCurve,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.40 * washScale)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
 
-    // 触点附近的小暗斑（手指按压感）
-    canvas.drawCircle(
-      p.touch,
-      18,
-      Paint()
-        ..color = Colors.black.withValues(alpha: 0.08)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
-    );
+      // 触点附近的小暗斑（手指按压感）
+      canvas.drawCircle(
+        p.touch,
+        18,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.08 * washScale)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
+      );
+    }
   }
 
-  /// 折缝宽域明暗：旋转坐标系（原点 vertex1、x 轴沿镜像轴法向）内
-  /// 绘制垂直于折缝的线性渐变。
+  /// 露出区侧折缝投影：沿主折缝曲线的窄描边（3 档同心，贴曲线衰减）。
   ///
-  /// 翻面侧（intoFlap）：折缝黑@0.28 → dis/5 处 0.10 → 触点全透明——
-  /// 垂直平分线性质保证触点（翻面最远点）到镜像轴距离恰为 dis/2，
-  /// 渐变终点天然落在翻面最远端：恢复曲面光影且尖端无叠帧堆黑
+  /// 不用轴锚定宽域渐变的原因：触点 T 恰在镜像轴上（距离=0），轴锚定
+  /// 渐变会在触点周围给出峰值暗晕——翻面尖端与页面视觉「粘连」；且
+  /// 角点与触点到轴等距（dis/2），渐变横跨整个露出区，光影笼罩下一页
+  /// 全部内容。窄描边只贴折缝，两个问题同时消除。
+  static const List<(double, int)> _revealShadowStops = [
+    (8, 0x73),
+    (20, 0x40),
+    (36, 0x1A),
+  ];
+
+  void _drawRevealShadow(
+    Canvas canvas,
+    Path foldCurve,
+    Path clipArea,
+    double washScale,
+  ) {
+    if (washScale <= 0.01) return;
+    canvas.save();
+    canvas.clipPath(clipArea);
+    for (final (w, a) in _revealShadowStops) {
+      canvas.drawPath(
+        foldCurve,
+        Paint()
+          ..color = Colors.black.withValues(alpha: (a / 255) * washScale)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+    }
+    canvas.restore();
+  }
+
+  /// 翻面侧折缝宽域明暗：旋转坐标系（原点 vertex1、x 轴沿镜像轴法向）
+  /// 内绘制垂直于折缝的线性渐变——折缝黑@0.28 → dis/5 处 0.10 → 触点
+  /// 全透明。垂直平分线性质保证触点（翻面最远点）到镜像轴距离恰为
+  /// dis/2，渐变终点天然落在翻面最远端：恢复曲面光影且尖端无叠帧堆黑
   /// （替代同心描边：描边在窄楔形尖端全部叠加，组合透明度 ≈0.9 必然
   /// 堆成黑斑）。x<0（折缝曲线两端偏离轴的月牙）钳位取折缝值。
-  ///
-  /// 露出区侧：折缝黑@0.20 → dis/2 全透明（折起页在下方页上的投影）。
   void _drawFoldWash(
     Canvas canvas,
     CurlPoints p,
     Size page,
-    Path clipArea, {
-    required bool intoFlap,
-  }) {
+    Path clipArea,
+    double washScale,
+  ) {
+    if (washScale <= 0.01) return;
     final angle = math.atan2(
       p.ctrl1.dx - p.corner.dx,
       p.ctrl2.dy - p.corner.dy,
@@ -409,32 +435,18 @@ class CurlPainter extends CustomPainter {
     canvas.clipPath(clipArea);
     canvas.translate(p.vertex1.dx, p.vertex1.dy);
     canvas.rotate(angle);
-    final Rect rect;
-    final LinearGradient gradient;
-    if (intoFlap) {
-      rect = Rect.fromLTWH(-p.dis / 2, 0, p.dis, maxLen);
-      gradient = LinearGradient(
-        begin: Alignment.centerLeft,
-        end: Alignment.centerRight,
-        stops: const [0.0, 0.5, 0.7, 1.0],
-        colors: [
-          Colors.black.withValues(alpha: 0.28),
-          Colors.black.withValues(alpha: 0.28),
-          Colors.black.withValues(alpha: 0.10),
-          Colors.transparent,
-        ],
-      );
-    } else {
-      rect = Rect.fromLTWH(-p.dis / 2, 0, p.dis / 2, maxLen);
-      gradient = LinearGradient(
-        begin: Alignment.centerRight,
-        end: Alignment.centerLeft,
-        colors: [
-          Colors.black.withValues(alpha: 0.20),
-          Colors.transparent,
-        ],
-      );
-    }
+    final rect = Rect.fromLTWH(-p.dis / 2, 0, p.dis, maxLen);
+    final gradient = LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      stops: const [0.0, 0.5, 0.7, 1.0],
+      colors: [
+        Colors.black.withValues(alpha: 0.28 * washScale),
+        Colors.black.withValues(alpha: 0.28 * washScale),
+        Colors.black.withValues(alpha: 0.10 * washScale),
+        Colors.transparent,
+      ],
+    );
     canvas.drawRect(rect, Paint()..shader = gradient.createShader(rect));
     canvas.restore();
   }
@@ -445,6 +457,7 @@ class CurlPainter extends CustomPainter {
         oldDelegate.revealPage != revealPage ||
         oldDelegate.touch != touch ||
         oldDelegate.autoProgress != autoProgress ||
+        oldDelegate.washScale != washScale ||
         oldDelegate.direction != direction;
   }
 }
