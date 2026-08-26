@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../../../../core/models/simple_models.dart';
@@ -268,6 +266,14 @@ class CurlPainter extends CustomPainter {
 
     final pageRectPath = Path()..addRect(Offset.zero & page);
 
+    // 折边曲线（两条二次贝塞尔）——铰链阴影与正面软阴影共用：
+    // 阴影沿此曲线衰减，与可见折边完全贴合
+    final edgeShadow = Path()
+      ..moveTo(p.start1.dx, p.start1.dy)
+      ..quadraticBezierTo(p.ctrl1.dx, p.ctrl1.dy, p.end1.dx, p.end1.dy)
+      ..lineTo(p.end2.dx, p.end2.dy)
+      ..quadraticBezierTo(p.ctrl2.dx, p.ctrl2.dy, p.start2.dx, p.start2.dy);
+
     // ① 正面剩余区：被折走的页（与空闲帧同一渲染函数，像素一致）
     final frontVisible =
         Path.combine(PathOperation.difference, pageRectPath, path0);
@@ -289,8 +295,14 @@ class CurlPainter extends CustomPainter {
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
     paintContent(canvas, revealPage);
-    // 折缝投影带：沿 crease 方向的渐变，宽度 dis/4
-    _drawCreaseShadow(canvas, p, page);
+    // 折缝铰链阴影（沿折边曲线，向露出区衰减）
+    _drawFoldEdgeShadow(
+      canvas,
+      edgeShadow,
+      revealArea,
+      alphaScale: 0.6,
+      widthScale: 0.8,
+    );
     canvas.restore();
 
     // ③ 背面折叠区：path1 = vertex→vertex2→end2→T→end1；clip = path0∩path1
@@ -318,18 +330,19 @@ class CurlPainter extends CustomPainter {
       canvas.transform(foldMirrorMatrix(p).storage);
       paintContent(canvas, foldingPage);
       canvas.restore();
-      // ③ 折缝阴影条（仍在同一个外层 save 下，clip 持续有效）
-      _drawBackFoldShadow(canvas, p, page);
+      // 折缝铰链阴影（沿折边曲线，向翻面内部衰减）
+      _drawFoldEdgeShadow(
+        canvas,
+        edgeShadow,
+        backFace,
+        alphaScale: 1.0,
+        widthScale: 1.0,
+      );
       canvas.restore();
     }
 
     // ④ 正面边缘软阴影：沿折边两条二次曲线描边 + 高斯模糊，
     //    裁到正面剩余区使模糊只向正面渗透
-    final edgeShadow = Path()
-      ..moveTo(p.start1.dx, p.start1.dy)
-      ..quadraticBezierTo(p.ctrl1.dx, p.ctrl1.dy, p.end1.dx, p.end1.dy)
-      ..lineTo(p.end2.dx, p.end2.dy)
-      ..quadraticBezierTo(p.ctrl2.dx, p.ctrl2.dy, p.start2.dx, p.start2.dy);
     canvas.save();
     canvas.clipPath(frontVisible);
     canvas.drawPath(
@@ -352,63 +365,41 @@ class CurlPainter extends CustomPainter {
     );
   }
 
-  /// 折缝投影带：canvas 平移到 start1、旋转 crease 方向角、
-  /// 画宽 dis/4 的线性渐变（黑@0.5 → 透明），指向目标区内部
-  void _drawCreaseShadow(Canvas canvas, CurlPoints p, Size page) {
-    final angle = math.atan2(
-      p.ctrl1.dx - p.corner.dx,
-      p.ctrl2.dy - p.corner.dy,
-    );
-    final stripW = (p.dis / 4).clamp(8.0, 64.0);
-    final maxLen = page.longestSide * 1.5;
-    canvas.save();
-    canvas.translate(p.start1.dx, p.start1.dy);
-    canvas.rotate(angle);
-    canvas.drawRect(
-      Rect.fromLTWH(-stripW, 0, stripW, maxLen),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.centerRight,
-          end: Alignment.centerLeft,
-          colors: [
-            Colors.black.withValues(alpha: 0.45),
-            Colors.transparent,
-          ],
-        ).createShader(Rect.fromLTWH(-stripW, 0, stripW, maxLen)),
-    );
-    canvas.restore();
-  }
+  /// 折边铰链阴影：沿两条贝塞尔折边做同心描边渐变——暗芯贴曲线、
+  /// 向外快速衰减（指数式观感），天然跟随折边曲率。
+  ///
+  /// （替代沿镜像轴锚定的直线渐变带：可见折边是贝塞尔曲线，两端
+  /// 偏离轴最多 dis/2，直线带与折边脱节产生「贴上去的灰条」感）
+  ///
+  /// 每档描边以折边为中心向两侧各渗半宽，裁剪后可见部分为贴边的
+  /// 单侧渐变；多档叠加在折边处合成近黑暗芯。
+  static const List<(double, int)> _foldShadowStops = [
+    (7, 0xB3),
+    (16, 0x80),
+    (28, 0x4D),
+    (44, 0x26),
+    (62, 0x0F),
+  ];
 
-  /// 背面折缝阴影条（legado folder-shadow，L278-333）：
-  /// 宽 f3 = min(|avg(start1.x,ctrl1.x)−ctrl1.x|, |avg(start2.y,ctrl2.y)−ctrl2.y|)，
-  /// 再以 dis/5（翻面宽 dis/2 的 40%）封顶——深拖时 f3 膨胀会把整个
-  /// 翻面罩进暗带，镜像文字不可读（阴影与卷曲面积失配的根源）
-  void _drawBackFoldShadow(Canvas canvas, CurlPoints p, Size page) {
-    final angle = math.atan2(
-      p.ctrl1.dx - p.corner.dx,
-      p.ctrl2.dy - p.corner.dy,
-    );
-    final f3 = math.min(
-      ((p.start1.dx + p.ctrl1.dx) / 2 - p.ctrl1.dx).abs(),
-      ((p.start2.dy + p.ctrl2.dy) / 2 - p.ctrl2.dy).abs(),
-    );
-    final stripW = math.min(f3 <= 0 ? p.dis / 4 : f3, p.dis / 5)
-        .clamp(6.0, 56.0);
-    final maxLen = page.longestSide * 1.5;
+  void _drawFoldEdgeShadow(
+    Canvas canvas,
+    Path edgeShadow,
+    Path clipArea, {
+    required double alphaScale,
+    required double widthScale,
+  }) {
     canvas.save();
-    canvas.translate(p.start1.dx, p.start1.dy);
-    canvas.rotate(angle);
-    // 旋转坐标系中折缝为 x=0，纸背内部在 +x 侧：
-    // 折缝处最深（0xB0），向内完全淡出——保证镜像文字全翻面可读
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, stripW, maxLen),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: const [Color(0xB0333333), Color(0x00333333)],
-        ).createShader(Rect.fromLTWH(0, 0, stripW, maxLen)),
-    );
+    canvas.clipPath(clipArea);
+    for (final (w, a) in _foldShadowStops) {
+      canvas.drawPath(
+        edgeShadow,
+        Paint()
+          ..color = Colors.black.withValues(alpha: (a / 255) * alphaScale)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * widthScale
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+    }
     canvas.restore();
   }
 
