@@ -359,7 +359,7 @@ class CurlPainter extends CustomPainter {
       p.ctrl1.dx - p.corner.dx,
       p.ctrl2.dy - p.corner.dy,
     );
-    final stripW = (p.dis / 4).clamp(8.0, 120.0);
+    final stripW = (p.dis / 4).clamp(8.0, 64.0);
     final maxLen = page.longestSide * 1.5;
     canvas.save();
     canvas.translate(p.start1.dx, p.start1.dy);
@@ -381,7 +381,8 @@ class CurlPainter extends CustomPainter {
 
   /// 背面折缝阴影条（legado folder-shadow，L278-333）：
   /// 宽 f3 = min(|avg(start1.x,ctrl1.x)−ctrl1.x|, |avg(start2.y,ctrl2.y)−ctrl2.y|)，
-  /// 色 0x33→0xB0 黑，贴折缝处最深、向纸背内部渐浅
+  /// 再以 dis/5（翻面宽 dis/2 的 40%）封顶——深拖时 f3 膨胀会把整个
+  /// 翻面罩进暗带，镜像文字不可读（阴影与卷曲面积失配的根源）
   void _drawBackFoldShadow(Canvas canvas, CurlPoints p, Size page) {
     final angle = math.atan2(
       p.ctrl1.dx - p.corner.dx,
@@ -391,20 +392,21 @@ class CurlPainter extends CustomPainter {
       ((p.start1.dx + p.ctrl1.dx) / 2 - p.ctrl1.dx).abs(),
       ((p.start2.dy + p.ctrl2.dy) / 2 - p.ctrl2.dy).abs(),
     );
-    final stripW = (f3 <= 0 ? p.dis / 4 : f3).clamp(8.0, 160.0);
+    final stripW = math.min(f3 <= 0 ? p.dis / 4 : f3, p.dis / 5)
+        .clamp(6.0, 56.0);
     final maxLen = page.longestSide * 1.5;
     canvas.save();
     canvas.translate(p.start1.dx, p.start1.dy);
     canvas.rotate(angle);
     // 旋转坐标系中折缝为 x=0，纸背内部在 +x 侧：
-    // 折缝处最深（0xB0），向内渐浅（0x33）
+    // 折缝处最深（0xB0），向内完全淡出——保证镜像文字全翻面可读
     canvas.drawRect(
       Rect.fromLTWH(0, 0, stripW, maxLen),
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
-          colors: const [Color(0xB0333333), Color(0x33333333)],
+          colors: const [Color(0xB0333333), Color(0x00333333)],
         ).createShader(Rect.fromLTWH(0, 0, stripW, maxLen)),
     );
     canvas.restore();
