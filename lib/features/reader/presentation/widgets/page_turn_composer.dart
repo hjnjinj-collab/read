@@ -50,11 +50,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   // ── 卷曲状态 ──
 
-  /// 当前页快照（拖拽开始捕获；null 时 CurlPainter 回退直绘）
-  ui.Image? _currentSnap;
+  /// 被折走的页快照（NEXT 时为当前页，PREV 时为上一页）
+  ui.Image? _foldingPageSnap;
 
-  /// 快照归属页：与当前页不一致的快照是陈旧内容，拖拽开始时废弃
-  PageInfo? _snapPage;
+  /// 露出的页快照（NEXT 时为下一页，PREV 时为当前页）
+  ui.Image? _revealPageSnap;
 
   /// 实时触点（本地坐标，拖拽期间更新）
   Offset _lastTouchLocal = Offset.zero;
@@ -82,7 +82,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   void dispose() {
     _turnController?.stop();
     _turnController?.dispose();
-    _currentSnap?.dispose();
+    _foldingPageSnap?.dispose();
+    _revealPageSnap?.dispose();
     super.dispose();
   }
 
@@ -191,32 +192,60 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     );
   }
 
-  /// 拖拽开始前的快照准备：归属页不符的快照是上一轮翻页的陈旧内容，
-  /// 直接废弃——捕获完成的异步窗口内 CurlPainter 回退直绘当前页
-  /// （与空闲帧像素一致，无闪现）；快照常备时（预捕获命中）零开销
+  /// 拖拽开始前捕获两张快照：被折走的页 + 露出的页
   void _prepareSnapshot() {
-    if (!identical(_snapPage, widget.currentPage)) {
-      _currentSnap?.dispose();
-      _currentSnap = null;
-      _snapPage = null;
-    }
-    _captureCurrentSnapshot();
+    // 释放旧快照
+    _foldingPageSnap?.dispose();
+    _revealPageSnap?.dispose();
+    _foldingPageSnap = null;
+    _revealPageSnap = null;
+    
+    // 异步捕获双快照
+    _captureBothSnapshots();
   }
 
-  Future<void> _captureCurrentSnapshot() async {
+  /// 捕获被折走的页和露出的页快照
+  Future<void> _captureBothSnapshots() async {
+    // 捕获被折走的页（动画开始时的可见页）
+    _foldingPageSnap = await _capturePageSnapshot(widget.currentPage);
+    
+    // 捕获露出的页（目标页）
+    if (_targetPage != null) {
+      _revealPageSnap = await _capturePageSnapshot(_targetPage!);
+    }
+  }
+
+  /// 捕获单个页面的快照
+  Future<ui.Image?> _capturePageSnapshot(PageInfo page) async {
     final ctx = _pageBoundaryKey.currentContext;
-    if (ctx == null) return;
+    if (ctx == null) return null;
     final ro = ctx.findRenderObject();
-    if (ro is! RenderRepaintBoundary || !ro.attached) return;
-    // 边界此刻显示的页（定格优先）即快照内容归属
-    final snapPage = _settledTarget ?? widget.currentPage;
+    if (ro is! RenderRepaintBoundary || !ro.attached) return null;
+    
+    // 检查是否需要临时切换显示内容
+    final needsSwitch = !identical(page, widget.currentPage) && 
+                        !identical(page, _settledTarget);
+    
+    if (needsSwitch) {
+      // 临时显示目标页，等待一帧后捕获
+      _settledTarget = page;
+      if (mounted) setState(() {});
+      await Future.delayed(Duration.zero);
+    }
+    
     try {
       final img = await ro.toImage(pixelRatio: 1.0);
-      _currentSnap?.dispose();
-      _currentSnap = img;
-      _snapPage = snapPage;
+      if (needsSwitch) {
+        _settledTarget = null;
+        if (mounted) setState(() {});
+      }
+      return img;
     } catch (_) {
-      // 快照失败不致命：CurlPainter 回退到内容直绘
+      if (needsSwitch) {
+        _settledTarget = null;
+        if (mounted) setState(() {});
+      }
+      return null;
     }
   }
 
@@ -258,10 +287,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _isActive = false;
     _targetPage = null;
     _turnDirection = PageDirection.none;
-    // settle 完成立即清空快照：消除旧页快照在定格撤除窗口期被误用
-    _currentSnap?.dispose();
-    _currentSnap = null;
-    _snapPage = null;
+    // 释放双快照
+    _foldingPageSnap?.dispose();
+    _foldingPageSnap = null;
+    _revealPageSnap?.dispose();
+    _revealPageSnap = null;
     _turnController?.stop();
     _turnController?.dispose();
     _turnController = null;
@@ -271,7 +301,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   @override
   void didUpdateWidget(PageTurnComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // state 已切换到新页 → 撤定格，无缝交还正常渲染。
+    // state 已切换到新页 → 撤定格，无缝交还正常渲染（直接实时渲染，无快照）
     // 快速路径：preloaded 直采用同一实例，identical 必然命中；
     // 兜底路径：跨章 FFI 换新实例时按 pageIndex 对齐
     if (_settledTarget != null &&
@@ -280,14 +310,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
                 widget.currentPage.pageIndex ==
                     _settledTarget!.pageIndex))) {
       _settledTarget = null;
-      if (mounted) {
-        setState(() {});
-        // 新当前页已上屏 → 帧末预捕获快照：快速连翻时拖拽开始
-        // 快照常备，不落入直绘回退窗口
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _captureCurrentSnapshot();
-        });
-      }
+      if (mounted) setState(() {});
     }
   }
 
@@ -366,9 +389,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       child: CustomPaint(
         size: Size.infinite,
         painter: CurlPainter(
-          currentImage: _currentSnap,
-          currentPage: widget.currentPage,
-          targetPage: _targetPage!,
+          foldingPageImage: _foldingPageSnap,
+          revealPageImage: _revealPageSnap,
+          foldingPage: widget.currentPage,
+          revealPage: _targetPage!,
           paintContent: paintContent,
           touch: effTouch,
           direction: _turnDirection,

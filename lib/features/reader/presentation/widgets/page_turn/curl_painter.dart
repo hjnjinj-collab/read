@@ -214,14 +214,17 @@ CurlPoints calcCurlPoints(Offset touchIn, Offset corner, Size page) {
 // ══════════════════════════════════════════════════════════════
 
 class CurlPainter extends CustomPainter {
-  /// 当前页快照（拖拽开始捕获；null 时回退到 [paintContent] 直绘）
-  final ui.Image? currentImage;
+  /// 被折走的页快照（正面剩余区 + 背面镜像同源）
+  final ui.Image? foldingPageImage;
 
-  /// 当前页数据（快照未就绪时的直绘回退源）
-  final PageInfo currentPage;
+  /// 露出的页快照（目标页露出区）
+  final ui.Image? revealPageImage;
 
-  /// 底层目标页数据（每帧经 [paintContent] 绘制到露出区）
-  final PageInfo targetPage;
+  /// 被折走的页数据（快照失败时直绘回退）
+  final PageInfo foldingPage;
+
+  /// 露出的页数据（快照失败时直绘回退）
+  final PageInfo revealPage;
 
   /// 页面内容渲染回调（复用 PageContentRenderer，由 composer 注入绘制参数）
   final void Function(Canvas canvas, PageInfo page) paintContent;
@@ -233,7 +236,6 @@ class CurlPainter extends CustomPainter {
   final PageDirection direction;
 
   /// 自动播放阶段进度；拖拽阶段传 null。
-  /// 仅用于收尾淡入层门控（≥0.7 渐显目标页），触点插值由 composer 完成
   final double? autoProgress;
 
   static const Color _paperColor = Color(0xFFF5F1E8);
@@ -243,9 +245,10 @@ class CurlPainter extends CustomPainter {
   static const Color _paperBackColor = Color(0xFFE9E3D5);
 
   CurlPainter({
-    required this.currentImage,
-    required this.currentPage,
-    required this.targetPage,
+    required this.foldingPageImage,
+    required this.revealPageImage,
+    required this.foldingPage,
+    required this.revealPage,
     required this.paintContent,
     required this.touch,
     required this.direction,
@@ -274,12 +277,12 @@ class CurlPainter extends CustomPainter {
 
     final pageRectPath = Path()..addRect(Offset.zero & page);
 
-    // ① 正面剩余区
+    // ① 正面剩余区：被折走的页
     final frontVisible =
         Path.combine(PathOperation.difference, pageRectPath, path0);
     canvas.save();
     canvas.clipPath(frontVisible);
-    _drawCurrent(canvas, page);
+    _drawFoldingPage(canvas, page);
     canvas.restore();
 
     // ② 目标页露出区：五边形 start1→v1→v2→start2→corner ∩ path0
@@ -294,14 +297,14 @@ class CurlPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-    paintContent(canvas, targetPage);
+    _drawRevealPage(canvas, page);
     // 折缝投影带：沿 crease 方向的渐变，宽度 dis/4
     _drawCreaseShadow(canvas, p, page);
     canvas.restore();
 
     // ③ 背面折叠区：path1 = vertex→vertex2→end2→T→end1；clip = path0∩path1
     //    legado 配方（drawCurrentBackArea L273-335）：
-    //    不透明纸背底色 → 镜像当前页 → 折缝渐变阴影条
+    //    不透明纸背底色 → 镜像被折走的页（与正面同源）→ 折缝渐变阴影条
     final path1 = Path()
       ..moveTo(p.vertex1.dx, p.vertex1.dy)
       ..lineTo(p.vertex2.dx, p.vertex2.dy)
@@ -316,23 +319,11 @@ class CurlPainter extends CustomPainter {
       canvas.clipPath(backFace);
       // ① 不透明纸背底色：实心纸质感，不透下层内容
       canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
-      // ② 镜像内容：内层 save/transform/restore 保证变换只作用于内容
-      //    绘制，外层 clip 始终有效（消除「两个卷筒」现象）
-      final img = currentImage;
-      if (img != null) {
-        canvas.save();
-        canvas.transform(foldMirrorMatrix(p).storage);
-        final src = Rect.fromLTWH(
-            0, 0, img.width.toDouble(), img.height.toDouble());
-        canvas.drawImageRect(img, src, Offset.zero & page, Paint());
-        canvas.restore();
-      } else {
-        // 直绘回退：同样需要内层 save/transform/restore
-        canvas.save();
-        canvas.transform(foldMirrorMatrix(p).storage);
-        paintContent(canvas, currentPage);
-        canvas.restore();
-      }
+      // ② 镜像被折走的页：内层 save/transform/restore，与正面同源
+      canvas.save();
+      canvas.transform(foldMirrorMatrix(p).storage);
+      _drawFoldingPage(canvas, page);
+      canvas.restore();
       // ③ 折缝阴影条（仍在同一个外层 save 下，clip 持续有效）
       _drawBackFoldShadow(canvas, p, page);
       canvas.restore();
@@ -368,14 +359,27 @@ class CurlPainter extends CustomPainter {
   }
 
   /// 当前页绘制：优先用快照位图，未就绪则直绘回退
-  void _drawCurrent(Canvas canvas, Size page) {
-    final img = currentImage;
+  /// 绘制被折走的页：优先用快照，未就绪则直绘回退
+  void _drawFoldingPage(Canvas canvas, Size page) {
+    final img = foldingPageImage;
     if (img != null) {
       final src = Rect.fromLTWH(
           0, 0, img.width.toDouble(), img.height.toDouble());
       canvas.drawImageRect(img, src, Offset.zero & page, Paint());
     } else {
-      paintContent(canvas, currentPage);
+      paintContent(canvas, foldingPage);
+    }
+  }
+
+  /// 绘制露出的页：优先用快照，未就绪则直绘回退
+  void _drawRevealPage(Canvas canvas, Size page) {
+    final img = revealPageImage;
+    if (img != null) {
+      final src = Rect.fromLTWH(
+          0, 0, img.width.toDouble(), img.height.toDouble());
+      canvas.drawImageRect(img, src, Offset.zero & page, Paint());
+    } else {
+      paintContent(canvas, revealPage);
     }
   }
 
@@ -439,9 +443,10 @@ class CurlPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CurlPainter oldDelegate) {
-    return oldDelegate.currentImage != currentImage ||
-        oldDelegate.currentPage != currentPage ||
-        oldDelegate.targetPage != targetPage ||
+    return oldDelegate.foldingPageImage != foldingPageImage ||
+        oldDelegate.revealPageImage != revealPageImage ||
+        oldDelegate.foldingPage != foldingPage ||
+        oldDelegate.revealPage != revealPage ||
         oldDelegate.touch != touch ||
         oldDelegate.autoProgress != autoProgress ||
         oldDelegate.direction != direction;
