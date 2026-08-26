@@ -682,19 +682,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> nextPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
 
-    // 预载直采必须先于一切 await：目标页本就出自 render store 邻居，
-    // 状态换页作为首个同步动作——提交窗口期内新拖拽绝不会读到
-    // 「目标页==可见页」的陈旧邻居索引（内容重复闪现的根源）
-    if (preloaded != null) {
-      await _adoptPreloadedPage(preloaded);
-      return;
-    }
-
     try {
       final pageCount = await _pageCountOf(state.currentChapterIndex);
 
       if (state.currentPageIndex < pageCount - 1) {
         // Next page in current chapter
+        if (preloaded != null) {
+          await _adoptPreloadedPage(preloaded);
+          return;
+        }
         state = state.copyWith(currentPageIndex: state.currentPageIndex + 1);
         await _loadCurrentPage();
       } else if (state.currentChapterIndex < state.chapters.length - 1) {
@@ -716,14 +712,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> previousPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
 
-    // 预载直采先于一切 await（语义同 nextPage）
-    if (preloaded != null) {
-      await _adoptPreloadedPage(preloaded);
-      return;
-    }
-
     if (state.currentPageIndex > 0) {
       // Previous page in current chapter
+      if (preloaded != null) {
+        await _adoptPreloadedPage(preloaded);
+        return;
+      }
       state = state.copyWith(currentPageIndex: state.currentPageIndex - 1);
       await _loadCurrentPage();
     } else if (state.currentChapterIndex > 0) {
@@ -751,13 +745,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
     state = state.copyWith(
       currentPage: page,
       currentPageIndex: page.pageIndex,
-    );
-    // 先同步发布 current-only 结构：model.currentPage 与 state 立即
-    // 一致，陈旧邻居从结构上不可能被新拖拽读到；邻居页由异步发布
-    // 就绪后补全（窗口期内 target=null 走既有直翻兜底，安全）
-    _renderStore.publishStructure(
-      currentPage: page,
-      durPageIndex: page.pageIndex,
     );
     _publishRenderStructureAsync(page);
     _prefetchNextChapterEpub();
