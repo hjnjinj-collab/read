@@ -1,15 +1,16 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/simple_models.dart';
+import '../services/book_image_store.dart';
 import '../providers/reader_provider.dart';
 import '../providers/reader_render_state.dart';
 import 'page_turn/page_turn_controller.dart';
 import 'page_turn/page_turn_types.dart';
 import 'page_turn/curl_painter.dart';
+import 'page_turn/page_picture_cache.dart';
 import 'reader_page_widget.dart';
 
 /// P4 翻页合成 Widget — 管理动画生命周期 + 双页渲染
@@ -50,8 +51,17 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   // ── 卷曲状态 ──
 
-  /// 当前页快照（拖拽开始捕获；null 时 CurlPainter 回退直绘）
-  ui.Image? _currentSnap;
+  /// 页面纹理缓存：同步录制整页 Picture，拖拽开始零异步窗口
+  final PagePictureCache _pictureCache = PagePictureCache();
+
+  /// 本次翻页的当前页/目标页纹理（缓存持有生命周期，此处仅借用）
+  ui.Picture? _currentPicture;
+  ui.Picture? _targetPicture;
+  PageInfo? _currentPicturePage;
+  PageInfo? _targetPicturePage;
+
+  /// 已预热过的当前页（翻页后自动重预热邻居三页）
+  PageInfo? _prewarmedFor;
 
   /// 实时触点（本地坐标，拖拽期间更新）
   Offset _lastTouchLocal = Offset.zero;
@@ -72,14 +82,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// state 真正切换到新页（didUpdateWidget 撤除），消除旧页闪现
   PageInfo? _settledTarget;
 
-  /// 空闲态当前页的绘制边界（快照源）
-  final _pageBoundaryKey = GlobalKey();
-
   @override
   void dispose() {
     _turnController?.stop();
     _turnController?.dispose();
-    _currentSnap?.dispose();
+    _pictureCache.clear();
     super.dispose();
   }
 
@@ -104,7 +111,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
 
-    _captureCurrentSnapshot();
+    _capturePictures(target);
 
     _replaceController();
     setState(() {});
@@ -147,7 +154,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = start;
     _lastTouchLocal = start;
 
-    _captureCurrentSnapshot();
+    _capturePictures(target);
     _replaceController();
     setState(() {});
 
@@ -183,18 +190,92 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     );
   }
 
-  Future<void> _captureCurrentSnapshot() async {
-    final ctx = _pageBoundaryKey.currentContext;
-    if (ctx == null) return;
-    final ro = ctx.findRenderObject();
-    if (ro is! RenderRepaintBoundary || !ro.attached) return;
-    try {
-      final img = await ro.toImage(pixelRatio: 1.0);
-      _currentSnap?.dispose();
-      _currentSnap = img;
-    } catch (_) {
-      // 快照失败不致命：CurlPainter 回退到内容直绘
+  // ── 纹理捕获 ──
+
+  /// 拖拽开始同步取用当前页/目标页纹理——缓存命中零成本，
+  /// 未命中同步录制（无异步窗口，首帧即正确内容）
+  void _capturePictures(PageInfo target) {
+    final size = MediaQuery.of(context).size;
+    final key = _buildRenderKey(size);
+    _currentPicturePage = widget.currentPage;
+    _targetPicturePage = target;
+    _currentPicture = _pictureFor(widget.currentPage, size, key);
+    _targetPicture = _pictureFor(target, size, key);
+  }
+
+  PageRenderKey _buildRenderKey(Size size) {
+    final n = ref.read(readerProvider.notifier);
+    return PageRenderKey(
+      fontSize: n.fontSize,
+      lineHeight: n.lineHeight,
+      applyBold: n.boldEnabled,
+      applyItalic: n.italicEnabled,
+      applyTitleBold: n.boldEnabled && !n.renderAsEpub,
+      width: size.width,
+      height: size.height,
+    );
+  }
+
+  ui.Picture _pictureFor(PageInfo page, Size size, PageRenderKey key) {
+    return _pictureCache.get(page, key) ?? _recordPicture(page, size, key);
+  }
+
+  ui.Picture _recordPicture(PageInfo page, Size size, PageRenderKey key) {
+    final n = ref.read(readerProvider.notifier);
+    final r = recordPagePicture(
+      page,
+      size,
+      applyBold: n.boldEnabled,
+      applyItalic: n.italicEnabled,
+      applyTitleBold: n.boldEnabled && !n.renderAsEpub,
+      baseFontSize: n.fontSize,
+      baseLineHeight: n.lineHeight,
+    );
+    _pictureCache.put(page, key, r.picture);
+    for (final href in r.pendingImages) {
+      BookImageStore.instance.ensureLoaded(href, () => _onPageImageReady(page));
     }
+    return r.picture;
+  }
+
+  /// 图片异步解码完成：失效重录（同步替换引用后再调度重绘，
+  /// 不会出现画布引用已 dispose 纹理的窗口）
+  void _onPageImageReady(PageInfo page) {
+    if (!mounted) return;
+    _pictureCache.invalidate(page);
+    final size = MediaQuery.of(context).size;
+    final key = _buildRenderKey(size);
+    if (identical(page, _currentPicturePage)) {
+      _currentPicture = _recordPicture(page, size, key);
+    }
+    if (identical(page, _targetPicturePage)) {
+      _targetPicture = _recordPicture(page, size, key);
+    }
+    if (_isActive) setState(() {});
+  }
+
+  /// 空闲预热邻居三页纹理（对齐 legado 常备 curBitmap/nextBitmap：
+  /// 拖拽开始时快照永远就绪，快速连翻零首帧开销）
+  void _schedulePrewarm() {
+    if (widget.mode != PageTurnMode.simulation) return;
+    final current = _settledTarget ?? widget.currentPage;
+    if (identical(_prewarmedFor, current)) return;
+    _prewarmedFor = current;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final model = ref.read(readerRenderStoreProvider).model;
+      final size = MediaQuery.of(context).size;
+      final key = _buildRenderKey(size);
+      for (final page in [
+        current,
+        model.nextPage?.page,
+        model.previousPage?.page,
+      ]) {
+        if (page == null) continue;
+        if (_pictureCache.get(page, key) != null) continue;
+        _recordPicture(page, size, key);
+      }
+    });
   }
 
   /// 自动播放：翻完→提交翻页；回弹→复位。返回后控制器已复位/清理。
@@ -235,6 +316,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _isActive = false;
     _targetPage = null;
     _turnDirection = PageDirection.none;
+    // 借用引用置空（生命周期归缓存所有，勿在此 dispose）
+    _currentPicture = null;
+    _targetPicture = null;
     _turnController?.stop();
     _turnController?.dispose();
     _turnController = null;
@@ -262,10 +346,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   @override
   Widget build(BuildContext context) {
     if (!_isActive || _turnController == null || _targetPage == null) {
-      // 空闲态：定格页优先（翻页提交间隙），否则当前页
-      // （RepaintBoundary 供快照捕获）
+      // 空闲态：定格页优先（翻页提交间隙），否则当前页；
+      // 顺带预热邻居三页纹理（每页内容变更仅一次）
+      _schedulePrewarm();
       return RepaintBoundary(
-        key: _pageBoundaryKey,
         child: _buildPage(_settledTarget ?? widget.currentPage),
       );
     }
@@ -285,8 +369,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final notifier = ref.watch(readerProvider.notifier);
 
     // 自动阶段触点插值（legado onAnimStart L226-237 终点语义）：
-    //   翻完 → 触点扫过整页（NEXT 终点 (-w,h)），折叠吞没全页后交换；
-    //     收尾由 CurlPainter 的淡入层保证末帧 = 100% 干净目标页
+    //   翻完 → 触点扫过整页直至折痕轴落到对侧页缘（折叠吞没全页）：
+    //     NEXT 终点 (-w, h) → 轴落 x=0；PREV 终点 (2w, h) → 轴落 x=w。
+    //     末帧几何天然全覆盖目标页，无当前页残缝（淡入层仅数值兜底）
     //   回弹 → 从松手位置回到手势起始点（legado cancel 缩回语义）
     // 映射从起始进度 _autoFromProgress 归一化，避免松手瞬间折叠跳变
     Offset effTouch = _lastTouchLocal;
@@ -303,8 +388,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       final Offset sweepTarget;
       if (_autoIsTurn) {
         sweepTarget = _turnDirection == PageDirection.next
-            ? Offset(-size.width * 0.25, size.height * 0.90)
-            : Offset(size.width * 1.25, size.height * 0.90);
+            ? Offset(-size.width, size.height)
+            : Offset(size.width * 2, size.height);
       } else {
         sweepTarget = _dragFirstTouch;
       }
@@ -329,8 +414,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       child: CustomPaint(
         size: Size.infinite,
         painter: CurlPainter(
-          currentImage: _currentSnap,
+          currentPicture: _currentPicture,
           currentPage: widget.currentPage,
+          targetPicture: _targetPicture,
           targetPage: _targetPage!,
           paintContent: paintContent,
           touch: effTouch,

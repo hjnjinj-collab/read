@@ -91,6 +91,27 @@ Matrix4 reflectionAboutCrease(Offset a, Offset b) {
   ]);
 }
 
+/// 真实折叠轴镜像矩阵（含枢轴平移，纯函数可单测）
+///
+/// 轴 = 触点-角点垂直平分线：ctrl1 到角点/触点等距（可证
+/// |ctrl1−corner|² = |ctrl1−touch|²），故「过 ctrl1 且垂直于
+/// corner−touch」的直线即垂直平分线。对齐 legado drawCurrentBackArea
+/// 的 mMatrixArray(f8,f9) + pre/postTranslate(ctrl1)——镜像内容绕真实
+/// 折缝铰链，正/背面在折缝处像素连续（用 start1→start2 做轴会横向
+/// 偏移 (corner.x−ctrl1.x)/2，导致镜面内容与折缝不衔接）。
+/// 方向取 ⊥(corner−touch) 而非 ctrl1→mid：横扫终点 (-w,h) 处
+/// ctrl1 与中点重合，后者会零向量退化。
+Matrix4 foldMirrorMatrix(CurlPoints p) {
+  final dx = p.corner.dx - p.touch.dx;
+  final dy = p.corner.dy - p.touch.dy;
+  final axisEnd = Offset(p.ctrl1.dx - dy, p.ctrl1.dy + dx);
+  final r = reflectionAboutCrease(p.ctrl1, axisEnd);
+  return Matrix4.identity()
+    ..translateByDouble(p.ctrl1.dx, p.ctrl1.dy, 0, 1)
+    ..multiply(r)
+    ..translateByDouble(-p.ctrl1.dx, -p.ctrl1.dy, 0, 1);
+}
+
 /// 主几何计算——legado calcPoints 移植
 ///
 /// 含「start1 出屏时按相似三角形把触点拉回屏内再重算」的兜底。
@@ -193,13 +214,16 @@ CurlPoints calcCurlPoints(Offset touchIn, Offset corner, Size page) {
 // ══════════════════════════════════════════════════════════════
 
 class CurlPainter extends CustomPainter {
-  /// 当前页快照（拖拽开始捕获；null 时回退到 [paintContent] 直绘）
-  final ui.Image? currentImage;
+  /// 当前页纹理（PagePictureCache 同步录制；null 时回退 [paintContent] 直绘）
+  final ui.Picture? currentPicture;
 
-  /// 当前页数据（快照未就绪时的直绘回退源）
+  /// 当前页数据（纹理未就绪时的直绘回退源）
   final PageInfo currentPage;
 
-  /// 底层目标页数据（每帧经 [paintContent] 绘制到露出区）
+  /// 目标页纹理（露出区/收尾淡入优先重放；null 回退直绘）
+  final ui.Picture? targetPicture;
+
+  /// 底层目标页数据（纹理未就绪时的直绘回退源）
   final PageInfo targetPage;
 
   /// 页面内容渲染回调（复用 PageContentRenderer，由 composer 注入绘制参数）
@@ -212,7 +236,7 @@ class CurlPainter extends CustomPainter {
   final PageDirection direction;
 
   /// 自动播放阶段进度；拖拽阶段传 null。
-  /// 仅用于收尾淡入层门控（≥0.7 渐显目标页），触点插值由 composer 完成
+  /// 仅用于收尾淡入层门控（≥0.95 兜底渐显），触点插值由 composer 完成
   final double? autoProgress;
 
   static const Color _paperColor = Color(0xFFF5F1E8);
@@ -222,8 +246,9 @@ class CurlPainter extends CustomPainter {
   static const Color _paperBackColor = Color(0xFFE9E3D5);
 
   CurlPainter({
-    required this.currentImage,
+    required this.currentPicture,
     required this.currentPage,
+    required this.targetPicture,
     required this.targetPage,
     required this.paintContent,
     required this.touch,
@@ -258,7 +283,7 @@ class CurlPainter extends CustomPainter {
         Path.combine(PathOperation.difference, pageRectPath, path0);
     canvas.save();
     canvas.clipPath(frontVisible);
-    _drawCurrent(canvas, page);
+    _drawCurrent(canvas);
     canvas.restore();
 
     // ② 目标页露出区：五边形 start1→v1→v2→start2→corner ∩ path0
@@ -272,8 +297,7 @@ class CurlPainter extends CustomPainter {
     final revealArea = Path.combine(PathOperation.intersect, pentagon, path0);
     canvas.save();
     canvas.clipPath(revealArea);
-    canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-    paintContent(canvas, targetPage);
+    _drawTarget(canvas, page);
     // 折缝投影带：沿 crease 方向的渐变，宽度 dis/4
     _drawCreaseShadow(canvas, p, page);
     canvas.restore();
@@ -295,13 +319,11 @@ class CurlPainter extends CustomPainter {
       canvas.clipPath(backFace);
       // ① 不透明纸背底色：实心纸质感，不透下层内容
       canvas.drawRect(Offset.zero & page, Paint()..color = _paperBackColor);
-      // ② 沿折痕线（start1→start2）的纯反射镜像出纸背：
-      //    单位法向量保证正交（无拉伸），轴取折痕保证镜像位置正确
-      final m = reflectionAboutCrease(p.start1, p.start2);
-      canvas.translate(p.start1.dx, p.start1.dy);
-      canvas.transform(m.storage);
-      canvas.translate(-p.start1.dx, -p.start1.dy);
-      _drawCurrent(canvas, page);
+      // ② 沿真实折痕轴（过 ctrl1 的触点-角点垂直平分线）纯反射镜像出
+      //    纸背：单位法向量保证正交（无拉伸），铰链轴保证折缝处
+      //    正/背面内容像素连续
+      canvas.transform(foldMirrorMatrix(p).storage);
+      _drawCurrent(canvas);
       canvas.restore();
       // ③ 折缝阴影条：0x33→0xB0 黑（legado L110 配色），贴折缝最深
       canvas.save();
@@ -338,35 +360,44 @@ class CurlPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12),
     );
 
-    // ⑤ 收尾淡入层：自动扫过末段（≥70%）以渐增不透明度铺满目标页。
-    //    保证 progress=1.0 末帧 = 100% 干净目标页 = 定格帧——无论折叠
-    //    几何残留多少当前页切片都被盖住，从机制上消灭「末帧闪回当前页」。
-    //    （对齐 legado 末帧与换页后像素一致的性质）
+    // ⑤ 收尾淡入层（数值兜底）：横扫终点已保证折叠几何末帧吞没整页
+    //    （next=(-w,h) 轴落 x=0 / prev=(2w,h) 轴落 x=w），此处仅在仿真
+    //    终值残留亚像素残缝时（≥95%）以不透明度铺满目标页，保证末帧
+    //    = 100% 干净目标页。阈值之下的混合期不可见，不会叠字闪烁。
     final ap = autoProgress;
-    if (ap != null && ap >= 0.7) {
-      final opacity = ((ap - 0.7) / 0.3).clamp(0.0, 1.0);
+    if (ap != null && ap >= 0.95) {
+      final opacity = ((ap - 0.95) / 0.05).clamp(0.0, 1.0);
       if (opacity > 0) {
         canvas.saveLayer(
           Offset.zero & page,
           Paint()..color = Colors.white.withValues(alpha: opacity),
         );
-        canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-        paintContent(canvas, targetPage);
+        _drawTarget(canvas, page);
         canvas.restore();
       }
     }
   }
 
-  /// 当前页绘制：优先用快照位图，未就绪则直绘回退
-  void _drawCurrent(Canvas canvas, Size page) {
-    final img = currentImage;
-    if (img != null) {
-      final src = Rect.fromLTWH(
-          0, 0, img.width.toDouble(), img.height.toDouble());
-      canvas.drawImageRect(img, src, Offset.zero & page, Paint());
-    } else {
-      paintContent(canvas, currentPage);
+  /// 当前页绘制：优先重放纹理 Picture（一次录制，帧间零重排），
+  /// 未就绪则直绘回退
+  void _drawCurrent(Canvas canvas) {
+    final pic = currentPicture;
+    if (pic != null) {
+      canvas.drawPicture(pic);
+      return;
     }
+    paintContent(canvas, currentPage);
+  }
+
+  /// 目标页绘制：优先重放纹理，未就绪则纸色底 + 直绘回退
+  void _drawTarget(Canvas canvas, Size page) {
+    final pic = targetPicture;
+    if (pic != null) {
+      canvas.drawPicture(pic);
+      return;
+    }
+    canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
+    paintContent(canvas, targetPage);
   }
 
   /// 折缝投影带：canvas 平移到 start1、旋转 crease 方向角、
@@ -429,9 +460,10 @@ class CurlPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CurlPainter oldDelegate) {
-    return oldDelegate.currentImage != currentImage ||
+    return oldDelegate.currentPicture != currentPicture ||
         oldDelegate.currentPage != currentPage ||
         oldDelegate.targetPage != targetPage ||
+        oldDelegate.targetPicture != targetPicture ||
         oldDelegate.touch != touch ||
         oldDelegate.autoProgress != autoProgress ||
         oldDelegate.direction != direction;
