@@ -73,6 +73,24 @@ Offset bezierVertex(Offset s, Offset ctrl, Offset e) => Offset(
       (s.dy + 2 * ctrl.dy + e.dy) / 4,
     );
 
+/// 过点 [a]、沿 [a]→[b] 方向直线的平面反射矩阵
+///
+/// R = I − 2n̂n̂ᵀ，n̂ 为直线的**单位**法向量（方向向量旋转 90°）。
+/// 正交矩阵（纯镜像、零缩放），det = −1，直线上的点为不动点。
+/// 用于把当前页内容沿折痕线镜像出纸张背面。
+Matrix4 reflectionAboutCrease(Offset a, Offset b) {
+  final d = b - a;
+  final len = d.distance == 0 ? 0.001 : d.distance;
+  final nx = -d.dy / len;
+  final ny = d.dx / len;
+  return Matrix4.fromList([
+    1 - 2 * nx * nx, -2 * nx * ny, 0, 0, //
+    -2 * nx * ny, 1 - 2 * ny * ny, 0, 0, //
+    0, 0, 1, 0, //
+    0, 0, 0, 1,
+  ]);
+}
+
 /// 主几何计算——legado calcPoints 移植
 ///
 /// 含「start1 出屏时按相似三角形把触点拉回屏内再重算」的兜底。
@@ -282,16 +300,9 @@ class CurlPainter extends CustomPainter {
     if (!backFace.getBounds().isEmpty) {
       canvas.save();
       canvas.clipPath(backFace);
-      // 反射矩阵跨折痕（过 start1，法向量 u）
-      final dis = p.dis == 0 ? 0.001 : p.dis;
-      final ux = (p.corner.dx - p.ctrl1.dx) / dis;
-      final uy = (p.ctrl2.dy - p.corner.dy) / dis;
-      final m = Matrix4.fromList([
-        1 - 2 * uy * uy, 2 * ux * uy, 0, 0, //
-        2 * ux * uy, 1 - 2 * ux * ux, 0, 0, //
-        0, 0, 1, 0, //
-        0, 0, 0, 1,
-      ]);
+      // 沿折痕线（start1→start2）的纯反射镜像出纸背：
+      // 单位法向量保证正交（无拉伸），轴取折痕保证镜像位置正确
+      final m = reflectionAboutCrease(p.start1, p.start2);
       canvas.translate(p.start1.dx, p.start1.dy);
       canvas.transform(m.storage);
       canvas.translate(-p.start1.dx, -p.start1.dy);

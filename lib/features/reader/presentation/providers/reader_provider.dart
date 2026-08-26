@@ -675,7 +675,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }
 
   /// Go to next page
-  Future<void> nextPage() async {
+  ///
+  /// [preloaded] 翻页动画层传入的预载目标页（render store 邻居页）：
+  /// 直接采用、跳过 FFI 往返，实现翻页完成零延迟定格
+  /// （对齐 legado onAnimStop→fillPage 同步换页机制）。
+  Future<void> nextPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
 
     try {
@@ -683,6 +687,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       if (state.currentPageIndex < pageCount - 1) {
         // Next page in current chapter
+        if (preloaded != null) {
+          await _adoptPreloadedPage(preloaded);
+          return;
+        }
         state = state.copyWith(currentPageIndex: state.currentPageIndex + 1);
         await _loadCurrentPage();
       } else if (state.currentChapterIndex < state.chapters.length - 1) {
@@ -699,11 +707,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }
 
   /// Go to previous page
-  Future<void> previousPage() async {
+  ///
+  /// [preloaded] 语义同 [nextPage]。
+  Future<void> previousPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
 
     if (state.currentPageIndex > 0) {
       // Previous page in current chapter
+      if (preloaded != null) {
+        await _adoptPreloadedPage(preloaded);
+        return;
+      }
       state = state.copyWith(currentPageIndex: state.currentPageIndex - 1);
       await _loadCurrentPage();
     } else if (state.currentChapterIndex > 0) {
@@ -719,6 +733,34 @@ class ReaderNotifier extends Notifier<ReadingState> {
         await _loadCurrentPage();
       } catch (e) {
         state = state.copyWith(error: e.toString());
+      }
+    }
+  }
+
+  /// 直接采用预载页（零 FFI）：state 切换 + 三页重发布 + 进度落库 + EPUB 预取
+  ///
+  /// 收尾逻辑与 _loadCurrentPage 相同，仅省去取页的 FFI 往返——
+  /// 预载页本就出自同一分页缓存，内容一致。
+  Future<void> _adoptPreloadedPage(PageInfo page) async {
+    state = state.copyWith(
+      currentPage: page,
+      currentPageIndex: page.pageIndex,
+    );
+    _publishRenderStructureAsync(page);
+    _prefetchNextChapterEpub();
+
+    final filePath = state.filePath;
+    if (filePath != null) {
+      try {
+        await _db.saveProgress(
+          bookPath: filePath,
+          chapterIndex: state.currentChapterIndex,
+          charOffset: page.startCharIndex,
+          totalChapters: state.chapters.length,
+        );
+        await _db.touchLastRead(filePath);
+      } catch (_) {
+        // 进度保存失败不影响阅读
       }
     }
   }

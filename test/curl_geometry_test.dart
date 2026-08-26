@@ -74,6 +74,56 @@ void main() {
     });
   });
 
+  group('reflectionAboutCrease', () {
+    // 取 2x2 线性部分（storage 列主序: [m00,m01,.., m10,m11,..]）
+    List<List<double>> linear2x2(Matrix4 m) => [
+          [m.storage[0], m.storage[4]],
+          [m.storage[1], m.storage[5]],
+        ];
+
+    test('正交性 RᵀR = I（纯镜像零缩放——拉伸回归锁）', () {
+      final m = linear2x2(reflectionAboutCrease(
+        const Offset(100, 800),
+        const Offset(400, 650),
+      ));
+      // 对角元素 ≈ 1
+      expect(m[0][0] * m[0][0] + m[1][0] * m[1][0], closeTo(1, 1e-9));
+      expect(m[0][1] * m[0][1] + m[1][1] * m[1][1], closeTo(1, 1e-9));
+      // 列正交
+      expect(m[0][0] * m[0][1] + m[1][0] * m[1][1], closeTo(0, 1e-9));
+    });
+
+    test('det = −1（镜像而非旋转）', () {
+      final m = linear2x2(reflectionAboutCrease(
+        const Offset(0, 0),
+        const Offset(1, 1),
+      ));
+      final det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+      expect(det, closeTo(-1, 1e-9));
+    });
+
+    test('折痕线上的点是不动点（方向向量经反射保持不变）', () {
+      final a = const Offset(100, 800);
+      final b = const Offset(400, 650);
+      final m = reflectionAboutCrease(a, b);
+      // 折痕方向向量 d 经线性部分变换后保持不变（线上方向是特征值 1 的特征向量）
+      final d = b - a;
+      final dx = m.storage[0] * d.dx + m.storage[4] * d.dy;
+      final dy = m.storage[1] * d.dx + m.storage[5] * d.dy;
+      expect(dx, closeTo(d.dx, 1e-9));
+      expect(dy, closeTo(d.dy, 1e-9));
+    });
+
+    test('法向方向上的点被镜像到另一侧', () {
+      // 折痕为 x 轴（a=(0,0), b=(10,0)）→ (3,5) 应映到 (3,−5)
+      final m = reflectionAboutCrease(const Offset(0, 0), const Offset(10, 0));
+      final x = m.storage[0] * 3 + m.storage[4] * 5;
+      final y = m.storage[1] * 3 + m.storage[5] * 5;
+      expect(x, closeTo(3, 1e-9));
+      expect(y, closeTo(-5, 1e-9));
+    });
+  });
+
   group('calcCurlPoints', () {
     // next 翻页：角点固定右下 (400,800)，触点从右缘向左拖
     test('触点靠近右缘时折面几何收敛且有限', () {

@@ -65,6 +65,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 当前自动播放方向：true=正向翻完，false=回弹
   bool _autoIsTurn = true;
 
+  /// 翻页提交后的定格页：动画末帧与目标页内容一致，定格显示它直到
+  /// state 真正切换到新页（didUpdateWidget 撤除），消除旧页闪现
+  PageInfo? _settledTarget;
+
   /// 空闲态当前页的绘制边界（快照源）
   final _pageBoundaryKey = GlobalKey();
 
@@ -204,11 +208,23 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     }
   }
 
-  /// 提交翻页：通知 ReaderNotifier 移动到目标页
+  /// 提交翻页：先定格目标页（消除 state 更新间隙的旧页闪现），
+  /// 再带预载页即时换页（跳过 FFI，对齐 legado onAnimStop→fillPage 同步机制）
   void _commitPageTurn() {
     final d = _turnDirection;
+    final target = _targetPage;
+    _settledTarget = target; // 定格：动画末帧内容 == 目标页
     _resetState();
-    _directFlip(d);
+    if (target != null) {
+      final notifier = ref.read(readerProvider.notifier);
+      if (d == PageDirection.next) {
+        notifier.nextPage(preloaded: target);
+      } else if (d == PageDirection.prev) {
+        notifier.previousPage(preloaded: target);
+      }
+    } else {
+      _directFlip(d);
+    }
   }
 
   void _resetState() {
@@ -221,15 +237,28 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     if (mounted) setState(() {});
   }
 
+  @override
+  void didUpdateWidget(PageTurnComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // state 已切换到新页（pageIndex 对上）→ 撤定格，无缝交还正常渲染
+    if (_settledTarget != null &&
+        widget.currentPage != oldWidget.currentPage &&
+        widget.currentPage.pageIndex == _settledTarget!.pageIndex) {
+      _settledTarget = null;
+      if (mounted) setState(() {});
+    }
+  }
+
   // ── 构建 ──
 
   @override
   Widget build(BuildContext context) {
     if (!_isActive || _turnController == null || _targetPage == null) {
-      // 空闲态：只显示当前页（RepaintBoundary 供快照捕获）
+      // 空闲态：定格页优先（翻页提交间隙），否则当前页
+      // （RepaintBoundary 供快照捕获）
       return RepaintBoundary(
         key: _pageBoundaryKey,
-        child: _buildPage(widget.currentPage),
+        child: _buildPage(_settledTarget ?? widget.currentPage),
       );
     }
 
