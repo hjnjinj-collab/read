@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../../../../core/models/simple_models.dart';
+import '../../services/book_image_store.dart';
+import '../../diagnostics/reader_trace.dart';
 import 'page_turn_types.dart';
 
 // ══════════════════════════════════════════════════════════════
@@ -252,10 +254,57 @@ class CurlPainter extends CustomPainter {
     required this.direction,
     required this.autoProgress,
     required this.washScale,
-  });
+    // 图片就绪重绘通道：与空闲页 PagePainter(repaint: _repaintTick) 同机制。
+    // must 不走 shouldRepaint 字段比对——动画中 touch 不变时新 painter
+    // 字段全同，字段比对会抑制重绘，占位将永久冻结（纹理不变化根因）。
+    required Listenable repaint,
+  }) : super(repaint: repaint);
+
+  /// 资源就绪诊断辅助：背景图就绪状态字符串（ready / missing / null）
+  String _bgReady(PageInfo page) {
+    final href = page.backgroundHref;
+    if (href == null || href.isEmpty) return 'null';
+    return BookImageStore.instance.get(href) != null ? 'ready' : 'missing';
+  }
+
+  /// 资源就绪诊断辅助：图片 entry 就绪摘要（ready/total）
+  String _imgReadySummary(PageInfo page) {
+    var total = 0;
+    var ready = 0;
+    for (final entry in page.entries) {
+      final href = entry.resourceHref;
+      if (href == null || href.isEmpty) continue;
+      total++;
+      if (BookImageStore.instance.get(href) != null) ready++;
+    }
+    return '$ready/$total';
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 末帧短路：动画收尾（autoProgress >= 0.9995 视为已触顶；或 reveal=folding）
+    // 直接铺 reveal 全屏。绕过 path0/path1/backFace 极限退化下的灰色纸背色残迹。
+    // 阈值放宽到 0.9995：Flutter Ticker 在 animateTurn 触达 1.0 那一刻触发
+    // 短路帧后，后续 markNeedsPaint 触发的 paint 调用里 controller.progress
+    // 可能已回退到 ~0.9996（完成回调与最后帧时序竞争），硬阈值 1.0 会让这些
+    // trailing 帧走非短路路径 → 短暂"残迹帧"上屏 = 闪。
+    final ap = autoProgress;
+    final isSettled = (ap != null && ap >= 0.9995) ||
+        identical(revealPage, foldingPage);
+    // 翻页纹理诊断：每帧报告当前画的页面身份 + 资源就绪态
+    readerTrace('curl.paint.frame', {
+      'autoProgress': ap,
+      'isSettled': isSettled,
+      'folding': '${foldingPage.chapterIndex}/${foldingPage.pageIndex}#${readerPageId(foldingPage)}',
+      'reveal': '${revealPage.chapterIndex}/${revealPage.pageIndex}#${readerPageId(revealPage)}',
+      'revealBg': _bgReady(revealPage),
+      'revealImages': _imgReadySummary(revealPage),
+    });
+    if (isSettled) {
+      canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
+      paintContent(canvas, revealPage);
+      return;
+    }
     final page = size;
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
 
