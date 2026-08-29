@@ -16,7 +16,7 @@ book_parser = { path = "../book_parser" }
 uuid = { version = "1.6", features = ["v4"] }
 
 # 第二阶段新增
-rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel"], optional = true }
+rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel", "bindgen"], optional = true }
 memmap2 = "0.9"
 async-trait = "0.1"
 

@@ -16,7 +16,7 @@ roxmltree = "0.20"            # EPUB 结构 XML 解析 (container/OPF/NCX/nav)
 scraper = "0.20"              # 正文 XHTML→文本提取（HTML 语义解析）
 memmap2 = "0.9"               # 内存映射（大文件支持）
 lru = "0.12"                  # LRU 缓存
-rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel"], optional = true }  # JS 引擎（可选）
+rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel", "bindgen"], optional = true }  # JS 引擎（可选；Android 交叉编译必加 bindgen）
 tokio = { workspace = true }     # 异步运行时
 log = { workspace = true }       # 日志
 zhconv = "0.4.1"
