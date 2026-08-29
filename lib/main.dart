@@ -6,45 +6,28 @@ import 'core/database/app_database.dart';
 import 'features/reader/presentation/providers/reader_provider.dart';
 import 'core/ffi/book_service.dart';
 import 'core/services/reader_font.dart';
-import 'core/ffi/rust_bridge.dart/api.dart' as rust_api;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Rust FFI
+  // Initialize Rust FFI（FontManager 内部自动 load_embedded_default，
+  // 即从 rust/assets/NotoSansSC-Regular.otf 读字节注册为
+  // 'embedded_default' 默认字体；内置 Noto Sans CJK SC，跨平台一致）
   await BookService.init();
 
-  // Load system font
-  await _loadSystemFont();
+  // 把同一份 Noto Sans CJK SC 注册到 Dart 端 FontLoader（从
+  // assets/fonts/ 读），双引擎用同源字体 → 满足 M7 测量 / 绘制同源约束
+  await ReaderFont.initialize();
 
   runApp(const ProviderScope(child: MyApp()));
 }
 
-/// Load system font for text layout
-///
-/// M7 字体统一：候选表取首个成功路径，同一文件喂给两侧引擎——
-/// Rust ab_glyph 测量断行 + Dart FontLoader 注册 'ReaderSerif' 绘制，
-/// 保证 advance 同源。Dart 注册失败仅回退默认字体（排版仍用 Rust 结果）。
-Future<void> _loadSystemFont() async {
-  for (final path in ReaderFont.candidatePaths) {
-    try {
-      await rust_api.loadFontFile(
-        fontName: 'default',
-        fontPath: path,
-      );
-    } catch (e) {
-      debugPrint('✗ Failed to load font $path: $e');
-      continue; // Try next font
-    }
-
-    // Rust 已加载成功：Dart 侧注册同款供绘制（失败不影响排版）
-    await ReaderFont.registerFromFile(path);
-    debugPrint('✓ Font loaded successfully: $path');
-    return; // Success, exit
-  }
-
-  debugPrint('⚠ Warning: No system font loaded. Text layout may fail.');
-}
+/// 旧版 _loadSystemFont + ReaderFont.candidatePaths 已删除。
+/// 见 docs/bugfixes/2026-08-29_字体架构重写_用户可选.md
+/// 改用：
+/// - Rust:  FontManager::new_with_embedded_default() 启动自动加载内置字体
+/// - Dart:  ReaderFont.initialize() 读 assets/fonts/ 注册 'ReaderSerif'
+/// - 用户:  FontProvider.pickAndLoadCustomFont() 选 .ttf/.otf/.ttc 注入两侧
 
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);

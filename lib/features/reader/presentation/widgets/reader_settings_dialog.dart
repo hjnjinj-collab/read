@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/simple_models.dart';
+import '../../../../core/services/reader_font.dart';
+import '../../../../core/services/font_provider.dart';
 import '../providers/reader_provider.dart';
 
 class ReaderSettingsDialog extends ConsumerStatefulWidget {
@@ -193,6 +195,54 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // 字体选择（M9 字体架构：内置 Noto Sans CJK SC + 用户可选）
+                _buildSectionHeader('字体'),
+                const SizedBox(height: 8),
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.text_fields),
+                        title: const Text('当前字体'),
+                        subtitle: Text(
+                          ReaderFont.displayName,
+                          style: const TextStyle(
+                            fontFamily: 'ReaderSerif',
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.folder_open),
+                        title: const Text('选择本地字体文件'),
+                        subtitle: const Text(
+                          '支持 .ttf / .otf / .ttc（从设备存储）',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          final ok = await FontProvider.pickAndLoadCustomFont(context);
+                          if (ok && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('字体已切换（下次打开书籍生效）'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                            setState(() {}); // 刷新显示名
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
                 // Content cleaning section
                 _buildSectionHeader('内容净化'),
                 const SizedBox(height: 8),

@@ -72,3 +72,11 @@ rust/test_large_file_cargo/test_very_large_book.txt
 # Gradle build reports (build 产物，包含 AAR metadata 失败 HTML）
 /android/build/
 
+
+# Rust 端的字体文件（build 时 include_bytes! 嵌入 binary）
+/rust/assets/NotoSansSC-Regular.otf
+
+
+# Rust 4 ABI 编译产物（cargo ndk 输出，给 APK 打包用）
+/android/app/src/main/jniLibs/
+

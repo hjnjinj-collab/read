@@ -20,7 +20,10 @@ use crate::{
 
 // Global font manager
 static FONT_MANAGER: Lazy<Arc<Mutex<FontManager>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(FontManager::new()))
+    // 启动时自动加载内置 Noto Sans CJK SC：开箱即有 CJK 字体可用，
+    // 不依赖宿主系统字体（Windows/macOS/Linux/Android/iOS 行为一致）。
+    // 用户后续可用 load_font_file/load_font_data 注入新字体并 set_default_font 切换。
+    Arc::new(Mutex::new(FontManager::new_with_embedded_default()))
 });
 
 // M8-P4：跨章共享字形缓存——所有章节排版复用同一 GlyphCache，
@@ -210,13 +213,24 @@ fn effective_paragraph_spacing(font_size: f32) -> f32 {
     font_size * 0.8 * multiplier
 }
 
-/// Load font from file path
+/// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
+///
+/// 行为：写入 `tracing` 日志 + 静默返回 Ok，让上层 Dart 代码不因字体
+/// 加载失败而崩溃。FontManager 内置 Noto Sans CJK SC 默认字体，
+/// 即使所有 load_font_file 失败，仍有可用字体兜底。
 pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()> {
     let mut manager = FONT_MANAGER.lock().unwrap();
-    manager.load_font_from_file(font_name, &font_path)?;
-    // M8-P4：字体变更清共享字形缓存，防旧字体字形混入
-    SHARED_GLYPH_CACHE.lock().unwrap().clear();
-    Ok(())
+    match manager.load_font_from_file(font_name, &font_path) {
+        Ok(()) => {
+            // M8-P4：字体变更清共享字形缓存，防旧字体字形混入
+            SHARED_GLYPH_CACHE.lock().unwrap().clear();
+            Ok(())
+        }
+        Err(e) => {
+            log::warn!("load_font_file failed ({}): {}", font_path, e);
+            Ok(()) // 软失败
+        }
+    }
 }
 
 /// Load font from byte array
@@ -232,6 +246,26 @@ pub fn load_font_data(font_name: String, font_data: Vec<u8>) -> anyhow::Result<(
 pub fn get_font_count() -> usize {
     let manager = FONT_MANAGER.lock().unwrap();
     manager.font_count()
+}
+
+/// 切换默认字体（用户选字体后调用）
+///
+/// name 必须是已 load_font_* 加载过的字体名，否则抛错。
+/// 切换后清共享字形缓存防旧字体字形混入。
+pub fn set_default_font(font_name: String) -> anyhow::Result<()> {
+    let mut manager = FONT_MANAGER.lock().unwrap();
+    manager.set_default_font(&font_name)?;
+    SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    Ok(())
+}
+
+/// 获取当前默认字体名
+pub fn get_default_font_name() -> String {
+    let manager = FONT_MANAGER.lock().unwrap();
+    manager
+        .default_font_name()
+        .unwrap_or("embedded_default")
+        .to_string()
 }
 
 /// Parse TXT file and return book ID

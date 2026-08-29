@@ -11,7 +11,11 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
-/// Load font from file path
+/// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
+///
+/// 行为：写入 `tracing` 日志 + 静默返回 Ok，让上层 Dart 代码不因字体
+/// 加载失败而崩溃。FontManager 内置 Noto Sans CJK SC 默认字体，
+/// 即使所有 load_font_file 失败，仍有可用字体兜底。
 Future<void> loadFontFile({required String fontName, required String fontPath}) =>
     RustLib.instance.api.crateApiLoadFontFile(fontName: fontName, fontPath: fontPath);
 
@@ -21,6 +25,16 @@ Future<void> loadFontData({required String fontName, required List<int> fontData
 
 /// Get loaded font count
 Future<BigInt> getFontCount() => RustLib.instance.api.crateApiGetFontCount();
+
+/// 切换默认字体（用户选字体后调用）
+///
+/// name 必须是已 load_font_* 加载过的字体名，否则抛错。
+/// 切换后清共享字形缓存防旧字体字形混入。
+Future<void> setDefaultFont({required String fontName}) =>
+    RustLib.instance.api.crateApiSetDefaultFont(fontName: fontName);
+
+/// 获取当前默认字体名
+Future<String> getDefaultFontName() => RustLib.instance.api.crateApiGetDefaultFontName();
 
 /// Parse TXT file and return book ID
 Future<String> parseTxtFile({required String filePath, String? bookName}) =>

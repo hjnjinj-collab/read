@@ -39,6 +39,7 @@
 | **APK 安装成功但启动白/黑屏卡死（Flutter UI 永远不出现）** | `RustLib.init()` 调 `ExternalLibrary.open('libbridge.so')` 但 **APK 缺 `libbridge.so`**——Rust 库没为 Android ABI 编译；`build_apk.ps1` 没 cargo build 步骤，`main()` 在 `await BookService.init()` 抛 `ArgumentError` 后 `runApp` 不执行 | [bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so](./bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so.md) ⭐ `cargo install cargo-ndk` + `build_apk.ps1` 加 `cargo ndk -t <4 ABIs> -o jniLibs/ build --release` |
 | **`cargo ndk ... build --release` 报 `Could not find openssl via pkg-config` / `OPENSSL_DIR` 错误** | `reqwest 0.12` 默认 features 拉 `default-tls` = `native-tls` = `openssl-sys`；Windows host 编译时 link host OpenSSL 没事，Android 交叉编译时无 sysroot 必 fail | [bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls](./bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls.md) ⭐ `reqwest = { default-features = false, features = [..., "rustls-tls"] }`——纯 Rust TLS 无 C 依赖 |
 | **`cargo ndk ... build --release` 报 `couldn't read rquickjs-sys ... bindings/aarch64-linux-android.rs`** | `rquickjs-sys 0.6.2` 默认走预编译 `src/bindings/<target>.rs`，**Android ABI 不在预编译列表**（只覆盖 x86_64/aarch64 macOS+Linux+Windows 等 ~10 个主流目标） | [bugfixes/2026-08-29_Android编译rquickjs-sys缺bindings加bindgen](./bugfixes/2026-08-29_Android编译rquickjs-sys缺bindings加bindgen.md) ⭐ `rquickjs features = [..., "bindgen"]`——build 时用 NDK clang 现场生成 bindings |
+| **APK 跑通后阅读页字体显示"不存在" / 文本空白** | `ReaderFont.candidatePaths` 写死 Windows 路径（移动端 0% 命中），`loadFontFile` 静默失败；FontManager 找不到字体直接抛 `Err("字体不存在: default")` 冒泡到 Dart | [bugfixes/2026-08-29_字体架构重写_用户可选](./bugfixes/2026-08-29_字体架构重写_用户可选.md) ⭐ 内置 Noto Sans CJK SC（7.95MB Rust+Dart 同源）+ FontManager 三级 fallback + loadFontFile 软失败 + FontProvider 用户可选 .ttf/.otf/.ttc |
 
 ## 二、按错误信息查找
 
@@ -52,6 +53,7 @@
 | `Failed to load dynamic library 'libbridge.so'` / APK 启动白/黑屏 | `flutter_rust_bridge` Android 集成：Rust 必须为 4 ABI 编译到 `android/app/src/main/jniLibs/<abi>/libbridge.so` | 8-29 报告：build_apk.ps1 缺 cargo ndk 步骤 |
 | `Could not find openssl via pkg-config` / `OPENSSL_DIR` unset（Android 编译） | `reqwest` 默认 `default-tls` = `native-tls` = `openssl-sys`；Android 交叉编译无 sysroot 必 fail | 8-29 报告：`reqwest default-features=false + rustls-tls` |
 | `couldn't read ... rquickjs-sys ... bindings/aarch64-linux-android.rs` | `rquickjs-sys` 预编译 bindings 不覆盖 Android ABI | 8-29 报告：`rquickjs features += "bindgen"` 用 NDK clang 现场生成 |
+| 字体显示"不存在" / 阅读页文本空白 | 候选表硬编码 Windows 路径；FontManager 找不到字体直接抛错 | 8-29 报告：内置 Noto Sans CJK SC + 用户可 file_picker 选 .ttf/.otf/.ttc |
 | `missing field ... in initializer` | 结构体加了新字段，构造处未同步更新 |
 | EPUB 段间出现小字号行（本章说/脚注） | display:none 漏过滤 Paragraph/Heading；aside/footnote 块下沉为正文；CSS font-size<0.85 未分类 | A14：extract_rules aside 检测 + CSS 兜底 is_comment |
 | EPUB 底部留白过大且不统一 | layout_items 无填充率门槛，≥3 行即整段推下页 | A14：page_fill_threshold 默认 0.9（可调） |
