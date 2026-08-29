@@ -37,6 +37,7 @@
 | **`flutter build apk` 报 `Dependency ':flutter_plugin_android_lifecycle' requires compile against version 36 or later`** | Flutter 17.x 默认 `flutter.compileSdkVersion = 34`，但 AGP 9.0.1 在 `CheckAarMetadataWorkAction` 强制校验 AAR `min-compile-sdk=36`；多个 plugin 自己 build.gradle 写 `compileSdk flutter.compileSdkVersion` 也得改 | [bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补](./bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补.md) ⭐ app/build.gradle.kts 硬编 `compileSdk = 36` + 修补 pub cache 所有 plugin + 禁 Kotlin 增量编译（跨盘符相对路径错误） |
 | **`flutter build apk` 报 `Member not found: 'platform'`** | file_picker 12.x 引入 plugin federation（Android 拆 `android_file_picker`），`FilePicker.platform` 移除；`pickFiles()` 返回类型从 `FilePickerResult?` 变 `List<PlatformFile>` | [bugfixes/2026-08-29_file_picker_12.x_API破坏性变更](./bugfixes/2026-08-29_file_picker_12.x_API破坏性变更.md) ⭐ `FilePicker.platform.pickFiles()` → `FilePicker.pickFiles()`，`result.files.single` → `files.first` |
 | **APK 安装成功但启动白/黑屏卡死（Flutter UI 永远不出现）** | `RustLib.init()` 调 `ExternalLibrary.open('libbridge.so')` 但 **APK 缺 `libbridge.so`**——Rust 库没为 Android ABI 编译；`build_apk.ps1` 没 cargo build 步骤，`main()` 在 `await BookService.init()` 抛 `ArgumentError` 后 `runApp` 不执行 | [bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so](./bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so.md) ⭐ `cargo install cargo-ndk` + `build_apk.ps1` 加 `cargo ndk -t <4 ABIs> -o jniLibs/ build --release` |
+| **`cargo ndk ... build --release` 报 `Could not find openssl via pkg-config` / `OPENSSL_DIR` 错误** | `reqwest 0.12` 默认 features 拉 `default-tls` = `native-tls` = `openssl-sys`；Windows host 编译时 link host OpenSSL 没事，Android 交叉编译时无 sysroot 必 fail | [bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls](./bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls.md) ⭐ `reqwest = { default-features = false, features = [..., "rustls-tls"] }`——纯 Rust TLS 无 C 依赖 |
 
 ## 二、按错误信息查找
 
@@ -48,6 +49,7 @@
 | `Content hash on Dart side ... is different from Rust side` | Content Hash → BUG_FIXES §11 |
 | `Cannot start a runtime from within a runtime` | 异步嵌套：同步代码里已 block_on，外层不要再套 tokio::main |
 | `Failed to load dynamic library 'libbridge.so'` / APK 启动白/黑屏 | `flutter_rust_bridge` Android 集成：Rust 必须为 4 ABI 编译到 `android/app/src/main/jniLibs/<abi>/libbridge.so` | 8-29 报告：build_apk.ps1 缺 cargo ndk 步骤 |
+| `Could not find openssl via pkg-config` / `OPENSSL_DIR` unset（Android 编译） | `reqwest` 默认 `default-tls` = `native-tls` = `openssl-sys`；Android 交叉编译无 sysroot 必 fail | 8-29 报告：`reqwest default-features=false + rustls-tls` |
 | `missing field ... in initializer` | 结构体加了新字段，构造处未同步更新 |
 | EPUB 段间出现小字号行（本章说/脚注） | display:none 漏过滤 Paragraph/Heading；aside/footnote 块下沉为正文；CSS font-size<0.85 未分类 | A14：extract_rules aside 检测 + CSS 兜底 is_comment |
 | EPUB 底部留白过大且不统一 | layout_items 无填充率门槛，≥3 行即整段推下页 | A14：page_fill_threshold 默认 0.9（可调） |
