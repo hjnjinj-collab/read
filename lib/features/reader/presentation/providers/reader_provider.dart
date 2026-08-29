@@ -5,7 +5,10 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/ffi/book_service.dart';
 import '../services/book_image_store.dart';
+import '../widgets/page_turn/page_turn_types.dart';
+import 'page_frame.dart';
 import 'reader_render_state.dart';
+import '../diagnostics/reader_trace.dart';
 
 /// 全局数据库实例（drift，进程内单例）
 final appDatabaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
@@ -74,6 +77,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // key = 排版参数指纹，value = 该章总页数
   final Map<String, int> _chapterPageCounts = {};
 
+  /// 异步页面/frame 请求代际。旧请求完成后不得覆盖新阅读位置。
+  int _requestGeneration = 0;
+
+  /// 会话世代：换书/设置/窗口变化递增，旧 FrameSet 全部作废（不变量 6）。
+  int _sessionEpoch = 0;
+
+  /// 在途 FrameSet 准备批次计数（degraded 补发判定用）。
+  int _prepareInFlight = 0;
+
   /// 当前书是否为 EPUB（结构化路径分流标记）
   bool _isEpub = false;
 
@@ -115,15 +127,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _screenWidth = width;
     _screenHeight = height;
     _invalidatePageCountCache(); // M8-P4：窗口尺寸变更清页数缓存
+    _invalidateFrames(reason: 'window-resized'); // 旧尺寸 FrameSet 作废
     if (state.bookId == null || state.isLoading) return;
-    await _loadCurrentPage(
-      anchorCharOffset: state.currentPage?.startCharIndex,
-    );
+    await _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
   }
 
   void setFontSize(double fontSize) {
     _fontSize = fontSize;
     _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
+    _invalidateFrames(reason: 'font-size'); // 旧指纹 FrameSet 作废
     // Reload current page with new settings
     if (state.bookId != null) {
       _loadCurrentPage();
@@ -151,6 +163,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
   }) async {
+    // 设置开始变化即使旧页面请求失效，避免在等待 Rust 同步期间回写旧帧。
+    ++_requestGeneration;
+    _invalidateFrames(reason: 'settings'); // 旧指纹 FrameSet 与待决手势作废
     _removeDuplicateTitle = removeDuplicateTitle;
     _chineseConvert = chineseConvert;
     _replaceRules = replaceRules;
@@ -204,16 +219,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
 
     // 单次重载：简繁/规则经 options_hash 隔离缓存自然重算，锚点保持进度
-    await _loadCurrentPage(
-      anchorCharOffset: state.currentPage?.startCharIndex,
-    );
+    await _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
   }
 
   /// Open a book file
   Future<void> openBook(String filePath, String bookName) async {
+    ++_requestGeneration;
+    _invalidateFrames(reason: 'open-book');
     state = state.copyWith(isLoading: true, error: null);
-    // P1：发布 loading 状态到 render store
-    _renderStore.publishStructure(isLoading: true, message: '正在打开书籍…');
+    // 发布 loading 占位（无 frame；会话已推进，旧集合全部作废）
+    _renderStore.publishEmpty(isLoading: true, message: '正在打开书籍…');
 
     try {
       // 构建导入级净化选项（结构净化在导入时一次完成，
@@ -270,10 +285,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         await _loadCurrentPage();
       }
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
@@ -285,18 +297,32 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> _loadCurrentPage({int? anchorCharOffset}) async {
     if (state.bookId == null) return;
 
+    final generation = ++_requestGeneration;
+    final requestedBookId = state.bookId!;
+    final requestedChapterIndex = state.currentChapterIndex;
+    final requestedPageIndex = state.currentPageIndex;
+    readerTrace('page.load.start', {
+      'generation': generation,
+      'book': requestedBookId,
+      'chapter': requestedChapterIndex,
+      'page': requestedPageIndex,
+      'anchor': anchorCharOffset,
+    });
+
     try {
       // 分流：EPUB 结构化分页 / TXT 文本分页
       final PageInfo page;
       if (_isEpub) {
         // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
-        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-            : _chineseConvert == ChineseConvertType.t2s ? 2
+        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+            ? 1
+            : _chineseConvert == ChineseConvertType.t2s
+            ? 2
             : 0;
         page = await _bookService.getPageStructured(
-          state.bookId!,
-          state.currentChapterIndex,
-          state.currentPageIndex,
+          requestedBookId,
+          requestedChapterIndex,
+          requestedPageIndex,
           width: _screenWidth,
           height: _screenHeight,
           fontSize: _fontSize,
@@ -313,15 +339,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
         );
       } else {
         // 转换简繁设置为数字代码
-        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-            : _chineseConvert == ChineseConvertType.t2s ? 2
+        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+            ? 1
+            : _chineseConvert == ChineseConvertType.t2s
+            ? 2
             : 0;
 
         // 使用带预处理的 API
         page = await _bookService.getPageProcessed(
-          state.bookId!,
-          state.currentChapterIndex,
-          state.currentPageIndex,
+          requestedBookId,
+          requestedChapterIndex,
+          requestedPageIndex,
           width: _screenWidth,
           height: _screenHeight,
           fontSize: _fontSize,
@@ -340,15 +368,34 @@ class ReaderNotifier extends Notifier<ReadingState> {
         );
       }
 
+      // 结果回写前校验请求代际和阅读会话，防止旧请求覆盖新页。
+      if (generation != _requestGeneration ||
+          state.bookId != requestedBookId ||
+          state.currentChapterIndex != requestedChapterIndex) {
+        readerTrace('page.load.drop', {
+          'generation': generation,
+          'currentGeneration': _requestGeneration,
+          'requested': '$requestedChapterIndex/$requestedPageIndex',
+          'actual': '${state.currentChapterIndex}/${state.currentPageIndex}',
+        });
+        return;
+      }
+
       // 锚点定位后页码可能与请求不同：同步回状态
       state = state.copyWith(
         currentPage: page,
         currentPageIndex: page.pageIndex,
       );
+      readerTrace('page.load.commit', {
+        'generation': generation,
+        'pageId': readerPageId(page),
+        'page': '${page.chapterIndex}/${page.pageIndex}',
+        'range': '${page.startCharIndex}-${page.endCharIndex}',
+      });
 
       // P1 接线层：发布三页结构态到 render store（fire-and-forget，
       // 当前页已就绪可渲染，邻居页加载不阻塞 UI）
-      _publishRenderStructureAsync(page);
+      _prepareAndPublishFrameSet(page);
 
       // EPUB 翻章预取（M6）：当前章已渲染，后台预计算下一章分页入缓存，
       // 翻章零延迟。fire-and-forget：失败/被前台让路均静默不影响阅读
@@ -372,79 +419,310 @@ class ReaderNotifier extends Notifier<ReadingState> {
         }
       }
     } catch (e) {
+      readerTrace('page.next.error', {
+        'error': e.toString(),
+        'current': '${state.currentChapterIndex}/${state.currentPageIndex}',
+      });
       state = state.copyWith(error: e.toString());
     }
   }
 
-  /// P1 接线层：异步加载邻居页并发布三页结构态到 render store
+  /// FrameSet 发布管线：并行加载邻居槽位 → 统一预热资源 → 原子发布。
   ///
-  /// 当前页已在 state 中，这里并行加载 prev/next 页后一次性发布。
-  /// 失败静默（邻居页缺失不影响当前页渲染）。
-  Future<void> _publishRenderStructureAsync(PageInfo currentPage) async {
+  /// 协议要求（PageFrame 不变量 3）：
+  /// - 任何失配（generation/sessionEpoch/页面实例）不得静默丢弃——
+  ///   store 无 frame 或已标脏时用 state 现值补发 degraded 集合，
+  ///   保证 store 永不滞后于 state。旧协议在此直接 return 会让三页
+  ///   模型永久陈旧：前向翻页被 identical 守卫无限延迟（点击无响应），
+  ///   后向翻页取到「2 页前」旧邻居展开错误内容。
+  /// - 邻居槽位缺失必须有明确原因（越界/失败/加载中），永不静默 null。
+  Future<void> _prepareAndPublishFrameSet(PageInfo currentPage) async {
+    final generation = _requestGeneration;
+    final epoch = _sessionEpoch;
+    final fingerprint = layoutFingerprint();
+    final requestedBookId = state.bookId;
+    final requestedChapterIndex = state.currentChapterIndex;
+    final requestedPageIndex = state.currentPageIndex;
+    final sw = Stopwatch()..start();
+    _prepareInFlight++;
     try {
-      final chapterIndex = state.currentChapterIndex;
-      final pageIndex = state.currentPageIndex;
-
-      // 并行加载前后页
-      final results = await Future.wait([
-        _loadNeighborPage(chapterIndex, pageIndex - 1), // prev
-        _loadNeighborPage(chapterIndex, pageIndex + 1), // next
+      final chapterIndex = requestedChapterIndex;
+      final pageIndex = requestedPageIndex;
+      // 并行加载前后邻居槽位（含跨章回退，槽位态明确）
+      final slots = await Future.wait([
+        _loadNeighborSlot(chapterIndex, pageIndex - 1),
+        _loadNeighborSlot(chapterIndex, pageIndex + 1),
       ]);
+      readerTrace('frame.neighbors.ready', {
+        'generation': generation,
+        'prev': frameSlotTrace(slots[0]),
+        'next': frameSlotTrace(slots[1]),
+      });
 
-      // 异步期间状态已前进 → 本批邻居已过期，直接丢弃。
-      // 否则在途发布后落地会把结构态回写覆盖成旧页
-      // （model.current=旧页、可见页=新页），后续拖拽会取到
-      // 「目标页==可见页」的陈旧索引，卷曲把当前页翻给当前页。
-      if (!identical(state.currentPage, currentPage)) return;
+      // 三页资源统一预热（背景图 + 图片 entry 去重），完成后 frame 资源态
+      // 聚合为终态、动画门控据此判定可用性。
+      // 顺序：next 槽（用户最可能的翻页方向）→ current → prev，组内并发、
+      // 组间串行——目标帧资源最先就绪，门控最早放行；跨组共享 href 由
+      // states 表去重，不重复解码。
+      final states = <String, BookImageState>{};
+      final resourceGroups = <Set<String>>[
+        slots[1].frame != null
+            ? ResourceManifest.of(slots[1].frame!.page).hrefs
+            : <String>{},
+        ResourceManifest.of(currentPage).hrefs,
+        slots[0].frame != null
+            ? ResourceManifest.of(slots[0].frame!.page).hrefs
+            : <String>{},
+      ];
+      for (final group in resourceGroups) {
+        final pending = group.where((h) => !states.containsKey(h)).toSet();
+        if (pending.isEmpty) continue;
+        states.addAll(await BookImageStore.instance.prewarmManifest(pending));
+      }
+      readerTrace('frame.resources.ready', {
+        'generation': generation,
+        'latencyMs': sw.elapsedMilliseconds,
+      });
 
-      _renderStore.publishStructure(
-        previousPage: results[0],
-        currentPage: currentPage,
-        nextPage: results[1],
-        durPageIndex: pageIndex,
+      if (_isStale(generation, epoch, requestedBookId, requestedChapterIndex,
+          requestedPageIndex, currentPage)) {
+        readerTrace('frame.prepare.stale', {
+          'generation': generation,
+          'currentGeneration': _requestGeneration,
+          'epoch': epoch,
+          'currentEpoch': _sessionEpoch,
+        });
+        // 完整 FrameSet 因失配弃发：降级补发保证 store 不滞后于 state
+        // （发布协议原则②，杜绝静默丢弃）
+        _publishDegradedFromState();
+        return;
+      }
+
+      final current = _frameWithResources(
+        _buildFrame(currentPage, generation: generation, epoch: epoch),
+        states,
       );
-    } catch (_) {
-      // 邻居页加载失败，仅发布当前页
-      _renderStore.publishStructure(
-        currentPage: currentPage,
-        durPageIndex: state.currentPageIndex,
-      );
+      _publishPinned(FrameSet(
+        setRevision: _renderStore.nextSetRevision(),
+        current: current,
+        previous: _finalizeSlot(slots[0], states),
+        next: _finalizeSlot(slots[1], states),
+        configFingerprint: fingerprint,
+        sessionEpoch: epoch,
+      ));
+      readerTrace('frame.commit', {
+        'generation': generation,
+        'set': _renderStore.frameSet?.id,
+        'latencyMs': sw.elapsedMilliseconds,
+      });
+    } catch (e) {
+      readerTrace('frame.prepare.error', {
+        'error': e.toString(),
+        'generation': generation,
+      });
+      if (_isStale(generation, epoch, requestedBookId, requestedChapterIndex,
+          requestedPageIndex, currentPage)) {
+        _publishDegradedFromState();
+        return;
+      }
+      // 邻居/预热异常：发布 current + failed 槽位（绝不 null 邻居不留标记）
+      _publishPinned(FrameSet(
+        setRevision: _renderStore.nextSetRevision(),
+        current: _frameWithResources(
+          _buildFrame(currentPage, generation: generation, epoch: epoch),
+          const {},
+        ),
+        previous: const FrameSlot.failed(),
+        next: const FrameSlot.failed(),
+        configFingerprint: fingerprint,
+        sessionEpoch: epoch,
+      ));
+    } finally {
+      _prepareInFlight--;
     }
   }
 
-  /// 安全加载相邻页：越界或异常返回 null
-  Future<PageInfo?> _loadNeighborPage(
+  /// 批次新鲜度校验：任一会话/位置/实例变化即视为陈旧
+  bool _isStale(
+    int generation,
+    int epoch,
+    String? bookId,
     int chapterIndex,
     int pageIndex,
-  ) async {
+    PageInfo currentPage,
+  ) {
+    return generation != _requestGeneration ||
+        epoch != _sessionEpoch ||
+        state.bookId != bookId ||
+        state.currentChapterIndex != chapterIndex ||
+        state.currentPageIndex != pageIndex ||
+        !identical(state.currentPage, currentPage);
+  }
+
+  /// 构建页面帧（资源态先置 loading，预热后由 [_frameWithResources] 聚合）
+  PageFrame _buildFrame(
+    PageInfo page, {
+    required int generation,
+    required int epoch,
+  }) {
+    return PageFrame(
+      identity: FrameIdentity.of(state.bookId ?? '', page),
+      configFingerprint: layoutFingerprint(),
+      sessionEpoch: epoch,
+      requestGeneration: generation,
+      page: page,
+      manifest: ResourceManifest.of(page),
+      resourceState: FrameResourceState.loading,
+    );
+  }
+
+  /// 按预热结果聚合帧资源态：全 ready→ready；任一稳定 failed→failed
+  /// （不变量 4 允许稳定失败帧启动动画，恒画占位无随机跳变）。
+  PageFrame _frameWithResources(
+    PageFrame frame,
+    Map<String, BookImageState> states,
+  ) {
+    return PageFrame(
+      identity: frame.identity,
+      configFingerprint: frame.configFingerprint,
+      sessionEpoch: frame.sessionEpoch,
+      requestGeneration: frame.requestGeneration,
+      page: frame.page,
+      manifest: frame.manifest,
+      resourceState: _aggregateResourceState(frame.manifest, states),
+    );
+  }
+
+  FrameSlot _finalizeSlot(FrameSlot slot, Map<String, BookImageState> states) {
+    final frame = slot.frame;
+    if (frame == null) return slot;
+    return FrameSlot.ready(_frameWithResources(frame, states));
+  }
+
+  FrameResourceState _aggregateResourceState(
+    ResourceManifest manifest,
+    Map<String, BookImageState> states,
+  ) {
+    if (manifest.isEmpty) return FrameResourceState.ready;
+    var allReady = true;
+    var anyFailed = false;
+    for (final href in manifest.hrefs) {
+      final s = states[href];
+      if (s == BookImageState.failed) {
+        anyFailed = true;
+        allReady = false;
+      } else if (s != BookImageState.ready) {
+        allReady = false;
+      }
+    }
+    if (allReady) return FrameResourceState.ready;
+    if (anyFailed) return FrameResourceState.failed;
+    return FrameResourceState.pending;
+  }
+
+  /// 陈旧/失效场景的兜底发布：用 state.currentPage 现值构建 degraded
+  /// FrameSet（邻居槽 pending、资源态 pending → 手势等待新批次）。
+  /// 仅在「store 无 frame 或已标脏，且没有更新的批次在途」时发布，
+  /// 避免覆盖即将落地的新鲜批次。
+  void _publishDegradedFromState() {
+    if (_prepareInFlight > 1) return;
+    if (_renderStore.frameSet != null && !_renderStore.dirty) return;
+    final current = state.currentPage;
+    if (current == null) return;
+    _publishPinned(FrameSet(
+      setRevision: _renderStore.nextSetRevision(),
+      current: PageFrame(
+        identity: FrameIdentity.of(state.bookId ?? '', current),
+        configFingerprint: layoutFingerprint(),
+        sessionEpoch: _sessionEpoch,
+        requestGeneration: _requestGeneration,
+        page: current,
+        manifest: ResourceManifest.of(current),
+        resourceState: FrameResourceState.pending,
+      ),
+      previous: const FrameSlot.pending(),
+      next: const FrameSlot.pending(),
+      configFingerprint: layoutFingerprint(),
+      sessionEpoch: _sessionEpoch,
+    ));
+    readerTrace('frame.commit.degraded', {
+      'generation': _requestGeneration,
+      'page': '${current.chapterIndex}/${current.pageIndex}',
+    });
+  }
+
+  /// FrameSet 发布统一出口：pin 资源清单（存活帧引用的图片不淘汰）
+  /// 后原子发布。pin/unpin 收敛在此单点，保证 dispose 安全。
+  void _publishPinned(FrameSet set) {
+    final hrefs = <String>{...set.current.manifest.hrefs};
+    for (final slot in [set.previous, set.next]) {
+      final frame = slot.frame;
+      if (frame != null) hrefs.addAll(frame.manifest.hrefs);
+    }
+    BookImageStore.instance.setPinned(hrefs);
+    _renderStore.publishFrameSet(set);
+  }
+
+  /// 加载邻居槽位：越界→outOfRange；FFI 异常→failed（永不静默 null）。
+  /// 缺失原因必须明确，手势门控与降级发布的语义依赖槽位态。
+  Future<FrameSlot> _loadNeighborSlot(int chapterIndex, int pageIndex) async {
     try {
       if (pageIndex < 0) {
         // 跨章到上一章末页
-        if (chapterIndex <= 0) return null;
+        if (chapterIndex <= 0) return const FrameSlot.outOfRange();
         final prevChapter = chapterIndex - 1;
         final count = await _pageCountOf(prevChapter);
-        if (count <= 0) return null;
-        return await _loadSinglePage(prevChapter, count - 1);
+        if (count <= 0) return const FrameSlot.outOfRange();
+        final page = await _loadSinglePage(prevChapter, count - 1);
+        return FrameSlot.ready(
+          _buildFrame(
+            page,
+            generation: _requestGeneration,
+            epoch: _sessionEpoch,
+          ),
+        );
       }
 
       final count = await _pageCountOf(chapterIndex);
       if (pageIndex >= count) {
         // 跨章到下一章首页
-        if (chapterIndex >= state.chapters.length - 1) return null;
-        return await _loadSinglePage(chapterIndex + 1, 0);
+        if (chapterIndex >= state.chapters.length - 1) {
+          return const FrameSlot.outOfRange();
+        }
+        final page = await _loadSinglePage(chapterIndex + 1, 0);
+        return FrameSlot.ready(
+          _buildFrame(
+            page,
+            generation: _requestGeneration,
+            epoch: _sessionEpoch,
+          ),
+        );
       }
 
-      return await _loadSinglePage(chapterIndex, pageIndex);
-    } catch (_) {
-      return null;
+      final page = await _loadSinglePage(chapterIndex, pageIndex);
+      return FrameSlot.ready(
+        _buildFrame(
+          page,
+          generation: _requestGeneration,
+          epoch: _sessionEpoch,
+        ),
+      );
+    } catch (e) {
+      readerTrace('frame.neighbor.failed', {
+        'page': '$chapterIndex/$pageIndex',
+        'error': e.toString(),
+      });
+      return const FrameSlot.failed();
     }
   }
 
   /// 加载单页（复用 _loadCurrentPage 的参数管线，但不修改 state）
   Future<PageInfo> _loadSinglePage(int chapterIndex, int pageIndex) async {
     if (_isEpub) {
-      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-          : _chineseConvert == ChineseConvertType.t2s ? 2
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+          ? 1
+          : _chineseConvert == ChineseConvertType.t2s
+          ? 2
           : 0;
       return _bookService.getPageStructured(
         state.bookId!,
@@ -464,8 +742,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
       );
     } else {
-      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-          : _chineseConvert == ChineseConvertType.t2s ? 2
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+          ? 1
+          : _chineseConvert == ChineseConvertType.t2s
+          ? 2
           : 0;
       return _bookService.getPageProcessed(
         state.bookId!,
@@ -500,25 +780,29 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (bookId == null || !_isEpub) return;
     final next = state.currentChapterIndex + 1;
     if (next >= state.chapters.length) return;
-    final convertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-        : _chineseConvert == ChineseConvertType.t2s ? 2
+    final convertCode = _chineseConvert == ChineseConvertType.s2t
+        ? 1
+        : _chineseConvert == ChineseConvertType.t2s
+        ? 2
         : 0;
-    unawaited(_bookService.prefetchStructuredChapter(
-      bookId,
-      next,
-      width: _screenWidth,
-      height: _screenHeight,
-      fontSize: _fontSize,
-      lineHeightMultiplier: _lineHeight,
-      paddingLeft: _paddingHorizontal,
-      paddingTop: _paddingVertical,
-      paddingRight: _paddingHorizontal,
-      paddingBottom: _paddingVertical,
-      chineseConvert: convertCode,
-      pageFillThreshold: _pageFillThreshold,
-      showComments: _showComments,
-      paraFormatHash: _paraFormatHash,
-    ));
+    unawaited(
+      _bookService.prefetchStructuredChapter(
+        bookId,
+        next,
+        width: _screenWidth,
+        height: _screenHeight,
+        fontSize: _fontSize,
+        lineHeightMultiplier: _lineHeight,
+        paddingLeft: _paddingHorizontal,
+        paddingTop: _paddingVertical,
+        paddingRight: _paddingHorizontal,
+        paddingBottom: _paddingVertical,
+        chineseConvert: convertCode,
+        pageFillThreshold: _pageFillThreshold,
+        showComments: _showComments,
+        paraFormatHash: _paraFormatHash,
+      ),
+    );
   }
 
   // ===== 书签 =====
@@ -590,17 +874,25 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return count;
   }
 
-  /// 生成页数缓存键（排版参数指纹 + 章节索引）
-  String _pageCountCacheKey(int chapterIndex) {
+  /// 排版/内容处理配置指纹（单一来源）。
+  ///
+  /// 页数缓存键、FrameSet 身份、adopt 批次校验共用：任一参与 Rust
+  /// 分页缓存键的参数变化都会改变指纹，旧指纹帧与缓存永不复用
+  /// （不变量 6：配置变更后旧 fingerprint 的缓存结果不得复用）。
+  String layoutFingerprint() {
     return '${_screenWidth}_${_screenHeight}_'
         '${_fontSize}_${_lineHeight}_'
         '${_paddingHorizontal}_${_paddingVertical}_'
         '${_pageFillThreshold}_${_showComments}_'
         '${_removeDuplicateTitle}_'
         '${_chineseConvert.index}_'
-        '${_replaceRules.length}_'
-        '${_paraFormatHash}_$chapterIndex';
+        '${_replaceRulesFingerprint()}_'
+        '${_paraFormatHash}';
   }
+
+  /// 生成页数缓存键（排版参数指纹 + 章节索引）
+  String _pageCountCacheKey(int chapterIndex) =>
+      '${layoutFingerprint()}_$chapterIndex';
 
   /// M9-P4：计算段落格式设置哈希（u64，用作 Rust 分页缓存键）
   ///
@@ -620,6 +912,26 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return BigInt.from(h & 0x7FFFFFFFFFFFFFFF);
   }
 
+  /// 替换规则必须按内容参与 Dart 页数缓存键；仅使用数量会在同数量改规则
+  /// 时错误复用旧页数，进而把跨页边界判断带到旧排版结果。
+  int _replaceRulesFingerprint() {
+    var hash = 17;
+    for (final rule in _replaceRules) {
+      for (final value in [
+        rule.pattern,
+        rule.replacement,
+        rule.isRegex.toString(),
+        rule.enabled.toString(),
+      ]) {
+        for (final codeUnit in value.codeUnits) {
+          hash = (hash * 31 + codeUnit) & 0x7fffffff;
+        }
+        hash = (hash * 31 + 1) & 0x7fffffff;
+      }
+    }
+    return hash;
+  }
+
   /// 未缓存的页数获取（真正走 FFI）
   Future<int> _pageCountOfUncached(int chapterIndex) async {
     final common = (
@@ -632,8 +944,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
     if (_isEpub) {
       // 简繁编码与 TXT 同口径；页数与页内容必须同参（否则错位）
-      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-          : _chineseConvert == ChineseConvertType.t2s ? 2
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+          ? 1
+          : _chineseConvert == ChineseConvertType.t2s
+          ? 2
           : 0;
       return _bookService.getPageCountStructured(
         state.bookId!,
@@ -652,8 +966,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
       );
     }
-    int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t ? 1
-        : _chineseConvert == ChineseConvertType.t2s ? 2
+    int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+        ? 1
+        : _chineseConvert == ChineseConvertType.t2s
+        ? 2
         : 0;
     return _bookService.getPageCountProcessed(
       state.bookId!,
@@ -680,6 +996,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _chapterPageCounts.clear();
   }
 
+  /// Frame 失效统一入口：推进会话世代，旧 FrameSet 与待决手势全部作废。
+  /// 不清 BookImageStore 解码图（图片内容与排版无关；换书仍走 bind/clear）。
+  void _invalidateFrames({required String reason}) {
+    _renderStore.advanceSession(
+      sessionEpoch: ++_sessionEpoch,
+      configFingerprint: layoutFingerprint(),
+    );
+    BookImageStore.instance.advanceSession(_sessionEpoch);
+    readerTrace('frame.invalidate', {'reason': reason, 'epoch': _sessionEpoch});
+  }
+
   /// Go to next page
   ///
   /// [preloaded] 翻页动画层传入的预载目标页（render store 邻居页）：
@@ -694,18 +1021,30 @@ class ReaderNotifier extends Notifier<ReadingState> {
       if (state.currentPageIndex < pageCount - 1) {
         // Next page in current chapter
         if (preloaded != null) {
-          await _adoptPreloadedPage(preloaded);
-          return;
+          if (await _adoptPreloadedPage(preloaded, forward: true)) return;
+          // adopt 失败 → 回退到 FFI 重载；adopt.reject 已记录原因
         }
         state = state.copyWith(currentPageIndex: state.currentPageIndex + 1);
         await _loadCurrentPage();
       } else if (state.currentChapterIndex < state.chapters.length - 1) {
         // Next chapter
+        if (preloaded != null &&
+            preloaded.chapterIndex == state.currentChapterIndex + 1 &&
+            preloaded.pageIndex == 0) {
+          if (await _adoptPreloadedPage(preloaded, forward: true)) return;
+        }
         state = state.copyWith(
           currentChapterIndex: state.currentChapterIndex + 1,
           currentPageIndex: 0,
         );
         await _loadCurrentPage();
+      } else {
+        // 越界：最后章最后页，不动 state
+        readerTrace('page.next.out-of-range', {
+          'pageCount': pageCount,
+          'currentIndex': state.currentPageIndex,
+          'chapter': state.currentChapterIndex,
+        });
       }
     } catch (e) {
       state = state.copyWith(error: e.toString());
@@ -721,13 +1060,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (state.currentPageIndex > 0) {
       // Previous page in current chapter
       if (preloaded != null) {
-        await _adoptPreloadedPage(preloaded);
-        return;
+        if (await _adoptPreloadedPage(preloaded, forward: false)) return;
       }
       state = state.copyWith(currentPageIndex: state.currentPageIndex - 1);
       await _loadCurrentPage();
     } else if (state.currentChapterIndex > 0) {
       // Previous chapter, last page
+      if (preloaded != null &&
+          preloaded.chapterIndex == state.currentChapterIndex - 1) {
+        if (await _adoptPreloadedPage(preloaded, forward: false)) return;
+      }
       try {
         final prevChapterIndex = state.currentChapterIndex - 1;
         final pageCount = await _pageCountOf(prevChapterIndex);
@@ -738,21 +1080,90 @@ class ReaderNotifier extends Notifier<ReadingState> {
         );
         await _loadCurrentPage();
       } catch (e) {
+        readerTrace('page.previous.error', {
+          'error': e.toString(),
+          'current': '${state.currentChapterIndex}/${state.currentPageIndex}',
+        });
         state = state.copyWith(error: e.toString());
       }
+    } else {
+      // 越界：第一章第一页，不动 state
+      readerTrace('page.previous.out-of-range', {
+        'currentIndex': state.currentPageIndex,
+        'chapter': state.currentChapterIndex,
+      });
     }
   }
 
-  /// 直接采用预载页（零 FFI）：state 切换 + 三页重发布 + 进度落库 + EPUB 预取
+  /// 直接采用预载页（零 FFI）：批次校验 + 三页预发布 + 进度落库 + EPUB 预取
   ///
-  /// 收尾逻辑与 _loadCurrentPage 相同，仅省去取页的 FFI 往返——
-  /// 预载页本就出自同一分页缓存，内容一致。
-  Future<void> _adoptPreloadedPage(PageInfo page) async {
+  /// 两道校验后先发布 provisional FrameSet 再切 state（store 永不滞后）：
+  /// provisional 的 current=目标帧、previous=旧当前帧、next=pending，
+  /// 异步 [_prepareAndPublishFrameSet] 随后补全真实邻居。
+  Future<bool> _adoptPreloadedPage(
+    PageInfo page, {
+    required bool forward,
+  }) async {
+    // ── 第一道：FrameSet 批次身份校验 ──
+    // 目标必须 identical 于当前发布集合对应槽位的帧，且集合的
+    // epoch/指纹/批次与当前会话一致——排除旧排版、旧批次邻居回写
+    // （设置变更窗口内采纳旧排版邻居实例的根因修复）。
+    final set = _renderStore.frameSet;
+    final slot =
+        set?.slotFor(forward ? PageDirection.next : PageDirection.prev);
+    final frame = slot?.frame;
+    final batchOk = set != null &&
+        frame != null &&
+        identical(frame.page, page) &&
+        set.sessionEpoch == _sessionEpoch &&
+        set.configFingerprint == layoutFingerprint() &&
+        _requestGeneration == set.current.requestGeneration;
+    if (!batchOk) {
+      readerTrace('page.adopt.reject', {'reason': 'frame-batch'});
+      return false;
+    }
+
+    // ── 第二道：位置相邻性（防御方向/位置错配）──
+    final chapterIndex = page.chapterIndex;
+    if (chapterIndex < 0 || chapterIndex >= state.chapters.length) {
+      readerTrace('page.adopt.reject', {'reason': 'chapter-range'});
+      return false;
+    }
+    final sameChapter = chapterIndex == state.currentChapterIndex;
+    final validNext = sameChapter
+        ? page.pageIndex == state.currentPageIndex + 1
+        : chapterIndex == state.currentChapterIndex + 1 && page.pageIndex == 0;
+    final validPrev = sameChapter
+        ? page.pageIndex == state.currentPageIndex - 1
+        : chapterIndex == state.currentChapterIndex - 1;
+    readerTrace('page.adopt.attempt', {
+      'forward': forward,
+      'target': '$chapterIndex/${page.pageIndex}',
+      'current': '${state.currentChapterIndex}/${state.currentPageIndex}',
+      'valid': forward ? validNext : validPrev,
+    });
+    if (forward ? !validNext : !validPrev) {
+      readerTrace('page.adopt.reject', {'reason': 'not-adjacent'});
+      return false;
+    }
+
+    ++_requestGeneration;
+
+    // 先模型后 state：provisional 集合让门控立即与可见页对齐
+    _publishPinned(FrameSet(
+      setRevision: _renderStore.nextSetRevision(),
+      current: frame,
+      previous: FrameSlot.ready(set.current),
+      next: const FrameSlot.pending(),
+      configFingerprint: set.configFingerprint,
+      sessionEpoch: set.sessionEpoch,
+    ));
     state = state.copyWith(
+      currentChapterIndex: chapterIndex,
       currentPage: page,
       currentPageIndex: page.pageIndex,
     );
-    _publishRenderStructureAsync(page);
+    _prepareAndPublishFrameSet(page);
     _prefetchNextChapterEpub();
 
     final filePath = state.filePath;
@@ -769,6 +1180,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         // 进度保存失败不影响阅读
       }
     }
+    return true;
   }
 
   /// Jump to specific chapter and page
@@ -776,6 +1188,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (state.bookId == null) return;
     if (chapterIndex < 0 || chapterIndex >= state.chapters.length) return;
 
+    ++_requestGeneration;
     state = state.copyWith(
       currentChapterIndex: chapterIndex,
       currentPageIndex: pageIndex,
@@ -785,16 +1198,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// Close current book
   Future<void> closeBook() async {
+    ++_requestGeneration;
     if (state.bookId != null) {
       await _bookService.releaseBook(state.bookId!);
     }
     BookImageStore.instance.clear();
     _invalidatePageCountCache(); // M8-P4：关书清页数缓存
     state = const ReadingState();
-    // P1：清空三页渲染状态
-    _renderStore.publishStructure(
-      isLoading: false,
-    );
+    readerTrace('session.close', {'generation': _requestGeneration});
+    // 清空渲染状态：会话作废 + 无 frame 占位
+    _invalidateFrames(reason: 'close-book');
+    _renderStore.publishEmpty(isLoading: false);
   }
 }
 

@@ -7,8 +7,8 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `clip_runs`, `effective_paragraph_spacing`, `ensure_epub_cleaned_cache`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_layout_config`, `trigger_preload_async`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredPageKey`, `TxtLayoutSnapshot`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_paragraph_spacing`, `ensure_epub_cleaned_cache`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
 /// Load font from file path
@@ -412,6 +412,10 @@ Future<bool> prefetchStructuredChapter({
 );
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）
+///
+/// 快路径：read 锁内窥探 parser 资源缓存，命中（渲染重复图/预热去重后
+/// 的图）直接返回，不与前台分页（BOOKS.write）争写锁；未命中才落写锁
+/// 慢路径（ZIP 读取 + 写缓存，仅每资源首次）。
 Future<Uint8List> getBookResource({required String bookId, required String resourceHref}) =>
     RustLib.instance.api.crateApiGetBookResource(bookId: bookId, resourceHref: resourceHref);
 

@@ -280,6 +280,31 @@ class CurlPainter extends CustomPainter {
     return '$ready/$total';
   }
 
+  // ── 帧诊断节流 ──
+  // composer 每次 build 都新建 painter 实例，实例字段无法跨帧记忆，故用静态。
+  // 需求：仅"前后纹理变化"时输出（每翻页 1~2 次），动画过程中间帧静默。
+  // 判定：foldingPage 或 revealPage 身份任一变化即输出。isSettled 翻转从 fold/reveal
+  // 变化中可推断（同帧页面身份不变不会跨越 settled 边界）。
+  static String? _lastTracedPages;
+
+  void _shouldTraceThisFrame() {
+    final foldingId =
+        '${foldingPage.chapterIndex}/${foldingPage.pageIndex}#${readerPageId(foldingPage)}';
+    final revealId =
+        '${revealPage.chapterIndex}/${revealPage.pageIndex}#${readerPageId(revealPage)}';
+    final pages = '$foldingId->$revealId';
+    if (_lastTracedPages == pages) return;
+    _lastTracedPages = pages;
+    final isSettled = identical(revealPage, foldingPage);
+    readerTrace('curl.paint.frame', {
+      'folding': foldingId,
+      'reveal': revealId,
+      'isSettled': isSettled,
+      'revealBg': _bgReady(revealPage),
+      'revealImages': _imgReadySummary(revealPage),
+    });
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     // 末帧短路：动画收尾（autoProgress >= 0.9995 视为已触顶；或 reveal=folding）
@@ -291,15 +316,8 @@ class CurlPainter extends CustomPainter {
     final ap = autoProgress;
     final isSettled = (ap != null && ap >= 0.9995) ||
         identical(revealPage, foldingPage);
-    // 翻页纹理诊断：每帧报告当前画的页面身份 + 资源就绪态
-    readerTrace('curl.paint.frame', {
-      'autoProgress': ap,
-      'isSettled': isSettled,
-      'folding': '${foldingPage.chapterIndex}/${foldingPage.pageIndex}#${readerPageId(foldingPage)}',
-      'reveal': '${revealPage.chapterIndex}/${revealPage.pageIndex}#${readerPageId(revealPage)}',
-      'revealBg': _bgReady(revealPage),
-      'revealImages': _imgReadySummary(revealPage),
-    });
+    // 翻页纹理诊断：仅页面身份变化时输出（每翻页 1~2 条），见 _shouldTraceThisFrame。
+    _shouldTraceThisFrame();
     if (isSettled) {
       canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
       paintContent(canvas, revealPage);

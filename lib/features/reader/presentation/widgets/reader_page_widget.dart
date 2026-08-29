@@ -6,14 +6,18 @@ import 'package:flutter/scheduler.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
+import '../diagnostics/reader_trace.dart';
 
 class ReaderPageWidget extends StatefulWidget {
   final PageInfo pageInfo;
+
   /// 字形开关（纯绘制期过滤：粗/斜按用户设置应用，下划线恒应用）
   final bool applyBold;
   final bool applyItalic;
+
   /// TXT 章节标题加粗（粗体开关 && 非 EPUB；EPUB 章首行不加粗）
   final bool applyTitleBold;
+
   /// 排版基准（M7 与 Rust 同源：替换硬编码 18/1.5，保证绘制与断行一致）
   final double baseFontSize;
   final double baseLineHeight;
@@ -43,6 +47,10 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
   }
 
   void _onImageReady() {
+    readerTrace('image.callback', {
+      'page':
+          '${widget.pageInfo.chapterIndex}/${widget.pageInfo.pageIndex}#${readerPageId(widget.pageInfo)}',
+    });
     _repaintTick.value++;
     // 帧末重绘，避免在回调栈内直接标记
     SchedulerBinding.instance.scheduleFrame();
@@ -91,6 +99,18 @@ class PagePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    readerTrace('page.paint', {
+      'page': '${pageInfo.chapterIndex}/${pageInfo.pageIndex}',
+      'pageId': readerPageId(pageInfo),
+      'entries': pageInfo.entries.length,
+      'fingerprint': readerPageFingerprint([
+        ...pageInfo.entries
+            .take(3)
+            .map((entry) => entry.text ?? entry.resourceHref ?? ''),
+        pageInfo.backgroundHref ?? '',
+      ]),
+      'summary': readerPageSummary(pageInfo.entries),
+    });
     canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
     PageContentRenderer.paintPage(
       canvas,
@@ -107,12 +127,14 @@ class PagePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(PagePainter oldDelegate) {
-    return oldDelegate.pageInfo != pageInfo ||
+    final repaint =
+        oldDelegate.pageInfo != pageInfo ||
         oldDelegate.applyBold != applyBold ||
         oldDelegate.applyItalic != applyItalic ||
         oldDelegate.applyTitleBold != applyTitleBold ||
         oldDelegate.baseFontSize != baseFontSize ||
         oldDelegate.baseLineHeight != baseLineHeight;
+    return repaint;
   }
 }
 
@@ -164,7 +186,11 @@ class PageContentRenderer {
         } else {
           // 解码中占位：浅灰圆角块 + 边框
           final rect = Rect.fromLTWH(
-              entry.x, entry.y, entry.width, entry.height);
+            entry.x,
+            entry.y,
+            entry.width,
+            entry.height,
+          );
           canvas.drawRRect(
             RRect.fromRectAndRadius(rect, const Radius.circular(6)),
             Paint()..color = const Color(0xFFDDDDDD),
@@ -199,8 +225,9 @@ class PageContentRenderer {
         fontSize: baseFontSize * baseScale,
         height: baseLineHeight,
         fontFamily: ReaderFont.family,
-        fontWeight:
-            (applyTitleBold && entry.isChapterStart) ? FontWeight.w700 : null,
+        fontWeight: (applyTitleBold && entry.isChapterStart)
+            ? FontWeight.w700
+            : null,
       );
 
       final TextSpan textSpan;
@@ -217,23 +244,24 @@ class PageContentRenderer {
             children.add(TextSpan(text: text.substring(cursor, s)));
           }
           if (e > s) {
-            children.add(TextSpan(
-              text: text.substring(s, e),
-              style: TextStyle(
-                color: _parseHexColor(seg.color) ?? baseColor,
-                fontSize: baseFontSize * (seg.fontScale ?? baseScale),
-                height: baseLineHeight,
-                fontFamily: ReaderFont.family,
-                // 合成粗/斜体（绘制期，不参与 Rust 断行测量）；
-                // null 时继承行级默认
-                fontWeight:
-                    (seg.bold && applyBold) ? FontWeight.w700 : null,
-                fontStyle:
-                    (seg.italic && applyItalic) ? FontStyle.italic : null,
-                decoration:
-                    seg.underline ? TextDecoration.underline : null,
+            children.add(
+              TextSpan(
+                text: text.substring(s, e),
+                style: TextStyle(
+                  color: _parseHexColor(seg.color) ?? baseColor,
+                  fontSize: baseFontSize * (seg.fontScale ?? baseScale),
+                  height: baseLineHeight,
+                  fontFamily: ReaderFont.family,
+                  // 合成粗/斜体（绘制期，不参与 Rust 断行测量）；
+                  // null 时继承行级默认
+                  fontWeight: (seg.bold && applyBold) ? FontWeight.w700 : null,
+                  fontStyle: (seg.italic && applyItalic)
+                      ? FontStyle.italic
+                      : null,
+                  decoration: seg.underline ? TextDecoration.underline : null,
+                ),
               ),
-            ));
+            );
             cursor = e;
           }
         }
@@ -294,12 +322,7 @@ class PageContentRenderer {
 
     // stretch：拉伸铺满（允许变形，对应 background-size:100% 100%）
     if (mode == 'stretch') {
-      paintImage(
-        canvas: canvas,
-        rect: rect,
-        image: image,
-        fit: BoxFit.fill,
-      );
+      paintImage(canvas: canvas, rect: rect, image: image, fit: BoxFit.fill);
       return;
     }
 

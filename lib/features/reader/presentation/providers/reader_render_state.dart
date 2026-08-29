@@ -1,38 +1,17 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/models/simple_models.dart';
 import '../widgets/page_turn/page_turn_types.dart';
+import 'page_frame.dart';
+import '../diagnostics/reader_trace.dart';
 
 /// 全局 ReaderRenderStateStore 实例（P1 接线层）
 ///
-/// ReaderNotifier 通过此 provider 获取 store 并发布三页结构态；
-/// 动画层通过此 provider 读取 viewport 并驱动渲染。
+/// ReaderNotifier 通过此 provider 构建并原子发布 FrameSet；
+/// 动画层通过此 provider 读取 frame/viewport 并驱动渲染。
 final readerRenderStoreProvider = Provider<ReaderRenderStateStore>(
   (ref) => ReaderRenderStateStore(),
 );
-
-/// 只读渲染页面包装：identity + revision 语义
-///
-/// 对齐 Android Track C1 的 ReaderRenderPage：
-/// - [identical(page, other.page)] 判定同一可变页实例
-/// - [revision] 递增确保相同页重发时仍可触发 Flutter rebuild
-@immutable
-class ReaderRenderPage {
-  final PageInfo page;
-  final int revision;
-
-  const ReaderRenderPage({required this.page, required this.revision});
-
-  @override
-  bool operator ==(Object other) =>
-      other is ReaderRenderPage &&
-      identical(page, other.page) &&
-      revision == other.revision;
-
-  @override
-  int get hashCode => identityHashCode(page) * 31 + revision.hashCode;
-}
 
 /// 不可变文本位置快照
 ///
@@ -74,55 +53,25 @@ class ReaderReadAloudHighlight {
   });
 }
 
-/// 低频结构渲染模型（三页 + 选择 + 朗读 + loading）
+/// 低频结构渲染模型（FrameSet + 选择 + 朗读 + loading）
 ///
-/// 聚合所有渲染所需的结构数据。仅在页面内容/选择/朗读状态变化时更新，
-/// 不随触点/动画进度高频变化。
+/// 页面结构以 [FrameSet] 为单一事实来源；三页数据要么整体就位、
+/// 要么以明确的槽位态（越界/失败/加载中）呈现，不允许静默置 null。
 @immutable
 class ReaderRenderModel {
-  final ReaderRenderPage? previousPage;
-  final ReaderRenderPage? currentPage;
-  final ReaderRenderPage? nextPage;
-  final int durPageIndex;
+  final FrameSet? frameSet;
   final ReaderSelection? selection;
   final List<ReaderReadAloudHighlight> readAloudHighlights;
   final String? message;
   final bool isLoading;
 
   const ReaderRenderModel({
-    this.previousPage,
-    this.currentPage,
-    this.nextPage,
-    this.durPageIndex = 0,
+    this.frameSet,
     this.selection,
     this.readAloudHighlights = const [],
     this.message,
     this.isLoading = false,
   });
-
-  ReaderRenderModel copyWith({
-    ReaderRenderPage? Function()? previousPage,
-    ReaderRenderPage? Function()? currentPage,
-    ReaderRenderPage? Function()? nextPage,
-    int? durPageIndex,
-    ReaderSelection? Function()? selection,
-    List<ReaderReadAloudHighlight>? readAloudHighlights,
-    String? Function()? message,
-    bool? isLoading,
-  }) {
-    return ReaderRenderModel(
-      previousPage:
-          previousPage != null ? previousPage() : this.previousPage,
-      currentPage: currentPage != null ? currentPage() : this.currentPage,
-      nextPage: nextPage != null ? nextPage() : this.nextPage,
-      durPageIndex: durPageIndex ?? this.durPageIndex,
-      selection: selection != null ? selection() : this.selection,
-      readAloudHighlights:
-          readAloudHighlights ?? this.readAloudHighlights,
-      message: message != null ? message() : this.message,
-      isLoading: isLoading ?? this.isLoading,
-    );
-  }
 }
 
 /// 高频 viewport 与动画状态
@@ -156,22 +105,46 @@ class ReaderRenderViewport {
 
 /// 双通道只读渲染状态存储
 ///
-/// 对齐 Android Track C1 的 ReaderRenderStateStore：
-/// - 低频 [model]：三页绘制数据、选择、朗读高亮、loading
+/// - 低频 [model]：FrameSet（三页帧）、选择、朗读高亮、loading
 /// - 高频 [viewport]：触点坐标、方向、动画进度
 ///
-/// 两个通道互相独立：viewport 更新不替换结构性 model。
-/// 通过 [addListener] 注册回调，与 Riverpod/ChangeNotifier 解耦。
+/// FrameSet 发布协议：
+/// - [publishFrameSet] 原子替换当前集合（整体提交，无半更新）
+/// - [advanceSession] 使旧会话全部帧作废（换书/设置/窗口变化）
+/// - 待决手势（[registerPendingTurn]/[consumePendingTurn]）承载
+///   「帧未就绪时挂起的翻页意图」，发布落地后由订阅者重试
 class ReaderRenderStateStore {
   ReaderRenderModel _model;
   ReaderRenderViewport _viewport;
 
   ReaderRenderStateStore()
-      : _model = const ReaderRenderModel(),
-        _viewport = const ReaderRenderViewport();
+    : _model = const ReaderRenderModel(),
+      _viewport = const ReaderRenderViewport();
 
   ReaderRenderModel get model => _model;
   ReaderRenderViewport get viewport => _viewport;
+
+  // ── FrameSet / 会话身份 ──
+
+  FrameSet? _frameSet;
+  int _sessionEpoch = 0;
+  String? _configFingerprint;
+  bool _dirty = false;
+  int _revision = 0;
+  PendingTurnGesture? _pendingTurn;
+
+  FrameSet? get frameSet => _frameSet;
+  int get sessionEpoch => _sessionEpoch;
+  String? get configFingerprint => _configFingerprint;
+
+  /// 请求过期后置位；由下一次（degraded 或完整）发布清除。
+  /// 发布协议据此决定是否补发，杜绝「静默丢弃 → 模型永久陈旧」。
+  bool get dirty => _dirty;
+
+  PendingTurnGesture? get pendingTurn => _pendingTurn;
+
+  /// 供构建 FrameSet 时取发布序号（publishFrameSet 时生效）
+  int nextSetRevision() => _revision + 1;
 
   // ── listener 管理（对齐 StateFlow collect） ──
 
@@ -199,65 +172,119 @@ class ReaderRenderStateStore {
     _viewportListeners.clear();
   }
 
-  // ── 发布方法（对齐 publishSession / publishStructure / publishViewport） ──
+  // ── 发布方法 ──
 
-  int _revision = 0;
-
-  /// 更新会话级信息（书籍/章节等），保留已有的三页数据
-  void publishSession({String? bookId, int? chapterIndex}) {
-    // 会话信息暂存于 model 的扩展字段中（P1 阶段再细化）
-    // 当前阶段仅用于测试保留语义
+  /// 会话推进：换书/设置/窗口变化时调用。
+  ///
+  /// 旧 epoch 的 FrameSet 全部作废、待决手势取消；此后手势门控
+  /// 因 frameSet==null 进入等待，直到新会话的 FrameSet 发布。
+  void advanceSession({
+    required int sessionEpoch,
+    required String configFingerprint,
+  }) {
+    _sessionEpoch = sessionEpoch;
+    _configFingerprint = configFingerprint;
+    _frameSet = null;
+    _dirty = true;
+    _pendingTurn = null;
+    readerTrace('render.session.advance', {
+      'epoch': sessionEpoch,
+      'fp': configFingerprint,
+    });
   }
 
-  /// 发布结构态：三页 + 选择 + 朗读高亮 + loading
-  ///
-  /// 对齐 Android 的 publishStructure。每调用一次 revision 递增，
-  /// 确保相同可变 PageInfo 实例重发时仍能触发 rebuild。
-  void publishStructure({
-    PageInfo? previousPage,
-    PageInfo? currentPage,
-    PageInfo? nextPage,
-    int durPageIndex = 0,
-    ReaderTextPosition? selectionStart,
-    ReaderTextPosition? selectionEnd,
-    String? message,
-    bool isLoading = false,
-  }) {
+  /// 原子发布 FrameSet：整体替换当前集合，revision 递增并通知订阅者。
+  void publishFrameSet(FrameSet set) {
     _revision++;
-
-    ReaderSelection? selection;
-    if (selectionStart != null && selectionEnd != null) {
-      selection = ReaderSelection(
-        start: selectionStart,
-        end: selectionEnd,
-      );
-    }
-
+    _frameSet = set;
+    _dirty = false;
     _model = ReaderRenderModel(
-      previousPage: previousPage != null
-          ? ReaderRenderPage(page: previousPage, revision: _revision)
-          : null,
-      currentPage: currentPage != null
-          ? ReaderRenderPage(page: currentPage, revision: _revision)
-          : null,
-      nextPage: nextPage != null
-          ? ReaderRenderPage(page: nextPage, revision: _revision)
-          : null,
-      durPageIndex: durPageIndex,
-      selection: selection,
-      readAloudHighlights: const [], // P1: 从 PageInfo 行数据提取
-      message: message,
-      isLoading: isLoading,
+      frameSet: set,
+      selection: _model.selection,
+      readAloudHighlights: _model.readAloudHighlights,
+      message: _model.message,
+      isLoading: _model.isLoading,
     );
+
+    readerTrace('render.publish', {
+      'revision': _revision,
+      'set': set.id,
+      'prev': _slotTrace(set.previous),
+      'next': _slotTrace(set.next),
+    });
 
     for (final listener in _modelListeners) {
       listener(_model);
     }
   }
 
+  /// 无 frame 的占位发布（开书 loading / 关书清空），保留消息语义。
+  void publishEmpty({String? message, bool isLoading = false}) {
+    _revision++;
+    _frameSet = null;
+    _model = ReaderRenderModel(
+      frameSet: null,
+      selection: _model.selection,
+      readAloudHighlights: _model.readAloudHighlights,
+      message: message,
+      isLoading: isLoading,
+    );
+    readerTrace('render.publish.empty', {
+      'revision': _revision,
+      'loading': isLoading,
+      'message': message,
+    });
+    for (final listener in _modelListeners) {
+      listener(_model);
+    }
+  }
+
+  String _slotTrace(FrameSlot slot) => frameSlotTrace(slot);
+
+  // ── 待决手势 ──
+
+  /// 登记挂起的翻页意图（重复注册覆盖旧意图）。
+  /// 返回登记的手势（供调用方核对 epoch）。
+  PendingTurnGesture registerPendingTurn(
+    PageDirection direction, {
+    required bool isTap,
+  }) {
+    final gesture = PendingTurnGesture(
+      direction: direction,
+      isTap: isTap,
+      registeredAt: DateTime.now(),
+      epoch: _sessionEpoch,
+    );
+    _pendingTurn = gesture;
+    readerTrace('turn.pending.register', {
+      'direction': direction,
+      'isTap': isTap,
+      'epoch': _sessionEpoch,
+    });
+    return gesture;
+  }
+
+  /// 消费待决手势：仅当传入集合仍是当前发布集合且 epoch 匹配时取出。
+  /// 门控（帧可用性）由调用方在消费后判定，不满足时应取消或继续等待。
+  PendingTurnGesture? consumePendingTurn(FrameSet? set) {
+    final gesture = _pendingTurn;
+    if (gesture == null) return null;
+    if (set == null || !identical(set, _frameSet)) return null;
+    if (gesture.epoch != _sessionEpoch) {
+      _pendingTurn = null;
+      return null;
+    }
+    _pendingTurn = null;
+    return gesture;
+  }
+
+  void cancelPendingTurn(String reason) {
+    if (_pendingTurn == null) return;
+    _pendingTurn = null;
+    readerTrace('turn.pending.cancel', {'reason': reason});
+  }
+
   /// 发布高频 viewport 状态（触点/动画进度）
-  ///
-  /// 对齐 Android 的 publishViewport。
   void publishViewport({
     required double width,
     required double height,
@@ -280,8 +307,10 @@ class ReaderRenderStateStore {
       touchY: touchY,
       direction: direction,
       isAnimationRunning: isAnimationRunning,
-      animationProgress: (xProgress > yProgress ? xProgress : yProgress)
-          .clamp(0.0, 1.0),
+      animationProgress: (xProgress > yProgress ? xProgress : yProgress).clamp(
+        0.0,
+        1.0,
+      ),
     );
 
     for (final listener in _viewportListeners) {

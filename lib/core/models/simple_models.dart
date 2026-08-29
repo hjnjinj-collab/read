@@ -14,8 +14,10 @@ class Chapter {
   final String title;
   final int startPos;
   final int endPos;
+
   /// 章节层级：1=顶层（EPUB 嵌套目录；TXT 平铺恒为 1）
   final int level;
+
   /// 父章节索引（null=顶层）
   final int? parentIndex;
 
@@ -135,6 +137,9 @@ class EntrySegment {
 
 class PageInfo {
   final int pageIndex;
+
+  /// 章节索引；页面身份不能只依赖章节内 pageIndex。
+  final int chapterIndex;
   final List<PageEntry> entries;
 
   /// 文本行视图（兼容便捷访问；图片项被过滤）
@@ -162,6 +167,7 @@ class PageInfo {
 
   const PageInfo({
     required this.pageIndex,
+    this.chapterIndex = 0,
     this.entries = const [],
     this.backgroundHref,
     this.backgroundSize,
@@ -173,6 +179,7 @@ class PageInfo {
 
 class ReadingState {
   final String? bookId;
+
   /// 书籍文件路径（持久化身份键：进度/书签以此关联）
   final String? filePath;
   final String? bookTitle;

@@ -86,13 +86,17 @@ class BookService {
   /// Get chapter list
   Future<List<Chapter>> getChapters(String bookId) async {
     final rustChapters = await rust_api.getChapters(bookId: bookId);
-    return rustChapters.map((ch) => Chapter(
-      title: ch.title,
-      startPos: ch.startPos.toInt(),
-      endPos: ch.endPos.toInt(),
-      level: ch.level,
-      parentIndex: ch.parentIndex?.toInt(),
-    )).toList();
+    return rustChapters
+        .map(
+          (ch) => Chapter(
+            title: ch.title,
+            startPos: ch.startPos.toInt(),
+            endPos: ch.endPos.toInt(),
+            level: ch.level,
+            parentIndex: ch.parentIndex?.toInt(),
+          ),
+        )
+        .toList();
   }
 
   /// Get chapter content
@@ -244,12 +248,16 @@ class BookService {
       removeDuplicateTitle: removeDuplicateTitle,
       reSegment: reSegment,
       chineseConvert: chineseConvert,
-      replaceRules: replaceRules.map((r) => rust_api.FfiReplaceRule(
-        pattern: r.pattern,
-        replacement: r.replacement,
-        ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
-        enabled: r.enabled,
-      )).toList(),
+      replaceRules: replaceRules
+          .map(
+            (r) => rust_api.FfiReplaceRule(
+              pattern: r.pattern,
+              replacement: r.replacement,
+              ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
+              enabled: r.enabled,
+            ),
+          )
+          .toList(),
       anchorCharOffset: anchorCharOffset == null
           ? null
           : BigInt.from(anchorCharOffset),
@@ -295,12 +303,16 @@ class BookService {
       removeDuplicateTitle: removeDuplicateTitle,
       reSegment: reSegment,
       chineseConvert: chineseConvert,
-      replaceRules: replaceRules.map((r) => rust_api.FfiReplaceRule(
-        pattern: r.pattern,
-        replacement: r.replacement,
-        ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
-        enabled: r.enabled,
-      )).toList(),
+      replaceRules: replaceRules
+          .map(
+            (r) => rust_api.FfiReplaceRule(
+              pattern: r.pattern,
+              replacement: r.replacement,
+              ruleType: r.isRegex ? 1 : 0, // 0=字符串, 1=正则, 2=JS
+              enabled: r.enabled,
+            ),
+          )
+          .toList(),
       pageFillThreshold: pageFillThreshold,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
@@ -324,31 +336,36 @@ class BookService {
   PageInfo _mapPage(rust_types.PageInfo page) {
     return PageInfo(
       pageIndex: page.pageIndex.toInt(),
+      chapterIndex: page.chapterIndex.toInt(),
       entries: page.entries
-          .map((e) => PageEntry(
-                text: e.text,
-                resourceHref: e.resourceHref,
-                x: e.x,
-                y: e.y,
-                width: e.width,
-                height: e.height,
-                color: e.color,
-                fontScale: e.fontScale,
-                segments: e.segments
-                    .map((s) => EntrySegment(
-                          start: s.start.toInt(),
-                          end: s.end.toInt(),
-                          color: s.color,
-                          fontScale: s.fontScale,
-                          bold: s.bold,
-                          italic: s.italic,
-                          underline: s.underline,
-                        ))
-                    .toList(),
-                isChapterStart: e.isChapterStart,
-                isTableFrame: e.isTableFrame,
-                isComment: e.isComment,
-              ))
+          .map(
+            (e) => PageEntry(
+              text: e.text,
+              resourceHref: e.resourceHref,
+              x: e.x,
+              y: e.y,
+              width: e.width,
+              height: e.height,
+              color: e.color,
+              fontScale: e.fontScale,
+              segments: e.segments
+                  .map(
+                    (s) => EntrySegment(
+                      start: s.start.toInt(),
+                      end: s.end.toInt(),
+                      color: s.color,
+                      fontScale: s.fontScale,
+                      bold: s.bold,
+                      italic: s.italic,
+                      underline: s.underline,
+                    ),
+                  )
+                  .toList(),
+              isChapterStart: e.isChapterStart,
+              isTableFrame: e.isTableFrame,
+              isComment: e.isComment,
+            ),
+          )
           .toList(),
       backgroundHref: page.backgroundHref,
       backgroundSize: page.backgroundSize,
@@ -395,8 +412,9 @@ class BookService {
       paddingRight: paddingRight,
       paddingBottom: paddingBottom,
       fontName: fontName,
-      anchorCharOffset:
-          anchorCharOffset == null ? null : BigInt.from(anchorCharOffset),
+      anchorCharOffset: anchorCharOffset == null
+          ? null
+          : BigInt.from(anchorCharOffset),
       chineseConvert: chineseConvert,
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
@@ -563,7 +581,9 @@ File coverCacheFile(String sourcePath) {
     hash ^= (unit >> 8) & 0xff;
     hash = (hash * 0x01000193) & 0xffffffff;
   }
-  return File('${Directory.systemTemp.path}/legado_covers/${hash.toRadixString(16)}.img');
+  return File(
+    '${Directory.systemTemp.path}/legado_covers/${hash.toRadixString(16)}.img',
+  );
 }
 
 /// 打开 EPUB 书时提取封面并落盘（书架跨启动显示；失败静默）

@@ -12,11 +12,8 @@ class ReaderPage extends ConsumerStatefulWidget {
   final String filePath;
   final String bookName;
 
-  const ReaderPage({
-    Key? key,
-    required this.filePath,
-    required this.bookName,
-  }) : super(key: key);
+  const ReaderPage({Key? key, required this.filePath, required this.bookName})
+    : super(key: key);
 
   @override
   ConsumerState<ReaderPage> createState() => _ReaderPageState();
@@ -48,7 +45,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final size = MediaQuery.of(context).size;
       ref.read(readerProvider.notifier).setScreenSize(size.width, size.height);
-      ref.read(readerProvider.notifier).openBook(widget.filePath, widget.bookName);
+      ref
+          .read(readerProvider.notifier)
+          .openBook(widget.filePath, widget.bookName);
     });
   }
 
@@ -92,8 +91,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final now = event.timeStamp.inMilliseconds;
     final dt = now - _dragLastTimestampMs;
     if (dt > 0) {
-      _releaseVelocityX =
-          (local.dx - _dragLastX) / (dt / 1000.0);
+      _releaseVelocityX = (local.dx - _dragLastX) / (dt / 1000.0);
     }
     _dragLastX = local.dx;
     _dragLastY = local.dy;
@@ -109,7 +107,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       final direction = dx > 0 ? PageDirection.prev : PageDirection.next;
       // 竖向意图压倒横向时不启动
       if (dy.abs() <= distance * 1.5) {
-        _composerKey.currentState?.startDrag(direction, Offset(_dragStartX, _dragStartY));
+        _composerKey.currentState?.startDrag(
+          direction,
+          Offset(_dragStartX, _dragStartY),
+        );
       }
     }
 
@@ -117,21 +118,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (_composerKey.currentState?.isIdle == false) {
       final screenWidth = MediaQuery.of(context).size.width;
       final progress = (distance / screenWidth).clamp(0.0, 1.0);
-      _composerKey.currentState?.updateDrag(progress, Offset(_dragLastX, _dragLastY));
+      _composerKey.currentState?.updateDrag(
+        progress,
+        Offset(_dragLastX, _dragLastY),
+      );
     }
 
     // 同时更新 viewport（供后续高级动画使用）
     final size = MediaQuery.of(context).size;
-    ref.read(readerRenderStoreProvider).publishViewport(
-      width: size.width,
-      height: size.height,
-      startX: _dragStartX,
-      startY: _dragStartY,
-      touchX: local.dx,
-      touchY: local.dy,
-      direction: dx > 0 ? PageDirection.prev : PageDirection.next,
-      isAnimationRunning: true,
-    );
+    ref
+        .read(readerRenderStoreProvider)
+        .publishViewport(
+          width: size.width,
+          height: size.height,
+          startX: _dragStartX,
+          startY: _dragStartY,
+          touchX: local.dx,
+          touchY: local.dy,
+          direction: dx > 0 ? PageDirection.prev : PageDirection.next,
+          isAnimationRunning: true,
+        );
   }
 
   void _onPointerUp(PointerUpEvent event) {
@@ -143,16 +149,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final dy = _dragLastY - _dragStartY;
 
     // 发布 viewport 最终状态
-    ref.read(readerRenderStoreProvider).publishViewport(
-      width: screenWidth,
-      height: MediaQuery.of(context).size.height,
-      startX: _dragStartX,
-      startY: _dragStartY,
-      touchX: _dragLastX,
-      touchY: _dragLastY,
-      direction: PageDirection.none,
-      isAnimationRunning: false,
-    );
+    ref
+        .read(readerRenderStoreProvider)
+        .publishViewport(
+          width: screenWidth,
+          height: MediaQuery.of(context).size.height,
+          startX: _dragStartX,
+          startY: _dragStartY,
+          touchX: _dragLastX,
+          touchY: _dragLastY,
+          direction: PageDirection.none,
+          isAnimationRunning: false,
+        );
 
     // 单次手势判定（此前重复计算两遍，已合并）
     final result = resolveGesture(
@@ -207,7 +215,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(readerProvider);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5DC),
       body: SafeArea(
@@ -223,22 +230,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 child: state.isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : state.error != null
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Text(
-                                'Error: ${state.error}',
-                                style: const TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          )
-                        : state.currentPage != null
-                            ? _PageTurnComposerBridge(
-                                key: _composerKey,
-                                currentPage: state.currentPage!,
-                                mode: _pageTurnMode,
-                              )
-                            : const Center(child: Text('No content')),
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Text(
+                            'Error: ${state.error}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      )
+                    : state.currentPage != null
+                    ? _PageTurnComposerBridge(
+                        key: _composerKey,
+                        currentPage: state.currentPage!,
+                        mode: _pageTurnMode,
+                      )
+                    : const Center(child: Text('No content')),
               ),
             ),
 
@@ -248,7 +255,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -272,10 +282,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     ),
                     Text(
                       '${state.currentChapterIndex + 1}/${state.chapters.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
                   ],
                 ),
@@ -315,7 +322,8 @@ class _PageTurnComposerBridge extends StatefulWidget {
   });
 
   @override
-  State<_PageTurnComposerBridge> createState() => _PageTurnComposerBridgeState();
+  State<_PageTurnComposerBridge> createState() =>
+      _PageTurnComposerBridgeState();
 }
 
 class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
