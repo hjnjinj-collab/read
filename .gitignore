@@ -65,3 +65,10 @@ macos/Flutter/ephemeral/
 
 # 大文件测试产物副本
 rust/test_large_file_cargo/test_very_large_book.txt
+
+# Native assets source files (large C amalgamation)
+.native_assets/
+
+# Gradle build reports (build 产物，包含 AAR metadata 失败 HTML）
+/android/build/
+

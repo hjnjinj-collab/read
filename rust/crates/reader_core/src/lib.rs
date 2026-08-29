@@ -14,7 +14,10 @@ pub use content_preprocessor::{
 };
 pub use task_scheduler::ChapterTaskScheduler;
 pub use chapter_utils::{ChapterInfo, extract_chapter_number, get_pure_chapter_name};
-pub use pagination_cache::{PaginationCache, CacheKey, CachedChapterPages, CacheStats};
+pub use pagination_cache::{
+    PaginationCache, CacheKey, CachedChapterPages, CacheStats,
+    CACHE_SCHEMA_REVISION, LAYOUT_REVISION,
+};
 pub use loading::{BookLoader, LoadingProgress, LoadingStage, LoadingCallbacks};
 
 #[cfg(feature = "js-engine")]

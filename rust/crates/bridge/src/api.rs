@@ -5,6 +5,7 @@ use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, GlyphCa
 use reader_core::{
     ContentPreprocessor, ProcessOptions, ChineseConvertType, ReplaceRule, RuleType,
     PaginationCache, CacheKey, CachedChapterPages,
+    CACHE_SCHEMA_REVISION, LAYOUT_REVISION,
     ReadSessionManager,
     PreloadExecutor, PreloadExecutorConfig,
     PreloadTask, DefaultPreloadStrategy, PreloadStrategy,
@@ -137,6 +138,8 @@ static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, 
 /// 结构化分页缓存键
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct StructuredPageKey {
+    cache_schema_revision: u32,
+    layout_revision: u32,
     book_id: String,
     chapter_index: usize,
     width: u32,
@@ -164,6 +167,8 @@ impl StructuredPageKey {
         para_format_hash: u64,
     ) -> Self {
         Self {
+            cache_schema_revision: CACHE_SCHEMA_REVISION,
+            layout_revision: LAYOUT_REVISION,
             book_id: book_id.to_string(),
             chapter_index,
             width: config.width.to_bits(),
@@ -424,7 +429,21 @@ pub fn update_book_cleaning(
 
     // 章节偏移可能随重建变化，分页缓存全部失效
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
+    clear_structured_pagination_cache_for_book(&book_id);
     Ok(())
+}
+
+/// 清除指定书籍的结构化分页缓存。
+fn clear_structured_pagination_cache_for_book(book_id: &str) {
+    let mut structured = STRUCTURED_PAGINATION_CACHE.lock().unwrap();
+    let stale: Vec<StructuredPageKey> = structured
+        .iter()
+        .filter(|(key, _)| key.book_id == book_id)
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in stale {
+        structured.pop(&key);
+    }
 }
 
 /// FFI 替换规则（用户自定义净化/替换规则）
@@ -1642,12 +1661,10 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
 fn process_structured_chapter(
     book_id: &str,
     chapter_index: usize,
-    config: &LayoutConfig,
-    chinese_convert: u8,
+    params: &StructuredParams,
     prefer_try_lock: bool,
-    para_format_hash: u64,
 ) -> anyhow::Result<Option<Arc<Vec<crate::PageInfo>>>> {
-    let cache_key = StructuredPageKey::new(book_id, chapter_index, config, chinese_convert, para_format_hash);
+    let cache_key = structured_cache_key(book_id, chapter_index, params);
 
     // M8-P4 缓存命中：Arc::clone 免整章克隆
     if let Some(arc_pages) = STRUCTURED_PAGINATION_CACHE
@@ -1660,7 +1677,7 @@ fn process_structured_chapter(
     }
 
     // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
-    let convert_mode = match chinese_convert {
+    let convert_mode = match params.convert_mode {
         1 => book_parser::content_cleaner::ConvertMode::SimplifiedToTraditional,
         2 => book_parser::content_cleaner::ConvertMode::TraditionalToSimplified,
         _ => book_parser::content_cleaner::ConvertMode::None,
@@ -1684,7 +1701,7 @@ fn process_structured_chapter(
         .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
     let content = structured
         .parser
-        .get_chapter_content_structured_ex(chapter_index, convert_mode, config.font_size)?;
+        .get_chapter_content_structured_ex(chapter_index, convert_mode, params.config.font_size)?;
     let background = content.background.clone();
     drop(books);
 
@@ -1705,7 +1722,7 @@ fn process_structured_chapter(
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     // M8-P4：跨章复用共享字形缓存
     let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
-    let engine = LayoutEngine::with_cache(config.clone(), font_manager, glyph_cache);
+    let engine = LayoutEngine::with_cache(params.config.clone(), font_manager, glyph_cache);
     let pages = engine.layout_items(&items, chapter_index)?;
 
     // 背景为章节级属性：逐页携带（Dart 侧按 href 去重解码一次）
@@ -1797,6 +1814,70 @@ fn structured_layout_config(
     }
 }
 
+/// 结构化路径参数单源：config + 简繁模式 + 段落哈希打包。
+///
+/// 三个 FFI 入口（get_page_structured / get_page_count_structured /
+/// prefetch_structured_chapter）与 process_structured_chapter 全部经由
+/// 本结构构造 config 与缓存键，杜绝「多处手抄参数 → bit 级错位 → 静默 miss」。
+/// FFI 签名不变，无需 codegen。
+struct StructuredParams {
+    config: LayoutConfig,
+    convert_mode: u8,
+    para_format_hash: u64,
+}
+
+impl StructuredParams {
+    #[allow(clippy::too_many_arguments)]
+    fn from_args(
+        width: f32,
+        height: f32,
+        font_size: f32,
+        line_height_multiplier: f32,
+        padding_left: f32,
+        padding_top: f32,
+        padding_right: f32,
+        padding_bottom: f32,
+        font_name: String,
+        chinese_convert: u8,
+        page_fill_threshold: f32,
+        show_comments: bool,
+        para_format_hash: u64,
+    ) -> Self {
+        Self {
+            config: structured_layout_config(
+                width,
+                height,
+                font_size,
+                line_height_multiplier,
+                padding_left,
+                padding_top,
+                padding_right,
+                padding_bottom,
+                font_name,
+                page_fill_threshold,
+                show_comments,
+            ),
+            convert_mode: chinese_convert,
+            para_format_hash,
+        }
+    }
+}
+
+/// 结构化分页缓存键的唯一构造点
+fn structured_cache_key(
+    book_id: &str,
+    chapter_index: usize,
+    params: &StructuredParams,
+) -> StructuredPageKey {
+    StructuredPageKey::new(
+        book_id,
+        chapter_index,
+        &params.config,
+        params.convert_mode,
+        params.para_format_hash,
+    )
+}
+
 /// 结构化分页获取（EPUB 主路径）
 ///
 /// `anchor_char_offset`: 进度锚点——章内文本字符偏移（与 TXT 路径同语义，
@@ -1822,7 +1903,7 @@ pub fn get_page_structured(
     show_comments: bool,
     para_format_hash: u64,
 ) -> anyhow::Result<crate::PageInfo> {
-    let config = structured_layout_config(
+    let params = StructuredParams::from_args(
         width,
         height,
         font_size,
@@ -1832,11 +1913,13 @@ pub fn get_page_structured(
         padding_right,
         padding_bottom,
         font_name,
+        chinese_convert,
         page_fill_threshold,
         show_comments,
+        para_format_hash,
     );
     let pages =
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false, para_format_hash)?
+        process_structured_chapter(&book_id, chapter_index, &params, false)?
             .expect("前台结构化分页恒返回 Some");
 
     let effective = match anchor_char_offset {
@@ -1869,7 +1952,7 @@ pub fn get_page_count_structured(
     show_comments: bool,
     para_format_hash: u64,
 ) -> anyhow::Result<usize> {
-    let config = structured_layout_config(
+    let params = StructuredParams::from_args(
         width,
         height,
         font_size,
@@ -1879,11 +1962,13 @@ pub fn get_page_count_structured(
         padding_right,
         padding_bottom,
         font_name,
+        chinese_convert,
         page_fill_threshold,
         show_comments,
+        para_format_hash,
     );
     let pages =
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, false, para_format_hash)?
+        process_structured_chapter(&book_id, chapter_index, &params, false)?
             .expect("前台结构化分页恒返回 Some");
     Ok(pages.len())
 }
@@ -1912,7 +1997,7 @@ pub fn prefetch_structured_chapter(
     show_comments: bool,
     para_format_hash: u64,
 ) -> anyhow::Result<bool> {
-    let config = structured_layout_config(
+    let params = StructuredParams::from_args(
         width,
         height,
         font_size,
@@ -1922,21 +2007,39 @@ pub fn prefetch_structured_chapter(
         padding_right,
         padding_bottom,
         font_name,
+        chinese_convert,
         page_fill_threshold,
         show_comments,
+        para_format_hash,
     );
-    let cache_key = StructuredPageKey::new(&book_id, chapter_index, &config, chinese_convert, para_format_hash);
+    let cache_key = structured_cache_key(&book_id, chapter_index, &params);
     if STRUCTURED_PAGINATION_CACHE.lock().unwrap().contains(&cache_key) {
         return Ok(true);
     }
-    Ok(
-        process_structured_chapter(&book_id, chapter_index, &config, chinese_convert, true, para_format_hash)?
-            .is_some(),
-    )
+    Ok(process_structured_chapter(&book_id, chapter_index, &params, true)?.is_some())
 }
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）
+///
+/// 快路径：read 锁内窥探 parser 资源缓存，命中（渲染重复图/预热去重后
+/// 的图）直接返回，不与前台分页（BOOKS.write）争写锁；未命中才落写锁
+/// 慢路径（ZIP 读取 + 写缓存，仅每资源首次）。
 pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Result<Vec<u8>> {
+    // 快路径：读锁窥探缓存
+    {
+        let books = BOOKS.read().unwrap();
+        let handle = books
+            .get(&book_id)
+            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+        let structured = handle
+            .structured
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("非结构化书籍，无资源句柄"))?;
+        if let Some(data) = structured.parser.peek_resource_cache(&resource_href) {
+            return Ok(data);
+        }
+    }
+    // 慢路径：写锁内 ZIP 读取 + 写缓存（只读快路径未命中才到达）
     let mut books = BOOKS.write().unwrap();
     let handle = books
         .get_mut(&book_id)
@@ -1986,8 +2089,9 @@ pub fn release_book(book_id: String) -> anyhow::Result<()> {
     books.remove(&book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
 
-    // 结构化分页缓存随之失效（LRU 无按键删除接口，整体清理代价可忽略）
-    STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
+    // 两种格式的分页缓存都随书籍释放而失效。
+    PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
+    clear_structured_pagination_cache_for_book(&book_id);
 
     Ok(())
 }
@@ -2384,23 +2488,14 @@ pub fn get_pagination_cache_stats() -> anyhow::Result<String> {
 /// 清除指定书籍的分页缓存
 pub fn clear_pagination_cache_for_book(book_id: String) -> anyhow::Result<()> {
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
-    // 结构化缓存：按键前缀过滤（LRU 无按键删除，逐键清理）
-    let mut structured = STRUCTURED_PAGINATION_CACHE.lock().unwrap();
-    let stale: Vec<StructuredPageKey> = structured
-        .iter()
-        .filter(|(k, _)| k.book_id == book_id)
-        .map(|(k, _)| k.clone())
-        .collect();
-    for key in stale {
-        structured.pop(&key);
-    }
+    clear_structured_pagination_cache_for_book(&book_id);
     Ok(())
 }
 
 /// 清除所有分页缓存
 pub fn clear_all_pagination_cache() -> anyhow::Result<()> {
-    let mut cache = PAGINATION_CACHE.lock().unwrap();
-    cache.clear();
+    PAGINATION_CACHE.lock().unwrap().clear();
+    STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
     Ok(())
 }
 
@@ -2746,15 +2841,15 @@ pub async fn batch_process_chapters(
 
 /// 清除指定书籍的分页缓存
 pub fn clear_book_cache(book_id: String) -> anyhow::Result<()> {
-    let mut cache = PAGINATION_CACHE.lock().unwrap();
-    cache.clear_book(&book_id);
+    PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
+    clear_structured_pagination_cache_for_book(&book_id);
     Ok(())
 }
 
 /// 清除所有缓存
 pub fn clear_all_caches() -> anyhow::Result<()> {
-    let mut cache = PAGINATION_CACHE.lock().unwrap();
-    cache.clear();
+    PAGINATION_CACHE.lock().unwrap().clear();
+    STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
     Ok(())
 }
 

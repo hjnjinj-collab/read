@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.legado.legado_flutter"
-    compileSdk = flutter.compileSdkVersion
+    // 升级到 36：file_picker 依赖的 flutter_plugin_android_lifecycle 要求
+    // compileSdk >= 36（项目原 flutter.compileSdkVersion 是 34，触发 AAR metadata 失败）
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

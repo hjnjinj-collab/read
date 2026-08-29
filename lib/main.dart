@@ -155,14 +155,16 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
   Future<void> _pickAndOpenBook(BuildContext context) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      // file_picker 12.x: FilePicker.pickFiles() 直接调用（不再走 .platform），
+      // 返回 List<PlatformFile>（空列表 = 用户取消）
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['txt', 'epub'],
       );
 
-      if (result != null && result.files.single.path != null) {
-        final filePath = result.files.single.path!;
-        final fileName = result.files.single.name;
+      if (files.isNotEmpty && files.first.path != null) {
+        final filePath = files.first.path!;
+        final fileName = files.first.name;
 
         // Extract book name (remove extension)
         final bookName = fileName.contains('.')

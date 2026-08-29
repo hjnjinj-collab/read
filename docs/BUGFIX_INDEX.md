@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-08-21
+> 最后更新: 2026-08-29
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -33,6 +33,9 @@
 | **重新分段开启后超长段原样保留（TXT 尤甚）** | TXT Smart 模式只做软换行合并**从不切长段**；EPUB 切分器缺 ASCII 句读、回退扫全文无上界、cut==total 产空尾段、省略号可从中间切、闭引号悬段首、子段丢 align | M9.2：共享切分器 `paragraph_splitter.rs`（区间契约）双路径统一；阈值 Smart/Aggressive **用户可调**（默认 200/100，设置面板滑杆）；强标点纯 CJK 集+次级有界回退+闭标吸附+省略号原子+尾段再平衡；切口后剩余内容作为新段落从头计数继续切分（split_ranges while 循环不变式） |
 | **页尾长段落整段下移造成半页空白（调低填充门槛更严重）** | layout_text 决策块在 fill≥page_fill_threshold 时无条件整段推页，空白上限=1−threshold；行级续排循环虽存在但被该分支拦截 | M9.2：删除整段推页决策，改为行级精度——算剩余空间可容行数、放得下的行留下、余量推下页；仅保留孤行(<2行)/寡行(下页单行)轻保护。TXT 路径不再消费 page_fill_threshold（EPUB 仍消费） |
 | **TXT 阅读整体卡顿、越读越卡（翻页/设置面板/全局 UI 均卡）** | ①预加载自激级联：warm→miss→trigger→warm 无限推进全书、无去重无取消，10 章 LRU 被冲成滑动窗口→当前章被挤出→每次翻页同步全章重排；②命中路径每次翻页深克隆整章所有页；③is_chapter_marker 每次调用现场编译 3 个正则（每章数千次） | M9.3：①get_chapter_content 拆 impl(trigger)+quiet 封装、process_and_layout_chapter_inner(allow_preload_trigger) 参数化打断闭环 + 策略收窄 [N±1] + executor try_submit_dedup 去重（并修复 PreloadHandle Drop 自动取消误杀任务：内联等待终态）；②CachedChapterPages.pages 包 Arc（对齐 EPUB 先例），命中零克隆；③OnceLock 静态化正则（含 protect_html_tags） |
+| **`flutter build apk` 卡在 "Building native assets failed"（sqlite3 hook）** | sqlite3 默认从 `github.com` 下载预编译 .so，墙内网络 `HttpException: 信号灯超时` | [bugfixes/2026-08-29_Android构建sqlite3_hook_GitHub下载不通](./bugfixes/2026-08-29_Android构建sqlite3_hook_GitHub下载不通.md) ⭐ pubspec 加 `hooks.user_defines.sqlite3: source: source + path: <相对路径>` 走 NDK 本地编译 |
+| **`flutter build apk` 报 `Dependency ':flutter_plugin_android_lifecycle' requires compile against version 36 or later`** | Flutter 17.x 默认 `flutter.compileSdkVersion = 34`，但 AGP 9.0.1 在 `CheckAarMetadataWorkAction` 强制校验 AAR `min-compile-sdk=36`；多个 plugin 自己 build.gradle 写 `compileSdk flutter.compileSdkVersion` 也得改 | [bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补](./bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补.md) ⭐ app/build.gradle.kts 硬编 `compileSdk = 36` + 修补 pub cache 所有 plugin + 禁 Kotlin 增量编译（跨盘符相对路径错误） |
+| **`flutter build apk` 报 `Member not found: 'platform'`** | file_picker 12.x 引入 plugin federation（Android 拆 `android_file_picker`），`FilePicker.platform` 移除；`pickFiles()` 返回类型从 `FilePickerResult?` 变 `List<PlatformFile>` | [bugfixes/2026-08-29_file_picker_12.x_API破坏性变更](./bugfixes/2026-08-29_file_picker_12.x_API破坏性变更.md) ⭐ `FilePicker.platform.pickFiles()` → `FilePicker.pickFiles()`，`result.files.single` → `files.first` |
 
 ## 二、按错误信息查找
 

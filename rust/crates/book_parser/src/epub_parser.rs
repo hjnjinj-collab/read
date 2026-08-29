@@ -1610,6 +1610,15 @@ impl EpubParser {
         .blocks
     }
 
+    /// 只读窥探资源缓存（不触发 ZIP 读取）：命中返回字节，None=未命中。
+    ///
+    /// 供 bridge 的 get_book_resource 走 BOOKS.read() 快路径——命中时
+    /// 不与前台分页（BOOKS.write）争锁；未命中才落写锁慢路径。
+    pub fn peek_resource_cache(&self, resource_id: &str) -> Option<Vec<u8>> {
+        let mut cache = self.resource_cache.lock().unwrap();
+        cache.get(resource_id)
+    }
+
     /// 获取资源（带缓存）
     pub fn get_resource_cached(&mut self, resource_id: &str) -> Result<Vec<u8>> {
         // 先检查缓存

@@ -1,9 +1,20 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use lru::LruCache;
 use std::num::NonZeroUsize;
+
+/// 分页缓存条目的数据布局版本。变更缓存值/键的布局时递增，避免复用旧条目。
+pub const CACHE_SCHEMA_REVISION: u32 = 1;
+/// 排版结果版本。影响分页结果的算法或布局语义变更时递增。
+pub const LAYOUT_REVISION: u32 = 1;
+
+/// 缓存条目 TTL（辅助淘汰）。
+///
+/// 决策记录：LRU 容量为主淘汰，TTL 仅兜底极端陈旧条目
+/// （如小书章节长期驻留后的陈旧结果）。
+pub const ENTRY_TTL: Duration = Duration::from_secs(300);
 use layout_engine::{Page, LayoutConfig};
 
 /// 分页缓存键（唯一标识一次排版）
@@ -12,6 +23,8 @@ use layout_engine::{Page, LayoutConfig};
 /// 选项变更即产生新 key，旧条目由 LRU 淘汰——保证设置变更后不返回旧内容的页。
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct CacheKey {
+    pub cache_schema_revision: u32,
+    pub layout_revision: u32,
     pub book_id: String,
     pub chapter_index: usize,
     pub config_hash: u64,   // 排版配置的哈希值
@@ -46,6 +59,8 @@ impl CacheKey {
         config.page_fill_threshold.to_bits().hash(&mut hasher);
 
         Self {
+            cache_schema_revision: CACHE_SCHEMA_REVISION,
+            layout_revision: LAYOUT_REVISION,
             book_id: book_id.to_string(),
             chapter_index,
             config_hash: hasher.finish(),
@@ -115,7 +130,17 @@ impl PaginationCache {
     }
     
     /// 获取缓存
+    ///
+    /// TTL 辅助淘汰：命中但超龄 → 移除条目按 miss 处理
+    /// （peek 不更新 LRU 序，避免「提升后又逐出」的空转）。
     pub fn get(&mut self, key: &CacheKey) -> Option<&CachedChapterPages> {
+        if let Some(cached) = self.cache.peek(key) {
+            if cached.created_at.elapsed() > ENTRY_TTL {
+                self.cache.pop(key);
+                self.miss_count += 1;
+                return None;
+            }
+        }
         if let Some(cached) = self.cache.get(key) {
             self.hit_count += 1;
             Some(cached)
@@ -127,6 +152,13 @@ impl PaginationCache {
     
     /// 获取可变引用（用于修改）
     pub fn get_mut(&mut self, key: &CacheKey) -> Option<&mut CachedChapterPages> {
+        if let Some(cached) = self.cache.peek(key) {
+            if cached.created_at.elapsed() > ENTRY_TTL {
+                self.cache.pop(key);
+                self.miss_count += 1;
+                return None;
+            }
+        }
         if self.cache.contains(key) {
             self.hit_count += 1;
             self.cache.get_mut(key)
@@ -246,6 +278,14 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_key_contains_current_revisions() {
+        let key = CacheKey::new("book1", 0, &LayoutConfig::default());
+
+        assert_eq!(key.cache_schema_revision, CACHE_SCHEMA_REVISION);
+        assert_eq!(key.layout_revision, LAYOUT_REVISION);
+    }
+
+    #[test]
     fn test_cache_basic_operations() {
         let mut cache = PaginationCache::new(2);
         
@@ -299,5 +339,24 @@ mod tests {
         assert!(cache.get(&key1).is_none()); // Evicted
         assert!(cache.get(&key2).is_some()); // Still in cache
         assert!(cache.get(&key3).is_some()); // Just added
+    }
+
+    #[test]
+    fn test_cache_ttl_expiry() {
+        let mut cache = PaginationCache::new(2);
+        let config = LayoutConfig::default();
+        let key = CacheKey::new("book1", 0, &config);
+
+        // 陈旧条目：created_at 在 TTL 之外
+        cache.put(key.clone(), CachedChapterPages {
+            pages: Arc::new(vec![]),
+            total_pages: 0,
+            created_at: Instant::now() - (ENTRY_TTL + Duration::from_secs(1)),
+        });
+
+        // 命中但超龄 → 按 miss 处理并移除
+        assert!(cache.get(&key).is_none());
+        assert_eq!(cache.stats().miss_count, 1);
+        assert_eq!(cache.len(), 0);
     }
 }
