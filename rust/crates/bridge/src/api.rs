@@ -68,6 +68,25 @@ static PAGINATION_CACHE: Lazy<Arc<Mutex<PaginationCache>>> = Lazy::new(|| {
     Arc::new(Mutex::new(PaginationCache::new(10)))
 });
 
+// M9.5-G：预处理结果缓存——reader_core::PreprocessedCache 首次接入生产路径。
+// process_and_layout_chapter_inner 在预处理前查缓存，命中则连「取原文+六阶段
+// 预处理流水线」一并跳过；miss 正常处理后回填。容量 20 章，进程内存不落盘。
+// 键=book_id+章节+预处理选项 hash（para_format_hash 不参与预处理输出、置 0，
+// 段落格式化在缓存之后执行）。净化选项（ContentCleaningOptions）不在键中，
+// 但 set_content_cleaning_options 重建章节偏移时同步 clear_book 失效，
+// 不产生陈旧命中。内部 tokio Mutex 自同步，无需外层 std Mutex。
+static PREPROCESSED_CACHE: Lazy<reader_core::cache::PreprocessedCache> =
+    Lazy::new(|| reader_core::cache::PreprocessedCache::new());
+
+// M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
+// (update_book_cleaning / release_book / per-book clear), None = clear all.
+fn invalidate_preprocessed_cache(book_id: Option<&str>) {
+    match book_id {
+        Some(id) => shared_tokio_runtime().block_on(PREPROCESSED_CACHE.clear_book(id)),
+        None => shared_tokio_runtime().block_on(PREPROCESSED_CACHE.clear()),
+    }
+}
+
 /// 最近一次 TXT 前台排版参数快照（book_id + 完整处理选项）。
 /// 预加载 load_fn 据此以同参重建相邻章分页写入 PAGINATION_CACHE——
 /// 保证预取缓存键与前台键逐字节一致（含 f32 bits 口径）
@@ -500,6 +519,7 @@ pub fn update_book_cleaning(
     // 章节偏移可能随重建变化，分页缓存全部失效
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
     clear_structured_pagination_cache_for_book(&book_id);
+    invalidate_preprocessed_cache(Some(book_id.as_str()));
     Ok(())
 }
 
@@ -634,39 +654,61 @@ fn process_and_layout_chapter_inner(
         return Ok(cached.pages);
     }
 
-    // 未命中：重活全部在锁外执行（quiet 回源，是否触发预热由调用方语义决定）
-    let raw_content = if allow_preload_trigger {
-        get_chapter_content(book_id.to_string(), chapter_index)?
-    } else {
-        get_chapter_content_quiet(book_id.to_string(), chapter_index)?
-    };
-    let chapter_title = {
-        let books = BOOKS.read().unwrap();
-        let handle = books.get(book_id)
-            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-        handle.book.chapters.get(chapter_index)
-            .map(|ch| ch.title.clone())
-            .unwrap_or_default()
-    };
-
-    let options = ProcessOptions {
-        book_name: String::new(),
-        title: chapter_title,
+    // M9.5-G：预处理结果缓存——命中则跳过取原文与整个预处理流水线。
+    // para_format_hash 置 0：段落格式化（PARAGRAPH_FORMAT_SETTINGS）在缓存
+    // 之后执行、不影响预处理输出，段落设置变更不应失效本缓存。
+    let pre_key = reader_core::cache::CacheKey {
+        book_id: book_id.to_string(),
         chapter_index,
-        remove_duplicate_title,
-        re_segment,
-        chinese_convert: match chinese_convert {
-            1 => Some(ChineseConvertType::S2T),
-            2 => Some(ChineseConvertType::T2S),
-            _ => None,
-        },
-        adapt_special_style: true,
-        apply_user_markings: false,
+        rules_hash: CacheKey::hash_process_options(
+            remove_duplicate_title,
+            re_segment,
+            chinese_convert,
+            rules_hash,
+            /*para_format_hash=*/ 0,
+        ),
     };
+    let processed = match shared_tokio_runtime().block_on(PREPROCESSED_CACHE.get(&pre_key)) {
+        Some(hit) => hit,
+        None => {
+            // 未命中：重活全部在锁外执行（quiet 回源，是否触发预热由调用方语义决定）
+            let raw_content = if allow_preload_trigger {
+                get_chapter_content(book_id.to_string(), chapter_index)?
+            } else {
+                get_chapter_content_quiet(book_id.to_string(), chapter_index)?
+            };
+            let chapter_title = {
+                let books = BOOKS.read().unwrap();
+                let handle = books.get(book_id)
+                    .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                handle.book.chapters.get(chapter_index)
+                    .map(|ch| ch.title.clone())
+                    .unwrap_or_default()
+            };
 
-    let preprocessor = get_preprocessor_for_rules(&rules);
-    let processed =
-        shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
+            let options = ProcessOptions {
+                book_name: String::new(),
+                title: chapter_title,
+                chapter_index,
+                remove_duplicate_title,
+                re_segment,
+                chinese_convert: match chinese_convert {
+                    1 => Some(ChineseConvertType::S2T),
+                    2 => Some(ChineseConvertType::T2S),
+                    _ => None,
+                },
+                adapt_special_style: true,
+                apply_user_markings: false,
+            };
+
+            let preprocessor = get_preprocessor_for_rules(&rules);
+            let processed =
+                shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
+            // 回填预处理结果（LRU 容量 20 章自淘汰，不落盘）
+            shared_tokio_runtime().block_on(PREPROCESSED_CACHE.put(pre_key, processed.clone()));
+            processed
+        }
+    };
 
     // M9 P4：段落格式化（缩进 + 重新分段），在预处理后、布局前
     let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
@@ -2162,6 +2204,7 @@ pub fn release_book(book_id: String) -> anyhow::Result<()> {
     // 两种格式的分页缓存都随书籍释放而失效。
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
     clear_structured_pagination_cache_for_book(&book_id);
+    invalidate_preprocessed_cache(Some(book_id.as_str()));
 
     Ok(())
 }
@@ -2559,6 +2602,7 @@ pub fn get_pagination_cache_stats() -> anyhow::Result<String> {
 pub fn clear_pagination_cache_for_book(book_id: String) -> anyhow::Result<()> {
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
     clear_structured_pagination_cache_for_book(&book_id);
+    invalidate_preprocessed_cache(Some(book_id.as_str()));
     Ok(())
 }
 
@@ -2566,6 +2610,7 @@ pub fn clear_pagination_cache_for_book(book_id: String) -> anyhow::Result<()> {
 pub fn clear_all_pagination_cache() -> anyhow::Result<()> {
     PAGINATION_CACHE.lock().unwrap().clear();
     STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
+    invalidate_preprocessed_cache(None);
     Ok(())
 }
 
@@ -2913,6 +2958,7 @@ pub async fn batch_process_chapters(
 pub fn clear_book_cache(book_id: String) -> anyhow::Result<()> {
     PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
     clear_structured_pagination_cache_for_book(&book_id);
+    invalidate_preprocessed_cache(Some(book_id.as_str()));
     Ok(())
 }
 
@@ -2920,6 +2966,7 @@ pub fn clear_book_cache(book_id: String) -> anyhow::Result<()> {
 pub fn clear_all_caches() -> anyhow::Result<()> {
     PAGINATION_CACHE.lock().unwrap().clear();
     STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
+    invalidate_preprocessed_cache(None);
     Ok(())
 }
 
@@ -3100,6 +3147,57 @@ mod tests {
 
     /// M6-S1：TXT 预加载真预热——load_fn 副作用（分页缓存回填）验证。
     /// 旧实现只读原始文本即丢弃、对缓存零贡献；本测试锁定「预热→命中」语义
+    /// M9.5-G：预处理缓存接入——para_format_hash 变更击穿分页缓存键后，
+    /// 同章重读应命中预处理缓存（预处理键不含 para_format_hash，
+    /// 段落格式化在缓存之后执行、不影响预处理输出）。
+    #[test]
+    fn preprocessed_cache_hit_and_para_format_neutrality() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+        let dir = std::env::temp_dir().join(format!("preproc_cache_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let txt_path = dir.join("preproc.txt");
+        std::fs::write(
+            &txt_path,
+            "第一章 起点\n\n正文内容第一段落。\n\n第二章 终点\n\n第二章节的正文内容。\n",
+        )
+        .unwrap();
+
+        let book_id =
+            parse_txt_file(txt_path.to_string_lossy().to_string(), None).expect("TXT 导入失败");
+
+        let read = |para_hash: u64| {
+            get_page_processed(
+                book_id.clone(),
+                0,
+                0,
+                360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+                "TestFont".to_string(),
+                false, false, 0, Vec::new(), None, 0.9, para_hash,
+            )
+            .expect("前台读取失败")
+        };
+
+        // 首次读取：预处理缓存 miss → 回填（若此前已有同键条目则为 hit，不影响断言）
+        let _ = read(0);
+        let stats_first = shared_tokio_runtime().block_on(PREPROCESSED_CACHE.stats());
+
+        // 换 para_format_hash → 分页缓存换键 miss → 深入到预处理层；
+        // 预处理键 para_format_hash 置 0 → 应命中
+        let _ = read(0x1234);
+        let stats_second = shared_tokio_runtime().block_on(PREPROCESSED_CACHE.stats());
+
+        assert!(
+            stats_second.hits > stats_first.hits,
+            "para_format_hash 变更后同章重读应命中预处理缓存（hits {} → {}）",
+            stats_first.hits,
+            stats_second.hits
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn preload_txt_warm_fills_pagination_cache() {
         let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());

@@ -115,6 +115,25 @@ impl PreprocessedCache {
         stats.size = 0;
     }
 
+    /// 清除指定书籍的所有缓存条目。
+    ///
+    /// M9.5-G：净化选项重建会变更章节偏移/原文而缓存键不变（键不含净化选项），
+    /// 该路径必须显式失效，否则产生陈旧命中。
+    pub async fn clear_book(&self, book_id: &str) {
+        let mut cache = self.cache.lock().await;
+        let mut stats = self.stats.lock().await;
+
+        let stale: Vec<CacheKey> = cache
+            .iter()
+            .filter(|(k, _)| k.book_id == book_id)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in stale {
+            cache.pop(&k);
+        }
+        stats.size = cache.len();
+    }
+
     /// Get cache statistics.
     pub async fn stats(&self) -> CacheStats {
         let stats = self.stats.lock().await;
@@ -281,6 +300,37 @@ mod tests {
 
         // Hit rate
         assert_eq!(stats.hit_rate(), 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_cache_clear_book() {
+        let cache = PreprocessedCache::with_capacity(4);
+        let key_a0 = CacheKey {
+            book_id: "bookA".to_string(),
+            chapter_index: 0,
+            rules_hash: 1,
+        };
+        let key_a1 = CacheKey {
+            book_id: "bookA".to_string(),
+            chapter_index: 1,
+            rules_hash: 1,
+        };
+        let key_b0 = CacheKey {
+            book_id: "bookB".to_string(),
+            chapter_index: 0,
+            rules_hash: 1,
+        };
+
+        cache.put(key_a0.clone(), "a0".to_string()).await;
+        cache.put(key_a1.clone(), "a1".to_string()).await;
+        cache.put(key_b0.clone(), "b0".to_string()).await;
+
+        cache.clear_book("bookA").await;
+
+        assert_eq!(cache.get(&key_a0).await, None);
+        assert_eq!(cache.get(&key_a1).await, None);
+        assert_eq!(cache.get(&key_b0).await, Some("b0".to_string()));
+        assert_eq!(cache.len().await, 1);
     }
 
     #[test]
