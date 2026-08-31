@@ -103,7 +103,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final distance = dx.abs();
 
     // 超过启动阈值才开始动画（避免微抖误触发）
-    if (distance > 8.0 && _composerKey.currentState?.isIdle == true) {
+    // M9.5-J：挂起中不再重调 startDrag（之前 100ms × N 重复 register）
+    if (distance > 8.0 &&
+        _composerKey.currentState?.isIdle == true &&
+        _composerKey.currentState?.hasPendingTurn != true) {
       final direction = dx > 0 ? PageDirection.prev : PageDirection.next;
       // 竖向意图压倒横向时不启动
       if (dy.abs() <= distance * 1.5) {
@@ -330,6 +333,10 @@ class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
   final _composerKey = GlobalKey<PageTurnComposerState>();
 
   bool get isIdle => _composerKey.currentState?.isIdle ?? true;
+
+  /// M9.5-J：是否已挂起待决手势。供 _onPointerMove 跳过重复 startDrag
+  bool get hasPendingTurn =>
+      _composerKey.currentState?.hasPendingTurn ?? false;
 
   void startDrag(PageDirection direction, Offset localTouch) {
     _composerKey.currentState?.onDragStart(direction, localTouch);

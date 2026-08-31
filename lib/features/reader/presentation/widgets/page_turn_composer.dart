@@ -57,6 +57,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 当前是否空闲（无拖拽/动画进行中）
   bool get isIdle => !_isActive;
 
+  /// M9.5-J：是否已挂起待决手势（无动画/拖拽但 FrameSet 未发布）。
+  /// 供 reader_page._onPointerMove 跳过重复 startDrag 调用。
+  bool get hasPendingTurn => _pendingDirection != null;
+
   // ── 待决手势（不变量 4：帧未就绪时挂起重试） ──
 
   PageDirection? _pendingDirection;
@@ -136,6 +140,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   void onDragStart(PageDirection direction, Offset localTouch) {
     // F1 守卫：动画播放中忽略新请求（防 dispose 正在 tick 的控制器）
     if (_isActive || _turnController?.isAnimating == true) return;
+    // M9.5-J：已有挂起手势则拒绝重入（同方向或反方向都算）。
+    // 之前每帧 pointer-move 都会过守卫，10 次同 register
+    // 把 store 端 _pendingTurn/epoch 反复覆盖，
+    // 永远等不到 retry success。J 项用 _pendingRetryCount 上限
+    // 兜底 + 此守卫避免无谓重入。
+    if (_pendingDirection != null) return;
 
     final result = _targetFrameFor(direction);
     readerTrace('turn.start', {
@@ -174,6 +184,21 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 拖拽结束：根据判定结果执行自动动画
   Future<void> onDragEnd({required bool shouldTurn}) async {
     if (!_isActive || _turnController == null) return;
+    // M9.5-J：挂起中收到 drag end（FrameSet 期间 gesture 中断）→ 走直翻保功能
+    // 不创建新 controller（避免与 listener retry 竞争）
+    if (_pendingDirection != null) {
+      final d = _pendingDirection!;
+      _clearPending(reason: 'end-during-pending');
+      readerTrace('turn.drop', {
+        'reason': 'end-during-pending',
+        'direction': d,
+        'shouldTurn': shouldTurn,
+      });
+      if (shouldTurn) {
+        await _directFlip(d);
+      }
+      return;
+    }
     // 互斥：上一次 turn.end 还在跑（断线重发/系统粘性 pointer up），拒绝重入。
     // 否则重复 _runAuto 会重置正在 ticking 的 controller，导致上一轮动画"复现"。
     if (_turnEndInFlight) return;
@@ -282,15 +307,39 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   // ── 待决手势管理 ──
 
+  /// M9.5-J：重试上限。同手势期间 _registerPending 调用 N 次仍等不到
+  /// ready → trace turn.drop 并走 _directFlip 保功能。
+  /// 之前实现靠"pointer-move 重试会终有一次成功"假设，但 FrameSet
+  /// 未发布时是死循环（100ms × N），手感"动画消失"主因。
+  static const int _pendingRetryLimit = 5;
+
+  /// M9.5-J：当前挂起的 registerPending 调用次数（同手势累计）
+  int _pendingRetryCount = 0;
+
   void _registerPending(
     PageDirection direction, {
     required bool isTap,
     required Offset touch,
   }) {
+    // M9.5-J：超上限后丢弃手势，保功能走 _directFlip。
+    // 之前 _pendingTimer 倒计时会被每次 register 重置（拖拽持续中
+    // 永远到不了 600ms），现在改用"同手势累计 register 次数"硬上限。
+    if (!isTap && _pendingRetryCount >= _pendingRetryLimit) {
+      readerTrace('turn.drop', {
+        'reason': 'retry-limit',
+        'retries': _pendingRetryCount,
+        'direction': direction,
+      });
+      _clearPending(reason: 'retry-limit');
+      _directFlip(direction);
+      return;
+    }
+
     _pendingDirection = direction;
     _pendingIsTap = isTap;
     _pendingTouch = touch;
     _pendingSince = DateTime.now();
+    if (!isTap) _pendingRetryCount++;
     final store = ref.read(readerRenderStoreProvider);
     store.registerPendingTurn(direction, isTap: isTap);
     _pendingTimer?.cancel();
@@ -318,6 +367,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _pendingTimer = null;
     _pendingDirection = null;
     _pendingSince = null;
+    // M9.5-J：每次挂起生命周期结束重置重试计数
+    _pendingRetryCount = 0;
     ref.read(readerRenderStoreProvider).cancelPendingTurn(reason);
   }
 
