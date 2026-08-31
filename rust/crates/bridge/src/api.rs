@@ -1,7 +1,7 @@
 use crate::{BookHandle, ChapterInfo, PageInfo, BOOKS};
 use crate::diagnostics::{diagnose_file_encoding, diagnose_chapter_content};
 use book_parser::{BookParser, BookFormat, ContentCleaner, ConvertMode, ParagraphMode, CleanOptions};
-use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, GlyphCache, Page};
+use layout_engine::{LayoutConfig, LayoutEngine, EdgeInsets, FontManager, AdvancedGlyphCache, Page};
 use reader_core::{
     ContentPreprocessor, ProcessOptions, ChineseConvertType, ReplaceRule, RuleType,
     PaginationCache, CacheKey, CachedChapterPages,
@@ -30,8 +30,29 @@ static FONT_MANAGER: Lazy<Arc<Mutex<FontManager>>> = Lazy::new(|| {
 // 消除每章新建 LayoutEngine → 新建 GlyphCache 的冷启动开销。
 // GlyphCache 内部键含 font_name + font_size_bits，不同字体/字号自然隔离；
 // load_font_file/load_font_data 会 clear() 防容量污染。
-static SHARED_GLYPH_CACHE: Lazy<Mutex<GlyphCache>> =
-    Lazy::new(|| Mutex::new(GlyphCache::with_capacity(10_000)));
+//
+// M9.4-F：升级为 AdvancedGlyphCache，首次取用时预热 GB2312 一级常用字
+// （一次 batch_measure 单锁批量测量，约 <50ms）。预热键与热路径对齐：
+// - Dart 端 getPageProcessed/getPageCountProcessed 的 fontName 默认参数是
+//   'default'（book_service.dart），reader_provider 全部调用点未覆盖
+//   → 热路径 GlyphKey.font_name 恒为 "default"
+// - Dart 端默认阅读字号 18.0 = LayoutConfig::default().font_size
+// 因此用 LayoutConfig::default() 的 (font_name, font_size) 预热可全量命中。
+// 用户改字号/触发字体 clear() 后本次预热条目失效属预期——只优化默认启动态。
+// 注：原 plan 设想在 BookService::init() 触发，但 Rust 侧无该入口
+// （Dart 的 BookService.init 仅调 RustLib.init），故收敛到首次取用时机。
+static SHARED_GLYPH_CACHE: Lazy<Mutex<AdvancedGlyphCache>> = Lazy::new(|| {
+    let cache = AdvancedGlyphCache::with_capacity(10_000, FONT_MANAGER.clone());
+    let cfg = LayoutConfig::default();
+    cache.prewarm(&cfg.font_name, cfg.font_size);
+    log::info!(
+        "AdvancedGlyphCache prewarmed: {} glyphs (font={}, size={})",
+        cache.stats().len,
+        cfg.font_name,
+        cfg.font_size
+    );
+    Mutex::new(cache)
+});
 
 // Global content preprocessor（无替换规则的默认实例）
 static CONTENT_PREPROCESSOR: Lazy<Arc<ContentPreprocessor>> = Lazy::new(|| {
@@ -219,8 +240,15 @@ fn effective_paragraph_spacing(font_size: f32) -> f32 {
 /// 加载失败而崩溃。FontManager 内置 Noto Sans CJK SC 默认字体，
 /// 即使所有 load_font_file 失败，仍有可用字体兜底。
 pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()> {
-    let mut manager = FONT_MANAGER.lock().unwrap();
-    match manager.load_font_from_file(font_name, &font_path) {
+    // M9.4-F：必须先释放 FONT_MANAGER 锁再取 SHARED_GLYPH_CACHE 锁——
+    // SHARED 的 Lazy 初始化会 prewarm（内部 lock FONT_MANAGER），
+    // 持 FONT_MANAGER 锁的同时取 SHARED 锁构成 ABBA 死锁。
+    // 锁序约定：只允许 FONT_MANAGER ← SHARED 方向嵌套，禁止反向。
+    let loaded = {
+        let mut manager = FONT_MANAGER.lock().unwrap();
+        manager.load_font_from_file(font_name, &font_path)
+    };
+    match loaded {
         Ok(()) => {
             // M8-P4：字体变更清共享字形缓存，防旧字体字形混入
             SHARED_GLYPH_CACHE.lock().unwrap().clear();
@@ -235,8 +263,12 @@ pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()
 
 /// Load font from byte array
 pub fn load_font_data(font_name: String, font_data: Vec<u8>) -> anyhow::Result<()> {
-    let mut manager = FONT_MANAGER.lock().unwrap();
-    manager.load_font(font_name, font_data)?;
+    // M9.4-F：锁序约定同 load_font_file——先释放 FONT_MANAGER 再取 SHARED
+    let result = {
+        let mut manager = FONT_MANAGER.lock().unwrap();
+        manager.load_font(font_name, font_data)
+    };
+    result?;
     // M8-P4：字体变更清共享字形缓存
     SHARED_GLYPH_CACHE.lock().unwrap().clear();
     Ok(())
@@ -253,8 +285,12 @@ pub fn get_font_count() -> usize {
 /// name 必须是已 load_font_* 加载过的字体名，否则抛错。
 /// 切换后清共享字形缓存防旧字体字形混入。
 pub fn set_default_font(font_name: String) -> anyhow::Result<()> {
-    let mut manager = FONT_MANAGER.lock().unwrap();
-    manager.set_default_font(&font_name)?;
+    // M9.4-F：锁序约定同 load_font_file——先释放 FONT_MANAGER 再取 SHARED
+    let result = {
+        let mut manager = FONT_MANAGER.lock().unwrap();
+        manager.set_default_font(&font_name)
+    };
+    result?;
     SHARED_GLYPH_CACHE.lock().unwrap().clear();
     Ok(())
 }
@@ -642,8 +678,8 @@ fn process_and_layout_chapter_inner(
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    // M8-P4：跨章复用共享字形缓存
-    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
+    // M8-P4：跨章复用共享字形缓存（M9.4-F：O(1) Arc bump，共享 prewarm 条目）
+    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().glyph_cache();
     let engine = LayoutEngine::with_cache(config.clone(), font_manager, glyph_cache);
     let pages = std::sync::Arc::new(engine.layout_text(&processed, chapter_index)?);
 
@@ -1754,8 +1790,8 @@ fn process_structured_chapter(
     blocks_to_layout_items(&content.blocks, &mut items);
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    // M8-P4：跨章复用共享字形缓存
-    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().clone();
+    // M8-P4：跨章复用共享字形缓存（M9.4-F：O(1) Arc bump，共享 prewarm 条目）
+    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().glyph_cache();
     let engine = LayoutEngine::with_cache(params.config.clone(), font_manager, glyph_cache);
     let pages = engine.layout_items(&items, chapter_index)?;
 
@@ -3046,6 +3082,21 @@ static PRELOAD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// M9.4-F：SHARED_GLYPH_CACHE 首次取用即触发 prewarm，
+    /// 且热路径键（font_name="default", font_size=18.0）直接命中预热条目
+    #[test]
+    fn shared_glyph_cache_prewarmed_and_shared() {
+        let cache = SHARED_GLYPH_CACHE.lock().unwrap();
+        assert!(cache.stats().len > 0, "首次取用应已触发 prewarm");
+
+        // glyph_cache() 为 O(1) Arc 共享克隆——prewarm 条目对热路径可见
+        let key = layout_engine::GlyphKey::new('的', 18.0, "default");
+        assert!(
+            cache.glyph_cache().get(&key).is_some(),
+            "热路径键应命中预热条目"
+        );
+    }
 
     /// M6-S1：TXT 预加载真预热——load_fn 副作用（分页缓存回填）验证。
     /// 旧实现只读原始文本即丢弃、对缓存零贡献；本测试锁定「预热→命中」语义

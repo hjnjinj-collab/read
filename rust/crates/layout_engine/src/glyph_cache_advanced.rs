@@ -117,6 +117,15 @@ impl AdvancedGlyphCache {
         metrics.iter().map(|m| m.width).sum()
     }
 
+    /// 获取内部字形缓存的共享克隆（O(1) Arc 引用计数）
+    ///
+    /// LayoutEngine::with_cache 经此方法接入 SHARED_GLYPH_CACHE：
+    /// 克隆体共享同一 `Arc<Mutex<CacheInner>>`，prewarm 填充的字形
+    /// 对前台排版热路径直接可见（M9.4-F）。
+    pub fn glyph_cache(&self) -> GlyphCache {
+        self.cache.clone()
+    }
+
     /// 获取缓存统计
     pub fn stats(&self) -> CacheStats {
         self.cache.stats()
@@ -206,5 +215,28 @@ mod tests {
         assert_eq!(stats.hits, 0);
         assert_eq!(stats.misses, 0);
         assert_eq!(stats.hit_rate, 0.0);
+    }
+
+    /// M9.4-F：prewarm 应填充缓存，且热路径键（font_name="default"）可命中。
+    /// SHARED_GLYPH_CACHE 的预热键取 LayoutConfig::default()，此处同参验证。
+    #[test]
+    fn test_prewarm_populates_cache() {
+        let font_manager = Arc::new(Mutex::new(FontManager::new_with_embedded_default()));
+        let cache = AdvancedGlyphCache::with_capacity(10_000, font_manager);
+
+        assert_eq!(cache.stats().len, 0);
+        cache.prewarm("default", 18.0);
+
+        let stats = cache.stats();
+        assert!(stats.len > 0, "prewarm 后缓存应有条目");
+
+        // 热路径同键查询应命中（get_char_width 走缓存路径）
+        let width = cache.get_char_width("default", 18.0, '的');
+        assert!(width > 0.0, "预热后 '的' 宽度应 > 0");
+
+        // glyph_cache() 共享克隆应可见预热条目（O(1) Arc bump 语义）
+        let shared = cache.glyph_cache();
+        let key = GlyphKey::new('的', 18.0, "default");
+        assert!(shared.get(&key).is_some(), "共享克隆应命中预热条目");
     }
 }
