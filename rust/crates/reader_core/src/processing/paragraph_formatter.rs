@@ -79,6 +79,9 @@ impl ParagraphFormatter {
             return String::new();
         }
 
+        // P4 智能分段扩展：诗节行预扫描（连续短行 run ≥3 行 → 诗歌）
+        let poetry_lines = detect_poetry_lines(&lines);
+
         let mut paragraphs: Vec<String> = Vec::new();
         let mut current: Vec<String> = Vec::new();
 
@@ -91,6 +94,7 @@ impl ParagraphFormatter {
             let is_short = trimmed.chars().count() < 20 && !is_empty;
             let is_chapter = is_chapter_marker(trimmed);
             let is_dialogue = is_dialogue_line(trimmed);
+            let is_poetry = poetry_lines[i];
             let prev_was_empty = i > 0 && lines[i - 1].trim().is_empty();
 
             // 空行 = 硬边界
@@ -99,6 +103,16 @@ impl ParagraphFormatter {
                     paragraphs.push(current.join(""));
                     current.clear();
                 }
+                continue;
+            }
+
+            // P4 引用行（`>`/`＞` 前缀，论坛体/邮件体）：去前缀 + 独立成段
+            if let Some(quote_body) = strip_quote_prefix(trimmed) {
+                if !current.is_empty() {
+                    paragraphs.push(current.join(""));
+                    current.clear();
+                }
+                paragraphs.push(quote_body);
                 continue;
             }
 
@@ -111,6 +125,17 @@ impl ParagraphFormatter {
                 current.push(trimmed.to_string());
                 paragraphs.push(current.join(""));
                 current.clear();
+                continue;
+            }
+
+            // P4 诗节行：独立成段（不并入前段、不吸收后行）——
+            // 优先级高于缩进/短行规则（诗歌行常顶格无缩进）
+            if is_poetry {
+                if !current.is_empty() {
+                    paragraphs.push(current.join(""));
+                    current.clear();
+                }
+                paragraphs.push(trimmed.to_string());
                 continue;
             }
 
@@ -136,6 +161,14 @@ impl ParagraphFormatter {
 
             // 普通行：累加
             current.push(trimmed.to_string());
+
+            // P4 对话规则强化：完整闭合的对话行（「…」/“…”）立即结束段落，
+            // 后续叙述行不并入（防止对白与叙述黏段）。未闭合（「…」她说）
+            // 维持原合并行为。
+            if is_dialogue && ends_with_closing_quote(trimmed) {
+                paragraphs.push(current.join(""));
+                current.clear();
+            }
         }
 
         if !current.is_empty() {
@@ -215,10 +248,73 @@ fn is_chapter_marker(line: &str) -> bool {
 fn is_dialogue_line(line: &str) -> bool {
     line.starts_with('「')
         || line.starts_with('『')
-        || line.starts_with('"')
+        || line.starts_with('“')
+        || line.starts_with('”')
         || line.starts_with('"')
         || line.starts_with('（')
         || line.starts_with('(')
+}
+
+/// P4：对话行是否完整闭合（「…」/『…』/“…”/”…“ 结尾）——
+/// 闭合对话立即结束段落，未闭合（「…」她说）维持合并
+fn ends_with_closing_quote(line: &str) -> bool {
+    line.ends_with('」') || line.ends_with('』') || line.ends_with('”') || line.ends_with('"')
+}
+
+/// P4：引用行检测——`>` / `＞` 前缀（论坛体/邮件体），返回去前缀正文。
+/// 纯前缀行（仅有 ">"）返回空串（产生空段，layout 端空行跳过，无害）。
+fn strip_quote_prefix(line: &str) -> Option<String> {
+    let body = line.strip_prefix('>').or_else(|| line.strip_prefix('＞'))?;
+    Some(body.trim_start().to_string())
+}
+
+/// P4：诗节行检测——连续短行 run（≥3 行）标记为诗歌。
+///
+/// 候选特征：每行 2-16 字、不以强句末标点结尾（。！？；…——逗号结尾
+/// 仍算候选，诗句常逗号收行）、非对话/章节/引用行；空行或长行打断 run。
+/// 保守阈值防误伤：正常叙述的硬换行碎行若恰成 3+ 连短行也会按诗节
+/// 呈现（逐行独立），对劣质换行原文同样是合理呈现。
+fn detect_poetry_lines(lines: &[&str]) -> Vec<bool> {
+    let mut flags = vec![false; lines.len()];
+    // Some(is_candidate)：None = 空行（打断 run）
+    let classify = |l: &str| -> Option<bool> {
+        let t = l.trim();
+        if t.is_empty() {
+            return None;
+        }
+        if is_chapter_marker(t) || is_dialogue_line(t) || strip_quote_prefix(t).is_some() {
+            return Some(false);
+        }
+        let n = t.chars().count();
+        Some(n >= 2 && n <= 16 && !t.ends_with(['。', '！', '？', '；', '…']))
+    };
+    let mut run_start: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        match classify(line) {
+            None | Some(false) => {
+                if let Some(s) = run_start.take() {
+                    if i - s >= 3 {
+                        for f in flags.iter_mut().take(i).skip(s) {
+                            *f = true;
+                        }
+                    }
+                }
+            }
+            Some(true) => {
+                if run_start.is_none() {
+                    run_start = Some(i);
+                }
+            }
+        }
+    }
+    if let Some(s) = run_start {
+        if lines.len() - s >= 3 {
+            for f in flags.iter_mut().skip(s) {
+                *f = true;
+            }
+        }
+    }
+    flags
 }
 
 #[cfg(test)]
@@ -460,5 +556,47 @@ mod tests {
         let paras: Vec<&str> = result.split("\n\n").collect();
         // 短行可能被切分为多个段落
         assert!(paras.len() >= 1, "诗歌至少应有一个段落");
+    }
+
+    // ===== P4 智能分段扩展：诗歌/对话/引用 =====
+
+    #[test]
+    fn smart_poetry_lines_stay_independent() {
+        let formatter = ParagraphFormatter::new(settings(ReParagraphMode::Smart, false, 0));
+        let input = "他望着窗外出神，久久没有说话。\n床前明月光\n疑是地上霜\n举头望明月\n低头思故乡\n他想起了故乡的很多往事，一时难以平静。";
+        let out = formatter.format(input);
+        let paras: Vec<&str> = out.split("\n\n").collect();
+        // 诗节 4 行各自独立段（不并入前后长段）
+        assert!(paras.contains(&"床前明月光"), "诗行应独立成段（实得 {:?}）", paras);
+        assert!(paras.contains(&"疑是地上霜"));
+        assert!(paras.contains(&"举头望明月"));
+        assert!(paras.contains(&"低头思故乡"));
+        assert_eq!(paras.len(), 6);
+        // 前后长段不被诗行黏连
+        assert!(paras[0].starts_with("他望着"));
+        assert_eq!(paras[5], "他想起了故乡的很多往事，一时难以平静。");
+    }
+
+    #[test]
+    fn smart_quote_lines_stripped_and_independent() {
+        let formatter = ParagraphFormatter::new(settings(ReParagraphMode::Smart, false, 0));
+        let input = "正文开头\n> 这是引用的内容\n> 第二行引用\n正文继续";
+        let out = formatter.format(input);
+        let paras: Vec<&str> = out.split("\n\n").collect();
+        assert_eq!(paras[0], "正文开头");
+        assert!(paras.contains(&"这是引用的内容"), "引用行应去前缀独立成段（实得 {:?}）", paras);
+        assert!(paras.contains(&"第二行引用"));
+        assert_eq!(paras[3], "正文继续");
+    }
+
+    #[test]
+    fn smart_closed_dialogue_ends_paragraph() {
+        let formatter = ParagraphFormatter::new(settings(ReParagraphMode::Smart, false, 0));
+        // 第二行 >20 字（非短行）：无规则时会并入对话段
+        let input = "「你好。」\n他转身离开，留下一个背影，从此再也没有回来过。";
+        let out = formatter.format(input);
+        let paras: Vec<&str> = out.split("\n\n").collect();
+        assert_eq!(paras.len(), 2, "闭合对话应独立成段（实得 {:?}）", paras);
+        assert_eq!(paras[0], "「你好。」");
     }
 }

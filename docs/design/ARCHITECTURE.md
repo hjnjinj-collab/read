@@ -713,6 +713,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A19 | 翻页动画家族：水波纹 v16.10 + 坍塌溶解 + 快照按页 LRU + 手势互斥/排队治理（权威文档 PAGE_TURN_ANIMATION_ARCHITECTURE.md） | ✅ 2026-09-04 |
 | A20 | P2 排版批次：kinsoku 收口扩表 + 两端对齐 justify + EPUB margin-bottom/line-height 物化 | ✅ 2026-09-04 |
 | A21 | P3 行尾标点压缩悬挂：断行预算压缩 + 悬挂渲染 + 设置开关 | ✅ 2026-09-04 |
+| A22 | P4 性能激活（缓存共享/预热键对齐/孤寡行保护/SmartPaginator 退役）+ 智能分段扩展 | ✅ 2026-09-04 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -777,12 +778,38 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   对悬挂行自动豁免（零特判）；行首维持既有避头尾 pull-back 不动。
 - **设置**：`ParagraphFormatSettings.punctuation_compress`（默认关）+ FFI +
   持久化 + 设置面板开关 + para_format_hash 纳入。行中邻接挤压（segments
-  细化 + letterSpacing 负值合并）暂缓，实测观感满意后再评估。
+  细化 + letterSpacing 负值合并）经用户拍板**彻底砍掉**，勿再评估。
 
-**所有 A1–A21 + APK 全线落地**。下一阶段候选：
+**A22 详细说明（P4 性能激活 + 智能分段扩展，2026-09-04，用户实测验收）**：
+
+- **structured 路径字形缓存共享**：新构造器 `with_cache_and_measure`，
+  `build_layout_engine` 升级双缓存注入——此前 EPUB 排版每章全新
+  GlyphCache 全冷（首排逐字 ttf 查询），prewarm 字形现对全部排版入口可见。
+- **预热键对齐（修复隐性历史 bug）**：SHARED 预热键 `("default",18)` vs
+  热路径键（Dart 传入 `"ReaderSerif"`）不匹配——GB2312 预热对热路径
+  **完全无效**（M9.4-F 只验证了缓存填充未验证命中）。修复 = ① Dart 启动
+  loadFontData('ReaderSerif') 向 Rust 注册热路径字体名；② 三个字体 FFI
+  clear() 后按新字体重建预热；③ `last_prewarm` 去重防连续调用重复 40ms。
+- **孤行/寡行保护**：盘点确认 TXT 路径 M9.2 已有（行级分页决策块），
+  缺口仅 EPUB styled 路径 → 段首一次性决策本页容行数（寡行：拆分给下页
+  残留单行 → 本页少放一行；孤行：本页仅容 <2 行且页有足够行 → 整段推下页），
+  对齐 TXT 口径。**教训：决策变量在流式循环内逐轮重置则 cap 失效——
+  一次性决策必须提到循环外**。
+- **SmartPaginator 退役（A22 定案）**：不接入生产管线——与 M9.2 行级分页
+  职责重叠、后处理重分组触及进度锚点连续性（用户确认锚点安全方案）；
+  avoid_orphan/avoid_widow 字段在本模块内从未被消费（空壳）；模块保留
+  作检测器参考与测试基线。parallel 维持跳过（M9.3 后预热仅单章，rayon 零收益）。
+- **智能分段扩展（挂现有"重新分段=智能分段"开关，零 FFI 变更）**：
+  ① 诗节行——连续 ≥3 短行 run（2-16 字、无句末标点、非对话/章节/引用）
+  独立成段不并入前后长段；② 引用行——`>`/`＞` 前缀去前缀独立成段；
+  ③ 对话闭合——「…」完整闭合立即断段，未闭合（「…」她说）维持合并。
+  用户拍板：不加新设置项，避免 FFI 签名再膨胀；未来要开关时一次换
+  struct 传参。
+
+**所有 A1–A22 + APK 全线落地**。下一阶段候选：
 - P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
-- P2：诗歌/对话/引用智能分段（挂接规则扩展点）
-- P2：激活 SmartPaginator / parallel / AdvancedGlyphCache 至 bridge 热路径
+- P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
+- P2：性能激活已收官（A22：缓存共享 ✅ / 预热键对齐 ✅ / SmartPaginator 退役定案 / parallel 维持跳过）
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
 - P3：动画域清理（revealPageImage 字段 / buildSimulation 死代码 / RipplePainter v15 fallback 删除评估）
 - P3：Android 真机验证动画体系（手势坐标/dpr/toImage 性能）
