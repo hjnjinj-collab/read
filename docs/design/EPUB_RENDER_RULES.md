@@ -109,6 +109,7 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
 | background-size / background-position | PageBackground.size / .position | cover→Cover；contain→Contain；百分比/两值→Stretch；position 关键字原文透传 |
 | margin | Table.margin_top_percent（仅 top 的 %）；**Paragraph.spacing_after_em（margin-bottom，A20）**；盒模型简写展开为四长键 | `margin:20% 0 0 auto` → margin-top=20% 生效；**margin-bottom em/%/px/pt → em 倍数（非继承属性，仅自身声明），布局期与用户段距取 max**；其余方向忽略 |
 | line-height | Paragraph.line_height（A20） | **继承属性**（self_or_inherited）；无单位数字 `1.8`/`200%`/em 直接为倍率，px/pt÷基准字号折算；**书内显式声明优先、未声明用用户全局 line_height_multiplier**（与 text-indent 的"用户覆盖"语义相反） |
+| 行尾标点压缩 | 断行宽度预算（A21，用户开关默认关） | 非属性物化——判满失败且行尾字符为闭合类标点时按 0.5 倍宽计入预算收进行尾；渲染端全宽绘制自然悬挂出右缘；记录宽/上报宽保持 raw（悬挂行跳过 content_width 钳制，justify 自动豁免） |
 | height / padding-* | （解析但未消费） | 预留 |
 
 ### 2.4 继承语义

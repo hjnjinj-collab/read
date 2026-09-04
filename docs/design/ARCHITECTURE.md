@@ -712,6 +712,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A18 | MeasureCache 架构与左右边距修复（M10-B/M11/M12） | ✅ 2026-09-02 |
 | A19 | 翻页动画家族：水波纹 v16.10 + 坍塌溶解 + 快照按页 LRU + 手势互斥/排队治理（权威文档 PAGE_TURN_ANIMATION_ARCHITECTURE.md） | ✅ 2026-09-04 |
 | A20 | P2 排版批次：kinsoku 收口扩表 + 两端对齐 justify + EPUB margin-bottom/line-height 物化 | ✅ 2026-09-04 |
+| A21 | P3 行尾标点压缩悬挂：断行预算压缩 + 悬挂渲染 + 设置开关 | ✅ 2026-09-04 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -759,8 +760,27 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   "用户覆盖"语义相反，样式保真）；表格单元格同享；重新分段切分后每段继承
   原段行高（段级属性）。
 
-**所有 A1–A20 + APK 全线落地**。下一阶段候选：
-- P2：标点压缩/挤压（需测量层配合，justify 后续）
+**A21 详细说明（P3 行尾标点压缩悬挂，2026-09-04，用户实测验收）**：
+
+- **语义定案**：压缩只作用于 Rust 断行的**宽度预算**（判满比较点），
+  渲染端 Dart 以全宽字形原样绘制 → 行尾标点自然悬挂出右缘约半个字宽
+  （悬挂语义，用户确认观感可接受）。ab_glyph 无法应用 GSUB halt 特性 →
+  FontFeature.halt 方案双引擎脱钩，否决。
+- **接入点**：oracle 路径 find_longest_fit 判满后压缩延伸（下一字符可压缩
+  且 w_full − discount ≤ max+eps → 多吃一字）；styled 判满分支压缩接受并
+  立即 flush（**被压缩字符恒为行尾字符**不变量）。折扣按 Skia 单字符自然宽
+  ×(1−0.5) 计，MeasureCache 只存 raw 整串宽——M12 红线不破。
+- **关键坑**：M12 必修3 的 `width.min(content_width)` 钳制与悬挂冲突——
+  钳制后 Dart 端 2% 超宽检查触发整行 canvas.scale 压小而非悬挂。修复 =
+  `report_line_width` 悬挂行跳过钳制上报 raw（skiaW==rustW 检查天然通过）。
+- **记录口径**：pieces/LaidLine.width 保持 raw → justify_gap 的 slack≤0
+  对悬挂行自动豁免（零特判）；行首维持既有避头尾 pull-back 不动。
+- **设置**：`ParagraphFormatSettings.punctuation_compress`（默认关）+ FFI +
+  持久化 + 设置面板开关 + para_format_hash 纳入。行中邻接挤压（segments
+  细化 + letterSpacing 负值合并）暂缓，实测观感满意后再评估。
+
+**所有 A1–A21 + APK 全线落地**。下一阶段候选：
+- P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
 - P2：诗歌/对话/引用智能分段（挂接规则扩展点）
 - P2：激活 SmartPaginator / parallel / AdvancedGlyphCache 至 bridge 热路径
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
