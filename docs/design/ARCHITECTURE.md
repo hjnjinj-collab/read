@@ -1,9 +1,9 @@
 # 架构设计：端到端处理框架
 
-> 更新: 2026-09-02
+> 更新: 2026-09-04
 > 地位: 本文档是当前架构的**权威描述**，以代码实际状态为准。
 > 视角: **主流程主线**——从应用启动到阅读翻页的完整链路；按模块查代码的速查表见 §11。
-> 上一版（2026-08-29）覆盖到 A17/M9；本次更新到 **A18/M10-B/M11/M12 MeasureCache 架构与左右边距修复**。
+> 上一版（2026-09-02）覆盖到 A18/M10-B/M11/M12；本次更新到 **A19 翻页动画家族（水波纹 v16.10 / 坍塌溶解 / 快照按页 LRU / 手势互斥治理）**，动画域权威文档见 [PAGE_TURN_ANIMATION_ARCHITECTURE.md](./PAGE_TURN_ANIMATION_ARCHITECTURE.md)。
 
 ---
 
@@ -73,11 +73,12 @@ Dart `ReaderSerif`（rootBundle 加载 assets/fonts/NotoSansSC-Regular.otf）。
 │ │       + 跨章共享 GlyphCache + Dart PageFrame 体系（M9）              │    │
 │ └────────────────────────────────────────────────────────────────────┘  │
 │   │                                                                      │
-│ ┌─ 阶段五 渲染与翻页（PageFrame 体系，M9）──────────────────────────┐    │
+│ ┌─ 阶段五 渲染与翻页（PageFrame 体系，M9 + 动画家族 A19）──────────┐    │
 │ │ ReaderProvider: _prepareAndPublishFrameSet → FrameSet 原子发布       │    │
 │ │ ReaderRenderStateStore: 三槽 (current/previous/next) FrameSlot      │    │
-│ │ PageTurnComposer: 手势门控 (Ready/OutOfRange/Wait) + pending 重试   │    │
-│ │ PageTurnController → CurlPainter (required Listenable repaint)       │    │
+│ │ PageTurnComposer: 门控(Ready/OutOfRange/Wait) + _startTurnAnimated  │    │
+│ │   四模式: simulation卷曲 / verticalScroll / ripple水波纹 / collapse │    │
+│ │   快照按页 LRU(8) + 串行链 + 排队互斥（详见动画架构文档）           │    │
 │ │ PageContentRenderer: 文字直绘 + 图片查 ui.Image                      │    │
 │ └────────────────────────────────────────────────────────────────────┘  │
 │   │                                                                      │
@@ -455,9 +456,13 @@ FrameSlot 四态：ready / outOfRange / failed / pending（永不静默置 null�
 | `lib/features/reader/presentation/providers/page_frame.dart` | FrameIdentity/ResourceManifest/PageFrame/FrameSlot/FrameSet 不可变数据类 |
 | `lib/features/reader/presentation/providers/reader_render_state.dart` | ReaderRenderStateStore 框架（5 个核心方法） |
 | `lib/features/reader/presentation/providers/reader_provider.dart` | ReaderNotifier：FrameSet 发布协议（_prepareAndPublishFrameSet / adopt 双道校验 / _invalidateFrames） |
-| `lib/features/reader/presentation/widgets/page_turn_composer.dart` | 手势门控 + pending 重试 + PageFrame 升格 |
+| `lib/features/reader/presentation/widgets/page_turn_composer.dart` | 手势门控 + pending 重试 + PageFrame 升格 + **_startTurnAnimated 启动封装（A19）** |
 | `lib/features/reader/presentation/widgets/page_turn/curl_painter.dart` | CurlPainter（required Listenable repaint） |
 | `lib/features/reader/presentation/services/book_image_store.dart` | LRU 64 + pin + prewarmManifest + failed 重试 |
+
+### 6.5 翻页动画家族（A19，2026-09-04）
+
+四模式（simulation / verticalScroll / ripple / collapse）+ 统一启动封装 `_startTurnAnimated`（快照就绪门控）+ 按页 LRU 快照缓存 + 排队互斥治理。**权威文档：[PAGE_TURN_ANIMATION_ARCHITECTURE.md](./PAGE_TURN_ANIMATION_ARCHITECTURE.md)**（分层架构 / 缓存体系 / 工程硬约束 / 诊断 trace 全集）。
 
 ---
 
@@ -657,7 +662,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | **lib/core/database** | `lib/core/database/` | drift 数据库：书架 (Books) / 进度 (ReadingProgress) / 书签 (Bookmarks) |
 | **lib/features/reader/providers** | `lib/features/reader/presentation/providers/` | reader_provider.dart (Riverpod Notifier) / reader_render_state.dart (FrameSet store) / page_frame.dart (不可变数据类) |
 | **lib/features/reader/widgets** | `lib/features/reader/presentation/widgets/` | page_turn_composer.dart (手势门控 + pending 重试) / curl_painter.dart (Listenable repaint) / reader_page_widget.dart (PageContentRenderer) / reader_settings_dialog.dart (含字体选择) / reader_menu.dart / chapter_list_dialog.dart |
-| **lib/features/reader/widgets/page_turn** | `lib/features/reader/presentation/widgets/page_turn/` | curl_painter / page_turn_controller / page_turn_gesture / page_turn_types / scroll_turn_controller / simulation_turn_controller |
+| **lib/features/reader/widgets/page_turn** | `lib/features/reader/presentation/widgets/page_turn/` | curl_painter / ripple_painter(_v16) / collapse_painter / page_turn_controller（turnDuration + .orCancel）/ page_turn_gesture / page_turn_types（PageTurnMode×4 + PageTurnSpeed 三档）/ simulation·scroll·ripple·collapse_turn_controller / block_collapse·ripple_shredder.frag |
 | **lib/features/reader/services** | `lib/features/reader/presentation/services/` | book_image_store.dart (LRU 64 + pin + prewarmManifest + failed 退避重试) |
 
 ---
@@ -705,6 +710,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A16 | TXT 翻页性能与预加载治理（M9.3） | ✅ 2026-08-29 |
 | A17 | 字体架构用户可选（M9 字体重写） | ✅ 2026-08-29 |
 | A18 | MeasureCache 架构与左右边距修复（M10-B/M11/M12） | ✅ 2026-09-02 |
+| A19 | 翻页动画家族：水波纹 v16.10 + 坍塌溶解 + 快照按页 LRU + 手势互斥/排队治理（权威文档 PAGE_TURN_ANIMATION_ARCHITECTURE.md） | ✅ 2026-09-04 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -728,11 +734,16 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 **问题根源**：ttf-parser hmtx ≠ Skia HarfBuzz 整形后宽度 → 左右边距不对称  
 **最终效果**：rustW ≈ skiaW（偏差 ≤ 1px），左右边距精准对称
 
-**所有 A1–A18 + APK 全线落地**。下一阶段候选：
-- P1：CJK 避头尾与行首行尾禁则（A14 已部分实现，全量收口）
-- P1：两端对齐（行内 justify pass）
+**所有 A1–A19 + APK 全线落地**。下一阶段候选：
+- P1：设置持久化（翻页模式/速度/字体——当前全部内存态，重启回默认）
+- P1：坍塌动画参数设置化（阴影色 / 崩解节奏 / 方块大小 / 中心区阈值）
+- P1：暗黑主题（PageContentRenderer.paperColor 硬编码，无主题字段）
+- P2：CJK 避头尾与行首行尾禁则（A14 已部分实现，全量收口）
+- P2：两端对齐（行内 justify pass）
 - P2：诗歌/对话/引用智能分段（挂接规则扩展点）
 - P2：激活 SmartPaginator / parallel / AdvancedGlyphCache 至 bridge 热路径
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
+- P3：动画域清理（revealPageImage 字段 / buildSimulation 死代码 / RipplePainter v15 fallback 删除评估）
+- P3：Android 真机验证动画体系（手势坐标/dpr/toImage 性能）
 - P4：首字下沉、竖排（远期）
 - 字体：可调字号/行距/字重的预览滑杆、字体持久化（重启自动恢复）
