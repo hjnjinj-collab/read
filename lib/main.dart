@@ -40,6 +40,7 @@ void main() async {
       reParagraphMode: settings.reParagraphMode,
       smartSplitThreshold: settings.smartSplitThreshold,
       aggressiveSplitThreshold: settings.aggressiveSplitThreshold,
+      justify: settings.justify,
     );
   } catch (_) {}
 

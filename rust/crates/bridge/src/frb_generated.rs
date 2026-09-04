@@ -2943,6 +2943,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
             let api_re_paragraph_mode = <u8>::sse_decode(&mut deserializer);
             let api_smart_split_threshold = <u32>::sse_decode(&mut deserializer);
             let api_aggressive_split_threshold = <u32>::sse_decode(&mut deserializer);
+            let api_justify = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2954,6 +2955,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
                             api_re_paragraph_mode,
                             api_smart_split_threshold,
                             api_aggressive_split_threshold,
+                            api_justify,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -3402,6 +3404,7 @@ impl SseDecode for crate::PageEntryInfo {
         let mut var_color = <Option<String>>::sse_decode(deserializer);
         let mut var_fontScale = <Option<f32>>::sse_decode(deserializer);
         let mut var_segments = <Vec<crate::PageSegInfo>>::sse_decode(deserializer);
+        let mut var_letterGap = <f32>::sse_decode(deserializer);
         let mut var_isChapterStart = <bool>::sse_decode(deserializer);
         let mut var_isTableFrame = <bool>::sse_decode(deserializer);
         let mut var_isComment = <bool>::sse_decode(deserializer);
@@ -3415,6 +3418,7 @@ impl SseDecode for crate::PageEntryInfo {
             color: var_color,
             font_scale: var_fontScale,
             segments: var_segments,
+            letter_gap: var_letterGap,
             is_chapter_start: var_isChapterStart,
             is_table_frame: var_isTableFrame,
             is_comment: var_isComment,
@@ -3456,6 +3460,7 @@ impl SseDecode for crate::PageSegInfo {
         let mut var_bold = <bool>::sse_decode(deserializer);
         let mut var_italic = <bool>::sse_decode(deserializer);
         let mut var_underline = <bool>::sse_decode(deserializer);
+        let mut var_letterSpacing = <Option<f32>>::sse_decode(deserializer);
         return crate::PageSegInfo {
             start: var_start,
             end: var_end,
@@ -3464,6 +3469,7 @@ impl SseDecode for crate::PageSegInfo {
             bold: var_bold,
             italic: var_italic,
             underline: var_underline,
+            letter_spacing: var_letterSpacing,
         };
     }
 }
@@ -3866,6 +3872,7 @@ impl flutter_rust_bridge::IntoDart for crate::PageEntryInfo {
             self.color.into_into_dart().into_dart(),
             self.font_scale.into_into_dart().into_dart(),
             self.segments.into_into_dart().into_dart(),
+            self.letter_gap.into_into_dart().into_dart(),
             self.is_chapter_start.into_into_dart().into_dart(),
             self.is_table_frame.into_into_dart().into_dart(),
             self.is_comment.into_into_dart().into_dart(),
@@ -3912,6 +3919,7 @@ impl flutter_rust_bridge::IntoDart for crate::PageSegInfo {
             self.bold.into_into_dart().into_dart(),
             self.italic.into_into_dart().into_dart(),
             self.underline.into_into_dart().into_dart(),
+            self.letter_spacing.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4220,6 +4228,7 @@ impl SseEncode for crate::PageEntryInfo {
         <Option<String>>::sse_encode(self.color, serializer);
         <Option<f32>>::sse_encode(self.font_scale, serializer);
         <Vec<crate::PageSegInfo>>::sse_encode(self.segments, serializer);
+        <f32>::sse_encode(self.letter_gap, serializer);
         <bool>::sse_encode(self.is_chapter_start, serializer);
         <bool>::sse_encode(self.is_table_frame, serializer);
         <bool>::sse_encode(self.is_comment, serializer);
@@ -4250,6 +4259,7 @@ impl SseEncode for crate::PageSegInfo {
         <bool>::sse_encode(self.bold, serializer);
         <bool>::sse_encode(self.italic, serializer);
         <bool>::sse_encode(self.underline, serializer);
+        <Option<f32>>::sse_encode(self.letter_spacing, serializer);
     }
 }
 

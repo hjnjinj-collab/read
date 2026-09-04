@@ -1,5 +1,6 @@
 mod font_manager;
 mod glyph_cache;
+mod kinsoku;
 mod parallel;
 pub mod measure_cache;
 pub mod text_boundary;
@@ -36,6 +37,9 @@ pub struct LayoutConfig {
     pub page_fill_threshold: f32,
     /// 是否显示本章说（注释/旁注段落）；true=渲染、false=跳过绘制但保留锚点
     pub show_comments: bool,
+    /// P2 两端对齐（2026-09-04）：TXT 全局开关；段落末行/短行豁免。
+    /// EPUB 走 TextItem.align==Justify（CSS 或全局开关在 bridge 层重写）
+    pub justify: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +68,7 @@ impl Default for LayoutConfig {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         }
     }
 }
@@ -92,6 +97,10 @@ pub struct TextLine {
     /// 本章说标记（Dart 层据此渲染灰色小字或隐藏）
     #[serde(default)]
     pub is_comment: bool,
+    /// P2 两端对齐：行内字符间隙（px）。0=左对齐；>0 时 Dart 端经
+    /// TextStyle.letterSpacing 消费（含行尾字符的 n_chars 均分语义）
+    #[serde(default)]
+    pub letter_gap: f32,
 }
 
 /// 行内样式分段：`[start, end)` 字符区间（Rust char 计数）的样式覆盖。
@@ -110,6 +119,9 @@ pub struct LineSeg {
     pub italic: bool,
     #[serde(default)]
     pub underline: bool,
+    /// P2 两端对齐：拉丁词保护段（Some(0)=该区间不参与空隙拉伸）
+    #[serde(default)]
+    pub letter_spacing: Option<f32>,
 }
 
 /// 图片项的绘制参数（坐标已由布局引擎折算）
@@ -138,6 +150,9 @@ pub enum LayoutAlign {
     Left,
     Center,
     Right,
+    /// P2 两端对齐（2026-09-04）：CSS text-align:justify 回正 +
+    /// 全局开关（ParagraphFormatSettings.justify）在 bridge 层重写
+    Justify,
 }
 
 /// 页面内容项：文本行、图片或矩形（图片/表格均为不可分割原子块）
@@ -169,6 +184,9 @@ pub struct TextItem {
     pub indent_first_line_em: Option<f32>,
     /// 本章说标记（JS 提取层 aside/footnote 或 CSS 小字号兜底）
     pub is_comment: bool,
+    /// P2：行高倍率覆盖（EPUB CSS line-height 物化；None=用全局
+    /// line_height_multiplier——书内显式声明优先，未声明用用户全局）
+    pub line_height: Option<f32>,
 }
 
 /// 文本项的行内样式区段
@@ -195,6 +213,8 @@ struct LaidLine {
     char_end: usize,
     /// 本行之前被跳过的 `\n` 个数（锚点计数用：区间不含换行符）
     newlines_before: usize,
+    /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行）
+    letter_gap: f32,
 }
 
 /// 表格输入（原子排版：列宽提示 + 单元格文本项序列）
@@ -327,13 +347,13 @@ impl LayoutEngine {
         let mut current_y = self.config.padding.top;
         let mut char_index = 0;
         let mut page_start_char = 0;
-        let mut pending_paragraph_lines: Vec<(String, usize)> = Vec::new(); // (line_text, char_count)
+        let mut pending_paragraph_lines: Vec<(String, usize, f32)> = Vec::new(); // (line_text, char_count, letter_gap)
         let mut is_first_line = true;  // 标记是否是章节的第一行
 
         // M9.2 行级分页辅助宏：放置一行并推进游标（预置阶段与主循环共用）。
         // 必须定义在上述可变绑定之后（macro_rules 标识符按定义点解析）
         macro_rules! emit_line {
-            ($line_text:expr, $line_char_count:expr) => {{
+            ($line_text:expr, $line_char_count:expr, $letter_gap:expr) => {{
                 // M11：width 改用本行实测宽度（cache 命中即 Skia 实宽，
                 // miss 仍走 ttf-parser 估算——总比 content_width 硬编码更接近 Skia 实际）
                 // M12：传入 effective_font_size=TXT 路径始终 baseFontSize
@@ -351,6 +371,7 @@ impl LayoutEngine {
                     color: None,
                     font_scale: None,
                     segments: Vec::new(),
+                    letter_gap: $letter_gap,
                     is_chapter_start: is_first_line,  // 标记章节第一行
                     is_comment: false,
                 });
@@ -379,9 +400,21 @@ impl LayoutEngine {
 
             // 收集当前段落的所有行
             pending_paragraph_lines.clear();
-            for line_text in &para_lines {
+            let para_line_count = para_lines.len();
+            for (li, line_text) in para_lines.iter().enumerate() {
                 let line_char_count = line_text.chars().count();
-                pending_paragraph_lines.push((line_text.clone(), line_char_count));
+                // P2 两端对齐：段末行豁免；其余行按 (content_width − 自然宽) / 字符数 分配
+                let letter_gap = if self.config.justify && li + 1 < para_line_count {
+                    kinsoku::justify_gap(
+                        self.measure_text_width(line_text, self.config.font_size),
+                        content_width,
+                        line_char_count,
+                        self.config.font_size,
+                    )
+                } else {
+                    0.0
+                };
+                pending_paragraph_lines.push((line_text.clone(), line_char_count, letter_gap));
             }
 
             // ── M9.2 行级分页决策（取代旧"整段推页"分支）──
@@ -434,8 +467,8 @@ impl LayoutEngine {
             }
 
             // 长段预置：前 pre_place 行留在本页
-            for (line_text, line_char_count) in pending_paragraph_lines.iter().take(pre_place) {
-                emit_line!(line_text, line_char_count);
+            for (line_text, line_char_count, letter_gap) in pending_paragraph_lines.iter().take(pre_place) {
+                emit_line!(line_text, line_char_count, *letter_gap);
             }
             if manual_break {
                 pages.push(Page {
@@ -454,7 +487,7 @@ impl LayoutEngine {
             }
 
             // 逐行添加段落剩余内容（跨多页的超长段由循环内断页自然处理）
-            for (line_text, line_char_count) in pending_paragraph_lines.iter().skip(pre_place) {
+            for (line_text, line_char_count, letter_gap) in pending_paragraph_lines.iter().skip(pre_place) {
                 // 检查是否需要分页（强制分页，空间不足）
                 if current_y + line_height > self.config.height - self.config.padding.bottom {
                     // 只有当前页已有足够行数时才分页，否则强制添加
@@ -477,7 +510,7 @@ impl LayoutEngine {
                     // 如果当前页行数不足MIN_LINES，强制添加此行（避免过早分页）
                 }
 
-                emit_line!(line_text, line_char_count);
+                emit_line!(line_text, line_char_count, *letter_gap);
             }
             
             // 段落间距
@@ -569,7 +602,10 @@ impl LayoutEngine {
                         .max(item.runs.iter().filter_map(|r| r.font_scale).fold(1.0, f32::max));
                     // 本章说：固定小字倍率覆盖 para_max_scale；正常段落用 para_max_scale
                     let effective_scale = if item.is_comment { 0.7 } else { para_max_scale };
-                    let line_h = line_height * effective_scale;
+                    // P2：行高倍率——书内显式 line-height 优先，未声明用用户全局
+                    let line_h = self.config.font_size
+                        * item.line_height.unwrap_or(self.config.line_height_multiplier)
+                        * effective_scale;
 
                     // M9 P5：首行缩进 px（em × 基准字号）
                     let indent_px = item.indent_first_line_em.unwrap_or(0.0) * self.config.font_size;
@@ -594,6 +630,13 @@ impl LayoutEngine {
                             break_page!();
                         }
                     }
+
+                    // P2 两端对齐：Justify 直接启用；Left/未指定跟随全局 justify 开关
+                    let justify_on = match item.align {
+                        Some(LayoutAlign::Justify) => true,
+                        Some(LayoutAlign::Left) | None => self.config.justify,
+                        _ => false,
+                    };
 
                     // 段落完整性优先：整段放不下、页已有足够行数、且填充率
                     // 达到门槛时才提前翻页；未达门槛允许段落跨页拆分，
@@ -627,6 +670,17 @@ impl LayoutEngine {
                             let x = self.align_line_x(first_line.width, content_width, item.align)
                                 + indent_px; // M9 P5：首行缩进偏移
                             let segments = Self::segments_for_line(first_line, item);
+                            // P2 justify：强制首行不是段末行，参与拉伸（可用宽扣除缩进）
+                            let gap = if justify_on {
+                                kinsoku::justify_gap(
+                                    first_line.width,
+                                    content_width - indent_px,
+                                    first_line.text.chars().count(),
+                                    self.config.font_size,
+                                )
+                            } else {
+                                0.0
+                            };
                             char_index += first_line.char_end - first_line.char_start + first_line.newlines_before;
                             entries.push(PageEntry::Text(TextLine {
                                 text: first_line.text.clone(),
@@ -645,6 +699,7 @@ impl LayoutEngine {
                                     (para_max_scale != 1.0).then_some(para_max_scale)
                                 },
                                 segments,
+                                letter_gap: gap,
                                 is_chapter_start: char_index == 0 && page_start_char == 0,
                                 is_comment: item.is_comment,
                             }));
@@ -658,7 +713,7 @@ impl LayoutEngine {
                         break_page!();
                         
                         // 布局剩余行
-                        for line in laid.iter().skip(1) {
+                        for (line_idx, line) in laid.iter().skip(1).enumerate() {
                             if current_y + line_h > bottom_limit
                                 && text_lines_on_page >= MIN_LINES_PER_PAGE
                             {
@@ -670,6 +725,17 @@ impl LayoutEngine {
                             }
                             let x = self.align_line_x(line.width, content_width, item.align);
                             let segments = Self::segments_for_line(line, item);
+                            // P2 justify：段末行豁免
+                            let gap = if justify_on && line_idx + 2 < laid.len() {
+                                kinsoku::justify_gap(
+                                    line.width,
+                                    content_width,
+                                    line.text.chars().count(),
+                                    self.config.font_size,
+                                )
+                            } else {
+                                0.0
+                            };
                             char_index += line.char_end - line.char_start + line.newlines_before;
                             entries.push(PageEntry::Text(TextLine {
                                 text: line.text.clone(),
@@ -688,6 +754,7 @@ impl LayoutEngine {
                                     (para_max_scale != 1.0).then_some(para_max_scale)
                                 },
                                 segments,
+                                letter_gap: gap,
                                 is_chapter_start: false,
                                 is_comment: item.is_comment,
                             }));
@@ -700,6 +767,7 @@ impl LayoutEngine {
                         continue;  // 跳过下面的正常布局逻辑
                     }
 
+                    let para_line_count = laid.len(); // P2 justify：段末行判定
                     for (line_idx, line) in laid.into_iter().enumerate() {
                         if current_y + line_h > bottom_limit
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
@@ -715,6 +783,19 @@ impl LayoutEngine {
                         let x = self.align_line_x(line.width, content_width, item.align)
                             + if line_idx == 0 { indent_px } else { 0.0 };
                         let segments = Self::segments_for_line(&line, item);
+                        // P2 justify：末行豁免；首行可用宽扣除缩进
+                        let gap = if justify_on && line_idx + 1 < para_line_count {
+                            let avail =
+                                if line_idx == 0 && indent_px > 0.01 { content_width - indent_px } else { content_width };
+                            kinsoku::justify_gap(
+                                line.width,
+                                avail,
+                                line.text.chars().count(),
+                                self.config.font_size,
+                            )
+                        } else {
+                            0.0
+                        };
                         char_index += line.char_end - line.char_start + line.newlines_before;
                         entries.push(PageEntry::Text(TextLine {
                             text: line.text,
@@ -735,6 +816,7 @@ impl LayoutEngine {
                                 (para_max_scale != 1.0).then_some(para_max_scale)
                             },
                             segments,
+                            letter_gap: gap,
                             is_chapter_start: char_index == 0 && page_start_char == 0,
                             is_comment: item.is_comment,
                         }));
@@ -888,15 +970,8 @@ impl LayoutEngine {
         max_width: f32,
         font: &ab_glyph::FontRef<'static>,
     ) -> Result<Vec<String>> {
-        const LINE_START_FORBIDDEN: &[char] = &[
-            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
-            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
-        ];
-        const LINE_END_FORBIDDEN: &[char] =
-            &['「', '『', '（', '【', '〈', '《'];
-        fn is_word_char(c: char) -> bool {
-            c.is_ascii_alphanumeric() || c == '_'
-        }
+        // 2026-09-04 P2: 禁则表/词判定收口到 kinsoku 模块（原三处复制）
+        use kinsoku::{LINE_START_FORBIDDEN, LINE_END_FORBIDDEN, is_word_char};
 
         let eps = Self::line_fill_epsilon(max_width);
         let mut finished: Vec<String> = Vec::new();
@@ -1016,14 +1091,8 @@ impl LayoutEngine {
         paragraph: &str,
         max_width: f32,
     ) -> Result<Vec<String>> {
-        const LINE_START_FORBIDDEN: &[char] = &[
-            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
-            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
-        ];
-        const LINE_END_FORBIDDEN: &[char] = &['「', '『', '（', '【', '〈', '《'];
-        fn is_word_char(c: char) -> bool {
-            c.is_ascii_alphanumeric() || c == '_'
-        }
+        // 2026-09-04 P2: 禁则表/词判定收口到 kinsoku 模块
+        use kinsoku::{LINE_START_FORBIDDEN, LINE_END_FORBIDDEN, is_word_char};
 
         if paragraph.is_empty() {
             return Ok(Vec::new());
@@ -1328,6 +1397,18 @@ impl LayoutEngine {
                     bold: r.bold,
                     italic: r.italic,
                     underline: r.underline,
+                    // P2 justify 拉丁词保护：段内以 ASCII 字母/数字为主 → 不参与空隙拉伸
+                    letter_spacing: if line.letter_gap > 0.0 {
+                        let seg: String = item.text.chars().skip(s).take(e - s).collect();
+                        let (latin, total) = seg
+                            .chars()
+                            .fold((0usize, 0usize), |(l, t), c| {
+                                (l + usize::from(c.is_ascii_alphanumeric()), t + 1)
+                            });
+                        (total > 0 && latin * 2 > total).then_some(0.0)
+                    } else {
+                        None
+                    },
                 })
             })
             .collect()
@@ -1345,15 +1426,8 @@ impl LayoutEngine {
         max_width: f32,
         font: &ab_glyph::FontRef<'static>,
     ) -> Result<Vec<LaidLine>> {
-        const LINE_START_FORBIDDEN: &[char] = &[
-            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
-            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
-        ];
-        const LINE_END_FORBIDDEN: &[char] =
-            &['「', '『', '（', '【', '〈', '《'];
-        fn is_word_char(c: char) -> bool {
-            c.is_ascii_alphanumeric() || c == '_'
-        }
+        // 2026-09-04 P2: 禁则表/词判定收口到 kinsoku 模块
+        use kinsoku::{LINE_START_FORBIDDEN, LINE_END_FORBIDDEN, is_word_char};
 
         let mut lines: Vec<LaidLine> = Vec::new();
         // 当前行片段：(grapheme, 字符数, 判满有效宽度)
@@ -1396,6 +1470,7 @@ impl LayoutEngine {
                     char_start: line_start,
                     char_end: line_start + $flushed_len,
                     newlines_before: pending_newlines,
+                    letter_gap: 0.0, // P2 justify：flush 时未知是否末行，排版完成后统一分配
                 });
                 pending_newlines = 0;
                 // M9 P5：首行已结束，后续行恢复满宽
@@ -1514,6 +1589,35 @@ impl LayoutEngine {
         if !pieces.is_empty() {
             flush_line!(line_chars);
         }
+
+        // P2 两端对齐：flush 时未知末行，排版完成后统一分配行内间隙。
+        // 末行豁免；首行可用宽扣除缩进；Center/Right 天然不启用。
+        if lines.len() > 1 {
+            let justify_on = match item.align {
+                Some(LayoutAlign::Justify) => true,
+                Some(LayoutAlign::Left) | None => self.config.justify,
+                _ => false,
+            };
+            if justify_on {
+                let n = lines.len();
+                for (i, line) in lines.iter_mut().enumerate() {
+                    if i + 1 >= n {
+                        break; // 末行豁免
+                    }
+                    let avail = if i == 0 && indent_px > 0.01 {
+                        max_width - indent_px
+                    } else {
+                        max_width
+                    };
+                    line.letter_gap = kinsoku::justify_gap(
+                        line.width,
+                        avail,
+                        line.text.chars().count(),
+                        self.config.font_size,
+                    );
+                }
+            }
+        }
         Ok(lines)
     }
 
@@ -1605,7 +1709,7 @@ impl LayoutEngine {
                         .unwrap_or(1.0)
                         .max(titem.runs.iter().filter_map(|r| r.font_scale).fold(1.0, f32::max));
                     let line_h = self.config.font_size
-                        * self.config.line_height_multiplier
+                        * titem.line_height.unwrap_or(self.config.line_height_multiplier)
                         * max_scale;
                     for line in laid {
                         let x_in_cell =
@@ -1623,6 +1727,8 @@ impl LayoutEngine {
                             color: titem.color.clone(),
                             font_scale: (max_scale != 1.0).then_some(max_scale),
                             segments: Self::segments_for_line(&line, titem),
+                            // P2 justify：表格单元格窄列拉伸效果差，整体豁免
+                            letter_gap: 0.0,
                             is_chapter_start: false,
                             is_comment: false,
                         });
@@ -1729,6 +1835,7 @@ mod tests {
             paragraph_spacing: 8.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         
         let engine = LayoutEngine::new(config.clone(), font_manager);
@@ -2010,6 +2117,7 @@ mod tests {
             spacing_after_em: 0.0,
             indent_first_line_em: None,
             is_comment: false,
+            line_height: None,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let line = match &pages[0].entries[0] {
@@ -2061,6 +2169,7 @@ mod tests {
             spacing_after_em: 0.0,
             indent_first_line_em: None,
             is_comment: false,
+            line_height: None,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let lines: Vec<TextLine> = pages[0]
@@ -2105,6 +2214,7 @@ mod tests {
             spacing_after_em: 0.0,
             indent_first_line_em: None,
             is_comment: false,
+            line_height: None,
         })];
         let pages = engine.layout_items(&items, 0).unwrap();
         let lines: Vec<TextLine> = pages[0]
@@ -2140,6 +2250,7 @@ mod tests {
             spacing_after_em: 0.0,
             indent_first_line_em: None,
             is_comment: false,
+            line_height: None,
         };
         let font = engine
             .font_manager
@@ -2193,6 +2304,7 @@ mod tests {
                 spacing_after_em: 0.0,
                 indent_first_line_em: None,
                 is_comment: false,
+                line_height: None,
             };
             let lines = engine
                 .layout_styled_paragraph(&item, cw as f32, &font)
@@ -2250,6 +2362,7 @@ mod tests {
                 spacing_after_em: 0.0,
                 indent_first_line_em: None,
                 is_comment: false,
+                line_height: None,
             }],
         };
         let items = vec![LayoutItem::Table(TableInput {
@@ -2327,6 +2440,7 @@ mod tests {
                 spacing_after_em: 0.0,
                 indent_first_line_em: None,
                 is_comment: false,
+                line_height: None,
             }],
         };
         // 2 行 × 2 列
@@ -2847,6 +2961,7 @@ mod tests {
             paragraph_spacing: 8.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         let engine = LayoutEngine::new(config, font_manager);
         let text = "暮色里，小镇名叫泥瓶巷的僻静地方，有个孤苦伶仃的清瘦少年。此时，他正按照习俗，一手持蜡烛，一手持桃枝，照耀房梁、墙壁、木床等处，用桃枝敲敲打打，试图借此驱赶蛇蝎、蜈蚣等。他嘴里念念有词，是这座小镇祖祖辈辈传下来的老话：二月二，烛照梁，桃打墙，人间蛇虫无处藏。".to_string();

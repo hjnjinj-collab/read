@@ -73,6 +73,8 @@ pub enum Align {
     Left,
     Center,
     Right,
+    /// P2：text-align:justify（此前被折叠为 Left，两端对齐无从谈起）
+    Justify,
 }
 
 /// 行内富文本段：段落 `text` 的字符区间样式（span/em 等）
@@ -136,6 +138,9 @@ pub enum ContentBlock {
         /// EPUB 来自 CSS margin-bottom
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spacing_after_em: Option<f32>,
+        /// P2：行高倍率（EPUB CSS line-height 物化，CSS 继承属性；None=用户全局）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line_height: Option<f32>,
     },
     /// 标题（h1-h6 → 1..=6）
     Heading {
@@ -232,6 +237,7 @@ impl ContentBlock {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         }
     }
 
@@ -286,6 +292,7 @@ impl ContentBlock {
                 is_comment,
                 indent_first_line_em,
                 spacing_after_em,
+                line_height,
             } => ContentBlock::Paragraph {
                 text,
                 align,
@@ -308,6 +315,7 @@ impl ContentBlock {
                 is_comment,
                 indent_first_line_em,
                 spacing_after_em,
+                line_height,
             },
             ContentBlock::Heading {
                 level,
@@ -407,6 +415,7 @@ impl ContentBlock {
                 is_comment,
                 indent_first_line_em,
                 spacing_after_em,
+                line_height,
                 ..
             } => ContentBlock::Paragraph {
                 text,
@@ -430,6 +439,7 @@ impl ContentBlock {
                 is_comment,
                 indent_first_line_em,
                 spacing_after_em,
+                line_height,
             },
             ContentBlock::Heading {
                 level,
@@ -552,6 +562,7 @@ mod tests {
                     is_comment: false,
                     indent_first_line_em: None,
                     spacing_after_em: None,
+                    line_height: None,
                 },
                 ContentBlock::Table {
                     caption: None,

@@ -53,6 +53,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _reParagraphMode = persisted.reParagraphMode;
     _smartSplitThreshold = persisted.smartSplitThreshold;
     _aggressiveSplitThreshold = persisted.aggressiveSplitThreshold;
+    _justify = persisted.justify;
     _pageTurnMode = persisted.pageTurnMode;
     _pageTurnSpeed = persisted.pageTurnSpeed;
     _collapseStyle = persisted.collapse;
@@ -117,6 +118,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // M9.2：超长段切分阈值（字，用户可调；Rust 侧钳制 [20,2000]）
   int _smartSplitThreshold = 200;
   int _aggressiveSplitThreshold = 100;
+
+  // P2 两端对齐全局开关（EPUB 书内 justify 恒启用；TXT/Left 段跟随）
+  bool _justify = false;
   BigInt _paraFormatHash = BigInt.zero; // 段落格式设置哈希（FFI 缓存键）
 
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
@@ -155,6 +159,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int get reParagraphMode => _reParagraphMode;
   int get smartSplitThreshold => _smartSplitThreshold;
   int get aggressiveSplitThreshold => _aggressiveSplitThreshold;
+  bool get justify => _justify;
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
@@ -263,6 +268,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'reParagraphMode': _reParagraphMode,
         'smartSplitThreshold': _smartSplitThreshold,
         'aggressiveSplitThreshold': _aggressiveSplitThreshold,
+        'justify': _justify,
         'pageTurnMode': _pageTurnMode.name,
         'pageTurnSpeed': _pageTurnSpeed.name,
         'collapse': _collapseStyle.toJson(),
@@ -312,6 +318,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required int reParagraphMode,
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
+    required bool justify,
   }) async {
     // 设置开始变化即使旧页面请求失效，避免在等待 Rust 同步期间回写旧帧。
     ++_requestGeneration;
@@ -343,6 +350,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _reParagraphMode = reParagraphMode;
     _smartSplitThreshold = smartSplitThreshold;
     _aggressiveSplitThreshold = aggressiveSplitThreshold;
+    _justify = justify;
     await _bookService.setParagraphFormatSettings(
       enableIndent: enableIndent,
       indentSizeChars: indentSizeChars,
@@ -350,6 +358,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       reParagraphMode: reParagraphMode,
       smartSplitThreshold: smartSplitThreshold,
       aggressiveSplitThreshold: aggressiveSplitThreshold,
+      justify: justify,
     );
     _paraFormatHash = _computeParaFormatHash();
 
@@ -1303,6 +1312,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // M9.2：切分阈值参与哈希（调整即换缓存键重排）
     h = h * 31 + _smartSplitThreshold;
     h = h * 31 + _aggressiveSplitThreshold;
+    // P2：两端对齐开关参与哈希（justify 行宽分配改变排版结果）
+    h = h * 31 + (_justify ? 1 : 0);
     return BigInt.from(h & 0x7FFFFFFFFFFFFFFF);
   }
 

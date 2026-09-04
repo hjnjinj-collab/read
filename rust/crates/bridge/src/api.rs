@@ -270,6 +270,12 @@ fn effective_paragraph_spacing(font_size: f32) -> f32 {
     font_size * 0.8 * multiplier
 }
 
+/// P2：两端对齐全局开关（PARAGRAPH_FORMAT_SETTINGS.justify 单源）。
+/// 全部 LayoutConfig 构造点统一消费，遗留 FFI 入口同样跟随（行为一致无害）。
+fn effective_justify() -> bool {
+    PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().justify
+}
+
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
 /// 行为：写入 `tracing` 日志 + 静默返回 Ok，让上层 Dart 代码不因字体
@@ -556,6 +562,7 @@ pub fn set_paragraph_format_settings(
     re_paragraph_mode: u8,
     smart_split_threshold: u32,
     aggressive_split_threshold: u32,
+    justify: bool,
 ) -> anyhow::Result<()> {
     let mut settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap();
     settings.enable_indent = enable_indent;
@@ -564,6 +571,7 @@ pub fn set_paragraph_format_settings(
     settings.re_paragraph_mode = reader_core::ReParagraphMode::from_u8(re_paragraph_mode);
     settings.smart_split_threshold = smart_split_threshold.clamp(20, 2000) as usize;
     settings.aggressive_split_threshold = aggressive_split_threshold.clamp(20, 2000) as usize;
+    settings.justify = justify;
     Ok(())
 }
 
@@ -1213,6 +1221,7 @@ pub fn layout_chapter(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: effective_justify(),
     };
     
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1256,6 +1265,7 @@ pub fn get_page(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1298,6 +1308,7 @@ pub fn get_page_count(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1357,6 +1368,7 @@ pub fn get_page_processed(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     // 2. 处理 + 排版（带缓存，选项变更自动重算）
@@ -1431,6 +1443,7 @@ pub fn get_page_count_processed(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     // 2. 处理 + 排版（带缓存）
@@ -1515,6 +1528,7 @@ fn apply_paragraph_format_settings(
             is_comment: _,
             indent_first_line_em: _,
             spacing_after_em,
+            line_height,
         } = block
         else {
             unreachable!("is_normal_para 已判定为 Paragraph");
@@ -1549,6 +1563,8 @@ fn apply_paragraph_format_settings(
                 is_comment: false,
                 indent_first_line_em,
                 spacing_after_em,
+                // P2：行高为段级属性，未切分时原样保留
+                line_height,
             });
         } else {
             // 切分后的段：全部保留原对齐（M9.2：居中段切后不再突变左对齐），
@@ -1565,6 +1581,8 @@ fn apply_paragraph_format_settings(
                     is_comment: false,
                     indent_first_line_em,
                     spacing_after_em: if i == last { spacing_after_em } else { None },
+                    // P2：行高为段级属性——切分后每段继承原段行高
+                    line_height,
                 });
             }
         }
@@ -1627,6 +1645,8 @@ fn blocks_to_layout_items_inner(
                 runs,
                 is_comment,
                 indent_first_line_em,
+                spacing_after_em,
+                line_height,
                 ..
             } => {
                 if text.trim().is_empty() {
@@ -1657,7 +1677,12 @@ fn blocks_to_layout_items_inner(
                     font_scale: *font_scale,
                     runs,
                     spacing_before_em: 0.0,
-                    spacing_after_em: 0.0,
+                    // P2：CSS margin-bottom 物化（epub_parser resolved_spacing_after_em
+                    // 产出；None=书内未声明）。布局层与用户段距取 max（书内样式
+                    // 提供下限，用户倍率兜底）——先例：标题分级 space_after 同模式
+                    spacing_after_em: spacing_after_em.unwrap_or(0.0),
+                    // P2：CSS line-height 物化（书内显式声明优先，未声明用用户全局）
+                    line_height: *line_height,
                     indent_first_line_em: *indent_first_line_em,
                     is_comment: *is_comment,
                 }));
@@ -1691,6 +1716,7 @@ fn blocks_to_layout_items_inner(
                     spacing_after_em: space_after,
                     indent_first_line_em: None,
                     is_comment: false,
+                    line_height: None,
                 }));
             }
             ContentBlock::Image {
@@ -1717,6 +1743,7 @@ fn blocks_to_layout_items_inner(
                         book_parser::Align::Left => layout_engine::LayoutAlign::Left,
                         book_parser::Align::Center => layout_engine::LayoutAlign::Center,
                         book_parser::Align::Right => layout_engine::LayoutAlign::Right,
+                        book_parser::Align::Justify => layout_engine::LayoutAlign::Justify,
                     }),
                     bleed: *bleed,
                 });
@@ -1764,6 +1791,7 @@ fn blocks_to_layout_items_inner(
                                             runs,
                                             is_comment,
                                             indent_first_line_em: _,
+                                            line_height,
                                             ..
                                         } => {
                                             if text.trim().is_empty() {
@@ -1781,6 +1809,7 @@ fn blocks_to_layout_items_inner(
                                                 // （解析层已递归清零，此处强制防御）
                                                 indent_first_line_em: None,
                                                 is_comment: *is_comment,
+                                                line_height: *line_height,
                                             })
                                         }
                                         ContentBlock::Heading {
@@ -1803,6 +1832,7 @@ fn blocks_to_layout_items_inner(
                                                 spacing_after_em: 0.0,
                                                 indent_first_line_em: None,
                                                 is_comment: false,
+                                                line_height: None,
                                             })
                                         }
                                         _ => None,
@@ -1830,6 +1860,7 @@ fn map_align(a: Option<book_parser::Align>) -> Option<layout_engine::LayoutAlign
         book_parser::Align::Left => layout_engine::LayoutAlign::Left,
         book_parser::Align::Center => layout_engine::LayoutAlign::Center,
         book_parser::Align::Right => layout_engine::LayoutAlign::Right,
+        book_parser::Align::Justify => layout_engine::LayoutAlign::Justify,
     })
 }
 
@@ -2008,6 +2039,7 @@ fn structured_layout_config(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
+        justify: effective_justify(),
     }
 }
 
@@ -2533,6 +2565,7 @@ pub fn get_page_cached(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     // 委托统一实现：全关处理选项 = 原文行为；同样享受 options_hash 隔离的 LRU 缓存
@@ -2584,6 +2617,7 @@ pub fn get_page_count_cached(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     // 委托统一实现（全关处理选项 = 原文行为）
@@ -2635,6 +2669,7 @@ pub fn get_page_cached_processed(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: effective_justify(),
     };
     
     // 生成缓存键（需要包含预处理参数）
@@ -2816,6 +2851,7 @@ pub fn create_reading_session(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: effective_justify(),
     };
 
     let book_id = format!("session_{}", uuid::Uuid::new_v4());
@@ -3433,6 +3469,7 @@ mod tests {
             re_paragraph_mode: mode,
             smart_split_threshold: reader_core::SMART_THRESHOLD,
             aggressive_split_threshold: reader_core::AGGRESSIVE_THRESHOLD,
+            justify: false,
         }
     }
 
@@ -3500,6 +3537,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: Some(3.0),
             spacing_after_em: None,
+            line_height: None,
         };
         let mut blocks = vec![b];
         apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true));
@@ -3521,6 +3559,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: Some(3.0),
             spacing_after_em: None,
+            line_height: None,
         };
         let mut blocks = vec![b];
         apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false));
@@ -3546,6 +3585,7 @@ mod tests {
             is_comment: true,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         if let ContentBlock::Paragraph {
             indent_first_line_em: ref mut f,
@@ -3595,6 +3635,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         }];
         apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, false));
         assert!(blocks.len() >= 2);
@@ -3648,6 +3689,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         }];
         apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Smart, false));
         // 注：末片 55 字 ≥ 20%·阈值，不会触发尾段再平衡合并
@@ -3683,6 +3725,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: Some(2.0),
             spacing_after_em: None,
+            line_height: None,
         };
         let table = ContentBlock::Table {
             caption: None,

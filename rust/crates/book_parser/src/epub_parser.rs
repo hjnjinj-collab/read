@@ -1009,7 +1009,8 @@ impl EpubParser {
                 DeclValue::Keyword(k) => match k.as_str() {
                     "center" => Some(Align::Center),
                     "right" | "end" => Some(Align::Right),
-                    "left" | "start" | "justify" => Some(Align::Left),
+                    "left" | "start" => Some(Align::Left),
+                    "justify" => Some(Align::Justify), // P2：两端对齐回正（此前折叠为 Left）
                     _ => None,
                 },
                 _ => None,
@@ -1174,6 +1175,58 @@ impl EpubParser {
             }
             _ => None,
         }
+    }
+
+    /// P2：CSS margin-bottom 解析 → em 倍数（段后间距物化）
+    ///
+    /// margin 为非继承属性——仅查节点自身声明（含 margin 简写展开），
+    /// 不走 self_or_inherited。支持 em / % / px / pt，% 与 px/pt 按
+    /// resolved_text_indent 同款近似折算 em。负值原样保留（布局层
+    /// 与用户段距取 max 时自然被兜底）。
+    fn resolved_spacing_after_em(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+        base_font_px: f32,
+    ) -> Option<f32> {
+        let decls = sheet.declarations(ctx);
+        match decls.get("margin-bottom") {
+            Some(crate::css_lite::DeclValue::Em(e)) => Some(*e),
+            Some(crate::css_lite::DeclValue::Percent(p)) => Some(p / 100.0),
+            Some(crate::css_lite::DeclValue::Px(px)) if base_font_px > 0.0 => {
+                Some(px / base_font_px)
+            }
+            Some(crate::css_lite::DeclValue::Pt(pt)) if base_font_px > 0.0 => {
+                Some(pt * 4.0 / 3.0 / base_font_px)
+            }
+            _ => None,
+        }
+    }
+
+    /// P2：CSS line-height 解析 → 行高倍率（行内物化）
+    ///
+    /// line-height 为 CSS 继承属性——走 self_or_inherited。
+    /// 无单位数字（`line-height: 1.8`，最常见形态）落在 Keyword，
+    /// parse 折算；em/%/px/pt 按 resolved_text_indent 同款折算。
+    /// 倍率 ≤0 视为病态声明忽略。
+    fn resolved_line_height(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+        base_font_px: f32,
+    ) -> Option<f32> {
+        let v = Self::self_or_inherited(sheet, ctx, "line-height")?;
+        let multiplier = match v {
+            crate::css_lite::DeclValue::Em(e) => Some(e),
+            crate::css_lite::DeclValue::Percent(p) => Some(p / 100.0),
+            crate::css_lite::DeclValue::Px(px) if base_font_px > 0.0 => {
+                Some(px / base_font_px)
+            }
+            crate::css_lite::DeclValue::Pt(pt) if base_font_px > 0.0 => {
+                Some(pt * 4.0 / 3.0 / base_font_px)
+            }
+            crate::css_lite::DeclValue::Keyword(k) => k.parse::<f32>().ok(),
+            _ => None,
+        };
+        multiplier.filter(|m| *m > 0.0)
     }
 
     /// 行内标签的 UA 默认字形语义（b/strong 粗、i/em/cite 斜、a 下划线）
@@ -1362,6 +1415,7 @@ impl EpubParser {
                 is_comment,
                 indent_first_line_em,
                 spacing_after_em,
+                line_height,
             } => {
                 let ctx = Self::node_ctx_from_anc(anc.as_ref());
                 let align = align.or_else(|| Self::inherited_text_align(sheet, &ctx));
@@ -1371,6 +1425,12 @@ impl EpubParser {
                 // M9 P5：CSS text-indent → indent_first_line_em
                 let indent_first_line_em = indent_first_line_em
                     .or_else(|| Self::resolved_text_indent(sheet, &ctx, base_font_px));
+                // P2：CSS margin-bottom → spacing_after_em（段后间距物化）
+                let spacing_after_em = spacing_after_em
+                    .or_else(|| Self::resolved_spacing_after_em(sheet, &ctx, base_font_px));
+                // P2：CSS line-height → line_height（行高倍率物化，继承属性）
+                let line_height =
+                    line_height.or_else(|| Self::resolved_line_height(sheet, &ctx, base_font_px));
                 let runs = Self::resolve_runs(runs, sheet, text.chars().count(), base_font_px);
                 // M9 P1：CSS 兜底分类修正 - 收紧门槛 + 三重验证
                 // 旧逻辑（0.85/200）误判率高，导致《剑来》普通正文被标记为注释。
@@ -1395,6 +1455,7 @@ impl EpubParser {
                     is_comment,
                     indent_first_line_em,
                     spacing_after_em,
+                    line_height,
                 }
             }
             ContentBlock::Heading {
@@ -1528,6 +1589,7 @@ impl EpubParser {
                     is_comment,
                     indent_first_line_em: _,
                     spacing_after_em,
+                    line_height,
                 } => ContentBlock::Paragraph {
                     text,
                     align,
@@ -1538,6 +1600,7 @@ impl EpubParser {
                     is_comment,
                     indent_first_line_em: None,
                     spacing_after_em,
+                    line_height,
                 },
                 ContentBlock::Quote { blocks } => ContentBlock::Quote {
                     blocks: Self::clear_cell_indent(blocks),
@@ -2055,6 +2118,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: indent,
             spacing_after_em: None,
+            line_height: None,
         };
         // 单元格内容树：直接段落 + Quote 嵌套 + List 嵌套 + 非文本块
         let cell_tree = vec![
@@ -2550,6 +2614,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2594,6 +2659,7 @@ mod tests {
                         is_comment: false,
                         indent_first_line_em: None,
                         spacing_after_em: None,
+                        line_height: None,
                     }],
                     anc: Some(vec![
                         vec!["body".into()],
@@ -2672,6 +2738,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2705,6 +2772,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para2, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2735,6 +2803,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para3, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2785,6 +2854,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2810,6 +2880,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2834,6 +2905,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2905,6 +2977,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { font_scale, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2935,6 +3008,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { runs, .. } =
             EpubParser::apply_css_to_block(para, &sheet, DEFAULT_BASE_FONT_PX)
@@ -2975,6 +3049,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { is_comment, .. } =
             EpubParser::apply_css_to_block(para_normal_small, &sheet, DEFAULT_BASE_FONT_PX)
@@ -3001,6 +3076,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { is_comment, .. } =
             EpubParser::apply_css_to_block(para_aside, &sheet2, DEFAULT_BASE_FONT_PX)
@@ -3026,6 +3102,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let result = EpubParser::apply_css_to_block(para_footnote_class, &sheet3, DEFAULT_BASE_FONT_PX);
         let ContentBlock::Paragraph { is_comment, .. } = result
@@ -3051,6 +3128,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { is_comment, .. } =
             EpubParser::apply_css_to_block(para_centered, &sheet4, DEFAULT_BASE_FONT_PX)
@@ -3075,6 +3153,7 @@ mod tests {
             is_comment: false,
             indent_first_line_em: None,
             spacing_after_em: None,
+            line_height: None,
         };
         let ContentBlock::Paragraph { is_comment, .. } =
             EpubParser::apply_css_to_block(para_long, &sheet2, DEFAULT_BASE_FONT_PX)
@@ -3082,5 +3161,104 @@ mod tests {
             panic!("结构不应改变");
         };
         assert!(!is_comment, "即使有 aside 祖先，超过 150 字符不应标记为注释");
+    }
+
+    /// P2 排版批次：CSS margin-bottom / line-height / text-align:justify
+    /// 三项物化（段后间距取 em 倍数；行高倍率含无单位数字；justify 不再折叠 Left）
+    #[test]
+    fn css_materializes_spacing_line_height_and_justify() {
+        use crate::content_ir::ContentBlock;
+
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            "p.gap { margin-bottom: 1.5em; }\n\
+             p.lh { line-height: 1.8; }\n\
+             p.lhp { line-height: 200%; }\n\
+             p.px { margin-bottom: 36px; }\n\
+             p.jt { text-align: justify; }\n\
+             p.inherit-lh { line-height: 3; }",
+        );
+        let mk = |class: &str, text: &str| ContentBlock::Paragraph {
+            text: text.into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["p".into(), class.into()],
+            ]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+            line_height: None,
+        };
+        let base = DEFAULT_BASE_FONT_PX;
+
+        // margin-bottom: 1.5em → spacing_after_em=1.5
+        let r = match EpubParser::apply_css_to_block(mk("gap", "甲"), &sheet, base) {
+            ContentBlock::Paragraph {
+                spacing_after_em, ..
+            } => spacing_after_em,
+            _ => panic!("结构不应改变"),
+        };
+        assert_eq!(r, Some(1.5), "margin-bottom:1.5em 应物化为段后间距");
+
+        // margin-bottom: 36px → 36/18 = 2.0 em
+        let r = match EpubParser::apply_css_to_block(mk("px", "甲"), &sheet, base) {
+            ContentBlock::Paragraph {
+                spacing_after_em, ..
+            } => spacing_after_em,
+            _ => panic!("结构不应改变"),
+        };
+        assert!((r.unwrap() - 2.0).abs() < 1e-4, "36px/18px 应折算 2.0em");
+
+        // line-height: 1.8（无单位数字，最常见形态）
+        let r = match EpubParser::apply_css_to_block(mk("lh", "甲"), &sheet, base) {
+            ContentBlock::Paragraph { line_height, .. } => line_height,
+            _ => panic!("结构不应改变"),
+        };
+        assert_eq!(r, Some(1.8), "无单位 line-height 应物化为倍率");
+
+        // line-height: 200% → 2.0
+        let r = match EpubParser::apply_css_to_block(mk("lhp", "甲"), &sheet, base) {
+            ContentBlock::Paragraph { line_height, .. } => line_height,
+            _ => panic!("结构不应改变"),
+        };
+        assert!((r.unwrap() - 2.0).abs() < 1e-4, "200% 应折算 2.0");
+
+        // text-align: justify 不再折叠为 Left
+        let r = match EpubParser::apply_css_to_block(mk("jt", "甲"), &sheet, base) {
+            ContentBlock::Paragraph { align, .. } => align,
+            _ => panic!("结构不应改变"),
+        };
+        assert_eq!(r, Some(crate::content_ir::Align::Justify));
+
+        // line-height 继承属性：p 外层声明经 body 继承（margin-bottom 则不继承）
+        let sheet2 = crate::css_lite::CssStylesheet::parse("body { line-height: 3; margin-bottom: 2em; }");
+        let para = ContentBlock::Paragraph {
+            text: "甲".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
+            is_comment: false,
+            indent_first_line_em: None,
+            spacing_after_em: None,
+            line_height: None,
+        };
+        let r = match EpubParser::apply_css_to_block(para, &sheet2, base) {
+            ContentBlock::Paragraph {
+                line_height,
+                spacing_after_em,
+                ..
+            } => (line_height, spacing_after_em),
+            _ => panic!("结构不应改变"),
+        };
+        assert_eq!(r.0, Some(3.0), "line-height 为继承属性，body 声明应传导");
+        assert_eq!(
+            r.1, None,
+            "margin 为非继承属性，body 声明不得传导到子段"
+        );
     }
 }

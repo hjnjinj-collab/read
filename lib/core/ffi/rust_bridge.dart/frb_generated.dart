@@ -417,6 +417,7 @@ abstract class RustLibApi extends BaseApi {
     required int reParagraphMode,
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
+    required bool justify,
   });
 
   Future<void> crateApiUpdateBookCleaning({required String bookId, required ContentCleaningOptions options});
@@ -2585,6 +2586,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int reParagraphMode,
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
+    required bool justify,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2596,6 +2598,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_8(reParagraphMode, serializer);
           sse_encode_u_32(smartSplitThreshold, serializer);
           sse_encode_u_32(aggressiveSplitThreshold, serializer);
+          sse_encode_bool(justify, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 72, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
@@ -2607,6 +2610,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           reParagraphMode,
           smartSplitThreshold,
           aggressiveSplitThreshold,
+          justify,
         ],
         apiImpl: this,
       ),
@@ -2622,6 +2626,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "reParagraphMode",
       "smartSplitThreshold",
       "aggressiveSplitThreshold",
+      "justify",
     ],
   );
 
@@ -2941,7 +2946,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageEntryInfo dco_decode_page_entry_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12) throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 13) throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return PageEntryInfo(
       text: dco_decode_opt_String(arr[0]),
       resourceHref: dco_decode_opt_String(arr[1]),
@@ -2952,9 +2957,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       color: dco_decode_opt_String(arr[6]),
       fontScale: dco_decode_opt_box_autoadd_f_32(arr[7]),
       segments: dco_decode_list_page_seg_info(arr[8]),
-      isChapterStart: dco_decode_bool(arr[9]),
-      isTableFrame: dco_decode_bool(arr[10]),
-      isComment: dco_decode_bool(arr[11]),
+      letterGap: dco_decode_f_32(arr[9]),
+      isChapterStart: dco_decode_bool(arr[10]),
+      isTableFrame: dco_decode_bool(arr[11]),
+      isComment: dco_decode_bool(arr[12]),
     );
   }
 
@@ -2979,7 +2985,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageSegInfo dco_decode_page_seg_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7) throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8) throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return PageSegInfo(
       start: dco_decode_usize(arr[0]),
       end: dco_decode_usize(arr[1]),
@@ -2988,6 +2994,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bold: dco_decode_bool(arr[4]),
       italic: dco_decode_bool(arr[5]),
       underline: dco_decode_bool(arr[6]),
+      letterSpacing: dco_decode_opt_box_autoadd_f_32(arr[7]),
     );
   }
 
@@ -3423,6 +3430,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_color = sse_decode_opt_String(deserializer);
     var var_fontScale = sse_decode_opt_box_autoadd_f_32(deserializer);
     var var_segments = sse_decode_list_page_seg_info(deserializer);
+    var var_letterGap = sse_decode_f_32(deserializer);
     var var_isChapterStart = sse_decode_bool(deserializer);
     var var_isTableFrame = sse_decode_bool(deserializer);
     var var_isComment = sse_decode_bool(deserializer);
@@ -3436,6 +3444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       color: var_color,
       fontScale: var_fontScale,
       segments: var_segments,
+      letterGap: var_letterGap,
       isChapterStart: var_isChapterStart,
       isTableFrame: var_isTableFrame,
       isComment: var_isComment,
@@ -3475,6 +3484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_bold = sse_decode_bool(deserializer);
     var var_italic = sse_decode_bool(deserializer);
     var var_underline = sse_decode_bool(deserializer);
+    var var_letterSpacing = sse_decode_opt_box_autoadd_f_32(deserializer);
     return PageSegInfo(
       start: var_start,
       end: var_end,
@@ -3483,6 +3493,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bold: var_bold,
       italic: var_italic,
       underline: var_underline,
+      letterSpacing: var_letterSpacing,
     );
   }
 
@@ -3828,6 +3839,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.color, serializer);
     sse_encode_opt_box_autoadd_f_32(self.fontScale, serializer);
     sse_encode_list_page_seg_info(self.segments, serializer);
+    sse_encode_f_32(self.letterGap, serializer);
     sse_encode_bool(self.isChapterStart, serializer);
     sse_encode_bool(self.isTableFrame, serializer);
     sse_encode_bool(self.isComment, serializer);
@@ -3856,6 +3868,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.bold, serializer);
     sse_encode_bool(self.italic, serializer);
     sse_encode_bool(self.underline, serializer);
+    sse_encode_opt_box_autoadd_f_32(self.letterSpacing, serializer);
   }
 
   @protected

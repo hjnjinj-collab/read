@@ -358,12 +358,14 @@ class BookService {
                       bold: s.bold,
                       italic: s.italic,
                       underline: s.underline,
+                      letterSpacing: s.letterSpacing,
                     ),
                   )
                   .toList(),
               isChapterStart: e.isChapterStart,
               isTableFrame: e.isTableFrame,
               isComment: e.isComment,
+              letterGap: e.letterGap,
             ),
           )
           .toList(),
@@ -549,6 +551,7 @@ class BookService {
     required int reParagraphMode,
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
+    required bool justify,
   }) async {
     await rust_api.setParagraphFormatSettings(
       enableIndent: enableIndent,
@@ -557,6 +560,7 @@ class BookService {
       reParagraphMode: reParagraphMode,
       smartSplitThreshold: smartSplitThreshold,
       aggressiveSplitThreshold: aggressiveSplitThreshold,
+      justify: justify,
     );
   }
 

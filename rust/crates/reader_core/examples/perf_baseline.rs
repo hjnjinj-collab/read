@@ -250,6 +250,7 @@ fn main() -> anyhow::Result<()> {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         let engine = LayoutEngine::new(config, font_manager);
         let mut layout_times = Vec::new();

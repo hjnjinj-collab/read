@@ -250,6 +250,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             })
             .collect()
     }
@@ -328,6 +329,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 
@@ -343,6 +345,7 @@ mod tests {
             font_scale: None,
             segments: Vec::new(),
             is_comment: false,
+            letter_gap: 0.0,
         });
 
         // Paragraph 2: lines 3-4 (small gaps)
@@ -358,6 +361,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 
@@ -391,6 +395,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 
@@ -407,6 +412,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 
@@ -433,6 +439,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
         // 章节开头行，页面远未填满
@@ -447,6 +454,7 @@ mod tests {
             font_scale: None,
             segments: Vec::new(),
             is_comment: false,
+            letter_gap: 0.0,
         });
         for i in 1..3 {
             lines.push(TextLine {
@@ -460,6 +468,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 
@@ -492,6 +501,7 @@ mod tests {
             font_scale: None,
             segments: Vec::new(),
             is_comment: false,
+            letter_gap: 0.0,
         });
         for i in 1..5 {
             lines.push(TextLine {
@@ -505,6 +515,7 @@ mod tests {
                 font_scale: None,
                 segments: Vec::new(),
                 is_comment: false,
+                letter_gap: 0.0,
             });
         }
 

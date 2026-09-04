@@ -202,6 +202,7 @@ mod tests {
                 color: None,
                 font_scale: None,
                 segments: Vec::new(),
+                letter_gap: 0.0,
                 is_chapter_start: false,
                 is_comment: false,
             })],

@@ -729,6 +729,7 @@ mod tests {
                 is_comment: false,
                 indent_first_line_em: None,
                 spacing_after_em: None,
+                line_height: None,
             }
         );
     }

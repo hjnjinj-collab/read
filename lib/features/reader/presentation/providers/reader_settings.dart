@@ -85,6 +85,9 @@ class ReaderSettings {
   final int smartSplitThreshold;
   final int aggressiveSplitThreshold;
 
+  /// P2 两端对齐全局开关（EPUB 书内 justify 恒启用；TXT/Left 段跟随）
+  final bool justify;
+
   final PageTurnMode pageTurnMode;
   final PageTurnSpeed pageTurnSpeed;
 
@@ -113,6 +116,7 @@ class ReaderSettings {
     required this.reParagraphMode,
     required this.smartSplitThreshold,
     required this.aggressiveSplitThreshold,
+    required this.justify,
     required this.pageTurnMode,
     required this.pageTurnSpeed,
     required this.collapse,
@@ -140,6 +144,7 @@ class ReaderSettings {
         reParagraphMode: 1,
         smartSplitThreshold: 200,
         aggressiveSplitThreshold: 100,
+        justify: false,
         pageTurnMode: PageTurnMode.simulation,
         pageTurnSpeed: PageTurnSpeed.medium,
         collapse: CollapseStyle.defaults(),
@@ -173,6 +178,7 @@ class ReaderSettings {
         reParagraphMode: _i(j, 'reParagraphMode', 1),
         smartSplitThreshold: _i(j, 'smartSplitThreshold', 200),
         aggressiveSplitThreshold: _i(j, 'aggressiveSplitThreshold', 100),
+        justify: _b(j, 'justify', false),
         pageTurnMode:
             _e(PageTurnMode.values, j['pageTurnMode'], PageTurnMode.simulation),
         pageTurnSpeed:

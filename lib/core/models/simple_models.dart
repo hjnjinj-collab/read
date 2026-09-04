@@ -93,6 +93,9 @@ class PageEntry {
   /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
   final bool isComment;
 
+  /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行；绘制端转 letterSpacing）
+  final double letterGap;
+
   const PageEntry({
     this.text,
     this.resourceHref,
@@ -106,6 +109,7 @@ class PageEntry {
     this.isChapterStart = false,
     this.isTableFrame = false,
     this.isComment = false,
+    this.letterGap = 0.0,
   });
 
   bool get isImage => resourceHref != null;
@@ -124,6 +128,9 @@ class EntrySegment {
   final bool italic;
   final bool underline;
 
+  /// P2 justify 拉丁词保护（null=继承行级 letterGap；0=该区间不加间隙）
+  final double? letterSpacing;
+
   const EntrySegment({
     required this.start,
     required this.end,
@@ -132,6 +139,7 @@ class EntrySegment {
     this.bold = false,
     this.italic = false,
     this.underline = false,
+    this.letterSpacing,
   });
 }
 

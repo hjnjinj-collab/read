@@ -108,6 +108,7 @@ mod tests {
             paragraph_spacing: 8.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         
         // 创建多个章节
@@ -157,6 +158,7 @@ mod tests {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         
         // 创建 10 个较长的章节

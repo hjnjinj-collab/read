@@ -325,6 +325,10 @@ class PageContentRenderer {
         fontWeight: (applyTitleBold && entry.isChapterStart)
             ? FontWeight.w700
             : null,
+        // P2 两端对齐：行内字符间隙（0=无操作）。注意此处仅绘制样式——
+        // MeasureTextService 测量样式恒不带 gap（否则带隙行宽灌入
+        // Rust MeasureCache 会污染断行基准）
+        letterSpacing: entry.letterGap,
       );
 
       final TextSpan textSpan;
@@ -356,6 +360,9 @@ class PageContentRenderer {
                       ? FontStyle.italic
                       : null,
                   decoration: seg.underline ? TextDecoration.underline : null,
+                  // P2 justify 拉丁词保护段：Some(0) 压制该区间拉伸；
+                  // null 继承行级 letterGap
+                  letterSpacing: seg.letterSpacing ?? entry.letterGap,
                 ),
               ),
             );

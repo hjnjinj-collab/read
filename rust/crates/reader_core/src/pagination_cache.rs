@@ -268,6 +268,7 @@ mod tests {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            justify: false,
         };
         
         let config2 = config1.clone();

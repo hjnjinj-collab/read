@@ -43,6 +43,9 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   int _smartSplitThreshold = 200;
   int _aggressiveSplitThreshold = 100;
 
+  // P2 两端对齐（EPUB 书内 justify 恒启用；TXT/Left 段跟随本开关）
+  bool _justify = false;
+
   // 坍塌动画样式（2026-09-04 P1 设置化：变更即时生效+落库，不经「应用设置」）
   double _collapseBlockSize = 36;
   double _collapseSlideDistance = 45;
@@ -78,6 +81,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _reParagraphMode = n.reParagraphMode;
     _smartSplitThreshold = n.smartSplitThreshold;
     _aggressiveSplitThreshold = n.aggressiveSplitThreshold;
+    _justify = n.justify;
     _collapseBlockSize = n.collapseStyle.blockSize;
     _collapseSlideDistance = n.collapseStyle.slideDistance;
     _collapseShadowColorValue = n.collapseStyle.shadowColorValue;
@@ -191,6 +195,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         reParagraphMode: _reParagraphMode,
         smartSplitThreshold: _smartSplitThreshold,
         aggressiveSplitThreshold: _aggressiveSplitThreshold,
+        justify: _justify,
       );
 
       if (!mounted) return;
@@ -523,6 +528,14 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                       ],
                     ),
                   ),
+                _buildSwitchTile(
+                  title: '两端对齐',
+                  subtitle: '行内字符微调使左右边缘对齐（EPUB 书内 justify 恒启用）',
+                  value: _justify,
+                  onChanged: (value) {
+                    setState(() => _justify = value);
+                  },
+                ),
                 const SizedBox(height: 8),
                 Container(
                   decoration: BoxDecoration(

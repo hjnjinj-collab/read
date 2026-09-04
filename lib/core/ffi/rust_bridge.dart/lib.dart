@@ -158,6 +158,9 @@ class PageEntryInfo {
   /// 行内富文本分段（span 等，区间为行内字符偏移；空=整行统一）
   final List<PageSegInfo> segments;
 
+  /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行，绘制端转 letterSpacing）
+  final double letterGap;
+
   /// 章节首行标记（TXT 强制分页用；绘制端按粗体开关渲染标题加粗）
   final bool isChapterStart;
 
@@ -177,6 +180,7 @@ class PageEntryInfo {
     this.color,
     this.fontScale,
     required this.segments,
+    required this.letterGap,
     required this.isChapterStart,
     required this.isTableFrame,
     required this.isComment,
@@ -193,6 +197,7 @@ class PageEntryInfo {
       color.hashCode ^
       fontScale.hashCode ^
       segments.hashCode ^
+      letterGap.hashCode ^
       isChapterStart.hashCode ^
       isTableFrame.hashCode ^
       isComment.hashCode;
@@ -211,6 +216,7 @@ class PageEntryInfo {
           color == other.color &&
           fontScale == other.fontScale &&
           segments == other.segments &&
+          letterGap == other.letterGap &&
           isChapterStart == other.isChapterStart &&
           isTableFrame == other.isTableFrame &&
           isComment == other.isComment;
@@ -289,6 +295,9 @@ class PageSegInfo {
   final bool italic;
   final bool underline;
 
+  /// P2 justify 拉丁词保护段（Some(0)=该区间不加间隙；None=继承行级）
+  final double? letterSpacing;
+
   const PageSegInfo({
     required this.start,
     required this.end,
@@ -297,6 +306,7 @@ class PageSegInfo {
     required this.bold,
     required this.italic,
     required this.underline,
+    this.letterSpacing,
   });
 
   @override
@@ -307,7 +317,8 @@ class PageSegInfo {
       fontScale.hashCode ^
       bold.hashCode ^
       italic.hashCode ^
-      underline.hashCode;
+      underline.hashCode ^
+      letterSpacing.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -320,5 +331,6 @@ class PageSegInfo {
           fontScale == other.fontScale &&
           bold == other.bold &&
           italic == other.italic &&
-          underline == other.underline;
+          underline == other.underline &&
+          letterSpacing == other.letterSpacing;
 }

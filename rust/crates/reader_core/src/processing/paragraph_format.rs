@@ -46,6 +46,9 @@ pub struct ParagraphFormatSettings {
     pub smart_split_threshold: usize,
     /// M9.2：Aggressive 模式超长段切分阈值（字，用户可调）
     pub aggressive_split_threshold: usize,
+    /// P2：两端对齐全局开关（EPUB 书内 css text-align:justify 直接启用；
+    /// Left/未指定段落跟随本开关；TXT 全部跟随）
+    pub justify: bool,
 }
 
 impl Default for ParagraphFormatSettings {
@@ -57,6 +60,7 @@ impl Default for ParagraphFormatSettings {
             re_paragraph_mode: ReParagraphMode::Smart,
             smart_split_threshold: super::paragraph_splitter::SMART_THRESHOLD,
             aggressive_split_threshold: super::paragraph_splitter::AGGRESSIVE_THRESHOLD,
+            justify: false,
         }
     }
 }
@@ -85,6 +89,7 @@ impl ParagraphFormatSettings {
         self.re_paragraph_mode.hash(&mut hasher);
         self.smart_split_threshold.hash(&mut hasher);
         self.aggressive_split_threshold.hash(&mut hasher);
+        self.justify.hash(&mut hasher);
         hasher.finish()
     }
 

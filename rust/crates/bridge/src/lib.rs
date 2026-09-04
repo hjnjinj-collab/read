@@ -90,6 +90,8 @@ pub struct PageEntryInfo {
     pub font_scale: Option<f32>,
     /// 行内富文本分段（span 等，区间为行内字符偏移；空=整行统一）
     pub segments: Vec<PageSegInfo>,
+    /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行，绘制端转 letterSpacing）
+    pub letter_gap: f32,
     /// 章节首行标记（TXT 强制分页用；绘制端按粗体开关渲染标题加粗）
     pub is_chapter_start: bool,
     /// 表格单元格线框矩形（x/y/width/height 即几何；绘制端描边）
@@ -111,6 +113,8 @@ pub struct PageSegInfo {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    /// P2 justify 拉丁词保护段（Some(0)=该区间不加间隙；None=继承行级）
+    pub letter_spacing: Option<f32>,
 }
 
 impl From<Page> for PageInfo {
@@ -142,8 +146,10 @@ impl From<Page> for PageInfo {
                                 bold: s.bold,
                                 italic: s.italic,
                                 underline: s.underline,
+                                letter_spacing: s.letter_spacing,
                             })
                             .collect(),
+                        letter_gap: line.letter_gap,
                         is_chapter_start: line.is_chapter_start,
                         is_table_frame: false,
                         is_comment: line.is_comment,
@@ -158,6 +164,7 @@ impl From<Page> for PageInfo {
                         color: None,
                         font_scale: None,
                         segments: Vec::new(),
+                        letter_gap: 0.0,
                         is_chapter_start: false,
                         is_table_frame: false,
                         is_comment: false,
@@ -172,6 +179,7 @@ impl From<Page> for PageInfo {
                         color: None,
                         font_scale: None,
                         segments: Vec::new(),
+                        letter_gap: 0.0,
                         is_chapter_start: false,
                         is_table_frame: true,
                         is_comment: false,

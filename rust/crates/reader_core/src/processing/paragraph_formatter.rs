@@ -233,6 +233,7 @@ mod tests {
             re_paragraph_mode: mode,
             smart_split_threshold: crate::processing::SMART_THRESHOLD,
             aggressive_split_threshold: crate::processing::AGGRESSIVE_THRESHOLD,
+            justify: false,
         }
     }
 
