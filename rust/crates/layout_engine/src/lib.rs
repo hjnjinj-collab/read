@@ -326,6 +326,25 @@ impl LayoutEngine {
         }
     }
 
+    /// P4：双缓存显式注入（共享字形缓存 + 共享测量缓存）。
+    ///
+    /// structured（EPUB）路径此前经 with_measure_cache 每次全新 GlyphCache——
+    /// EPUB 每章首排逐字 ttf 冷查；经此构造器接入 SHARED_GLYPH_CACHE 的
+    /// O(1) Arc 共享克隆，prewarm 字形对 EPUB 热路径直接可见。
+    pub fn with_cache_and_measure(
+        config: LayoutConfig,
+        font_manager: FontManager,
+        glyph_cache: GlyphCache,
+        measure_cache: Arc<MeasureCache>,
+    ) -> Self {
+        Self {
+            config,
+            font_manager,
+            glyph_cache,
+            measure_cache,
+        }
+    }
+
     /// 替换 measure cache（Dart prefill 完成后接管）
     pub fn set_measure_cache(&mut self, cache: Arc<MeasureCache>) {
         self.measure_cache = cache;
@@ -774,8 +793,32 @@ impl LayoutEngine {
                     }
 
                     let para_line_count = laid.len(); // P2 justify：段末行判定
+                    // P4 孤行/寡行保护（对齐 TXT M9.2 行级分页口径）：
+                    // 段首一次性决策本页可容纳行数——拆分给下页残留单行 →
+                    // 本页少放一行（寡行）；本页仅能容 <2 行且页已有足够行 →
+                    // 整段推下页（孤行）。页行数不足 MIN_LINES 时交由既有
+                    // 逐行强制放置分支（与 TXT 一致）。
+                    let mut para_bottom_limit = bottom_limit;
+                    if para_line_count > 1 {
+                        let fit_avail =
+                            (((bottom_limit - current_y).max(0.0) + 0.01) / line_h) as usize;
+                        let mut fit = fit_avail.min(para_line_count);
+                        if para_line_count - fit == 1 {
+                            fit -= 1; // 寡行：下页收两行
+                        }
+                        if fit < 2 && text_lines_on_page >= MIN_LINES_PER_PAGE {
+                            fit = 0; // 孤行：整段推下页
+                        }
+                        if fit == 0 {
+                            if text_lines_on_page >= MIN_LINES_PER_PAGE {
+                                break_page!();
+                            }
+                        } else {
+                            para_bottom_limit = current_y + fit as f32 * line_h;
+                        }
+                    }
                     for (line_idx, line) in laid.into_iter().enumerate() {
-                        if current_y + line_h > bottom_limit
+                        if current_y + line_h > para_bottom_limit
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
                         {
                             break_page!();
@@ -3301,5 +3344,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn styled_orphan_avoided_on_page_break() {
+        // P4：EPUB styled 路径孤行保护——段落行数 = 页容+1 时，
+        // 无保护下页残留 1 行；有保护本页少放一行、下页收两行
+        let (engine, cfg) = create_test_engine();
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let usable = cfg.height - cfg.padding.top - cfg.padding.bottom;
+        let fit = ((usable + 0.01) / line_h) as usize; // 页可容行数
+        let para_lines = fit + 1;
+        let para = "甲".repeat(para_lines * 17);
+        let items = vec![LayoutItem::text(para)];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let counts: Vec<usize> = pages
+            .iter()
+            .map(|p| {
+                p.entries
+                    .iter()
+                    .filter(|e| matches!(e, PageEntry::Text(_)))
+                    .count()
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            vec![fit - 1, 2],
+            "本页少放一行、下页收两行（实得 {:?}，fit={})",
+            counts,
+            fit
+        );
+    }
 }
 

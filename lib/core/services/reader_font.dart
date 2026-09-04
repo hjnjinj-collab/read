@@ -59,6 +59,15 @@ class ReaderFont {
       family = 'ReaderSerif';
       displayName = '内置 Noto Sans CJK SC';
       debugPrint('✓ ReaderSerif (内置 Noto Sans CJK SC) registered');
+
+      // P4：向 Rust 注册同名字体 + 触发 GB2312 预热——此前启动路径 Rust
+      // 侧不知道 'ReaderSerif' 这个热路径字体名，SHARED_GLYPH_CACHE 预热键
+      // ("default") 对热路径完全不可见。软失败不阻塞启动（fallback 链兜底）。
+      try {
+        await rust_api.loadFontData(fontName: family, fontData: bytes);
+      } catch (e) {
+        debugPrint('✗ Rust 侧 ReaderSerif 注册失败（预热跳过）: $e');
+      }
       return true;
     } catch (e) {
       debugPrint('✗ Failed to register ReaderSerif from assets: $e');

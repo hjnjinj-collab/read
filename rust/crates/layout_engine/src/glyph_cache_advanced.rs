@@ -16,6 +16,9 @@ const GB2312_LEVEL2_CHARS: &str = "俺挨唉哎矮爱安暗按案昂凹奥八巴
 pub struct AdvancedGlyphCache {
     cache: GlyphCache,
     font_manager: Arc<Mutex<FontManager>>,
+    /// P4：最近一次预热键（font_name + font_size bits）——去重用，
+    /// load_font_data 与 set_default_font 连续调用同名字体不重复预热
+    last_prewarm: Mutex<Option<(String, u32)>>,
 }
 
 impl AdvancedGlyphCache {
@@ -24,6 +27,7 @@ impl AdvancedGlyphCache {
         Self {
             cache: GlyphCache::new(),
             font_manager,
+            last_prewarm: Mutex::new(None),
         }
     }
 
@@ -32,15 +36,26 @@ impl AdvancedGlyphCache {
         Self {
             cache: GlyphCache::with_capacity(capacity),
             font_manager,
+            last_prewarm: Mutex::new(None),
         }
     }
 
     /// 预热 GB2312 一级常用字
     ///
-    /// 在字体加载后调用此方法，可以显著提升首次渲染性能
+    /// 在字体加载后调用此方法，可以显著提升首次渲染性能。
+    /// P4：同 (font_name, font_size) 重复调用直接跳过（去重）。
+    /// **键必须与热路径 LayoutConfig.font_name 一致**，否则预热条目
+    /// 对热路径不可见（历史 bug：预热键 "default" vs 热路径 "ReaderSerif"）。
     pub fn prewarm(&self, font_name: &str, font_size: f32) {
+        {
+            let last = self.last_prewarm.lock().unwrap();
+            if last.as_ref() == Some(&(font_name.to_string(), font_size.to_bits())) {
+                return;
+            }
+        }
         let chars: Vec<char> = GB2312_LEVEL1_CHARS.chars().collect();
         self.batch_measure(font_name, font_size, &chars);
+        *self.last_prewarm.lock().unwrap() = Some((font_name.to_string(), font_size.to_bits()));
     }
 
     /// 批量测量字符

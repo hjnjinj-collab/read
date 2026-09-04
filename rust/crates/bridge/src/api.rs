@@ -92,7 +92,12 @@ static MEASURE_CACHE: Lazy<Arc<layout_engine::MeasureCache>> =
 /// 走此 helper，确保 Dart 端 Dart MeasureTextService 注入的 Skia 实测宽度对所有
 /// 排版入口即时可见。
 fn build_layout_engine(config: LayoutConfig, font_manager: FontManager) -> LayoutEngine {
-    LayoutEngine::with_measure_cache(config, font_manager, MEASURE_CACHE.clone())
+    // P4：同时注入 SHARED_GLYPH_CACHE 共享克隆——此前此 helper 仅注入
+    // measure cache，structured（EPUB）路径每章全新 GlyphCache 全冷
+    // （首排逐字 ttf 查询）。glyph_cache() 为 O(1) Arc bump 共享克隆，
+    // prewarm 字形对全部排版入口直接可见。
+    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().glyph_cache();
+    LayoutEngine::with_cache_and_measure(config, font_manager, glyph_cache, MEASURE_CACHE.clone())
 }
 
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
@@ -281,6 +286,18 @@ fn effective_punct_compress() -> bool {
     PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().punctuation_compress
 }
 
+/// P4：字体变更后按新字体重建 GB2312 预热。
+///
+/// 键 = (font_name, 默认字号)——必须与热路径 LayoutConfig.font_name 一致，
+/// 否则预热条目对热路径不可见（历史 bug：SHARED Lazy 预热键 "default"
+/// vs 热路径 Dart 传入的 "ReaderSerif"）。prewarm 内部按 last_prewarm
+/// 去重，load_font_data + set_default_font 连续调用不重复预热开销。
+/// 锁序：调用点必须已释放 FONT_MANAGER（prewarm 内部会取 FONT_MANAGER）。
+fn prewarm_shared_glyph(font_name: &str) {
+    let size = LayoutConfig::default().font_size;
+    SHARED_GLYPH_CACHE.lock().unwrap().prewarm(font_name, size);
+}
+
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
 /// 行为：写入 `tracing` 日志 + 静默返回 Ok，让上层 Dart 代码不因字体
@@ -293,12 +310,17 @@ pub fn load_font_file(font_name: String, font_path: String) -> anyhow::Result<()
     // 锁序约定：只允许 FONT_MANAGER ← SHARED 方向嵌套，禁止反向。
     let loaded = {
         let mut manager = FONT_MANAGER.lock().unwrap();
-        manager.load_font_from_file(font_name, &font_path)
+        manager.load_font_from_file(font_name.clone(), &font_path)
     };
     match loaded {
         Ok(()) => {
             // M8-P4：字体变更清共享字形缓存，防旧字体字形混入
-            SHARED_GLYPH_CACHE.lock().unwrap().clear();
+            // P4：清后按新字体重建预热（键对齐热路径）
+            {
+                let shared = SHARED_GLYPH_CACHE.lock().unwrap();
+                shared.clear();
+                shared.prewarm(&font_name, LayoutConfig::default().font_size);
+            }
             Ok(())
         }
         Err(e) => {
@@ -313,11 +335,16 @@ pub fn load_font_data(font_name: String, font_data: Vec<u8>) -> anyhow::Result<(
     // M9.4-F：锁序约定同 load_font_file——先释放 FONT_MANAGER 再取 SHARED
     let result = {
         let mut manager = FONT_MANAGER.lock().unwrap();
-        manager.load_font(font_name, font_data)
+        manager.load_font(font_name.clone(), font_data)
     };
     result?;
     // M8-P4：字体变更清共享字形缓存
-    SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    // P4：清后按新字体重建预热（键对齐热路径）
+    {
+        let shared = SHARED_GLYPH_CACHE.lock().unwrap();
+        shared.clear();
+        shared.prewarm(&font_name, LayoutConfig::default().font_size);
+    }
     Ok(())
 }
 
@@ -339,7 +366,13 @@ pub fn set_default_font(font_name: String) -> anyhow::Result<()> {
         manager.set_default_font(&font_name)
     };
     result?;
-    SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    // P4：清后按新默认字体重建预热（键对齐热路径；与 load_font_data 同名
+    // 时由 last_prewarm 去重，不重复预热开销）
+    {
+        let shared = SHARED_GLYPH_CACHE.lock().unwrap();
+        shared.clear();
+        shared.prewarm(&font_name, LayoutConfig::default().font_size);
+    }
     // M10-B：字体切换时清测量缓存（Dart 端的 Skia 测宽只对当前字体有效）
     MEASURE_CACHE.clear();
     Ok(())
