@@ -49,6 +49,9 @@ pub struct ParagraphFormatSettings {
     /// P2：两端对齐全局开关（EPUB 书内 css text-align:justify 直接启用；
     /// Left/未指定段落跟随本开关；TXT 全部跟随）
     pub justify: bool,
+    /// P3：行尾标点压缩悬挂（判满失败且行尾可压缩标点折半宽能放下时
+    /// 收进行尾，渲染端全宽绘制自然悬挂出右缘）
+    pub punctuation_compress: bool,
 }
 
 impl Default for ParagraphFormatSettings {
@@ -61,6 +64,7 @@ impl Default for ParagraphFormatSettings {
             smart_split_threshold: super::paragraph_splitter::SMART_THRESHOLD,
             aggressive_split_threshold: super::paragraph_splitter::AGGRESSIVE_THRESHOLD,
             justify: false,
+            punctuation_compress: false,
         }
     }
 }
@@ -90,6 +94,7 @@ impl ParagraphFormatSettings {
         self.smart_split_threshold.hash(&mut hasher);
         self.aggressive_split_threshold.hash(&mut hasher);
         self.justify.hash(&mut hasher);
+        self.punctuation_compress.hash(&mut hasher);
         hasher.finish()
     }
 

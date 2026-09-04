@@ -269,6 +269,7 @@ mod tests {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         
         let config2 = config1.clone();

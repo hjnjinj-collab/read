@@ -46,6 +46,9 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   // P2 两端对齐（EPUB 书内 justify 恒启用；TXT/Left 段跟随本开关）
   bool _justify = false;
 
+  // P3 行尾标点压缩悬挂
+  bool _punctuationCompress = false;
+
   // 坍塌动画样式（2026-09-04 P1 设置化：变更即时生效+落库，不经「应用设置」）
   double _collapseBlockSize = 36;
   double _collapseSlideDistance = 45;
@@ -82,6 +85,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _smartSplitThreshold = n.smartSplitThreshold;
     _aggressiveSplitThreshold = n.aggressiveSplitThreshold;
     _justify = n.justify;
+    _punctuationCompress = n.punctuationCompress;
     _collapseBlockSize = n.collapseStyle.blockSize;
     _collapseSlideDistance = n.collapseStyle.slideDistance;
     _collapseShadowColorValue = n.collapseStyle.shadowColorValue;
@@ -196,6 +200,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         smartSplitThreshold: _smartSplitThreshold,
         aggressiveSplitThreshold: _aggressiveSplitThreshold,
         justify: _justify,
+        punctuationCompress: _punctuationCompress,
       );
 
       if (!mounted) return;
@@ -534,6 +539,14 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   value: _justify,
                   onChanged: (value) {
                     setState(() => _justify = value);
+                  },
+                ),
+                _buildSwitchTile(
+                  title: '标点压缩',
+                  subtitle: '行尾标点悬挂出右缘，挤出更多排版空间',
+                  value: _punctuationCompress,
+                  onChanged: (value) {
+                    setState(() => _punctuationCompress = value);
                   },
                 ),
                 const SizedBox(height: 8),

@@ -2944,6 +2944,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
             let api_smart_split_threshold = <u32>::sse_decode(&mut deserializer);
             let api_aggressive_split_threshold = <u32>::sse_decode(&mut deserializer);
             let api_justify = <bool>::sse_decode(&mut deserializer);
+            let api_punctuation_compress = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2956,6 +2957,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
                             api_smart_split_threshold,
                             api_aggressive_split_threshold,
                             api_justify,
+                            api_punctuation_compress,
                         )?;
                         Ok(output_ok)
                     })(),

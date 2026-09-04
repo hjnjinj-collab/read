@@ -40,6 +40,10 @@ pub struct LayoutConfig {
     /// P2 两端对齐（2026-09-04）：TXT 全局开关；段落末行/短行豁免。
     /// EPUB 走 TextItem.align==Justify（CSS 或全局开关在 bridge 层重写）
     pub justify: bool,
+    /// P3 行尾标点压缩悬挂（2026-09-04）：判满失败且行尾可压缩标点折半宽
+    /// 能放下时收进行尾（预算按压缩宽），渲染端全宽绘制自然悬挂出右缘。
+    /// 记录宽度保持 raw 口径（justify 自动豁免悬挂行；TextLine.width 跳过钳制）
+    pub punctuation_compress: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +73,7 @@ impl Default for LayoutConfig {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         }
     }
 }
@@ -360,8 +365,9 @@ impl LayoutEngine {
                 let measured_w = self.measure_text_width($line_text, self.config.font_size);
                 // M12 必修3 兜底：width 不超过 content_width，避免绘制端"行宽声明 > 实际"
                 // （仅影响 TextLine.width 报告值，不影响二分搜索路径——二分搜索用 raw 宽度）
+                // P3：悬挂行跳过钳制（见 report_line_width 注释）
                 let content_width = self.content_width();
-                let clamped_w = measured_w.min(content_width);
+                let clamped_w = self.report_line_width(measured_w, $line_text, content_width);
                 current_lines.push(TextLine {
                     text: $line_text.clone(),
                     x: self.config.padding.left,
@@ -686,7 +692,7 @@ impl LayoutEngine {
                                 text: first_line.text.clone(),
                                 x,
                                 y: current_y,
-                                width: first_line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
+                                width: self.report_line_width(first_line.width, &first_line.text, content_width), // M11+12 实测宽；P3 悬挂行跳过钳制
                                 height: line_h,
                                 color: if item.is_comment {
                                     Some("#888888".to_string())
@@ -741,7 +747,7 @@ impl LayoutEngine {
                                 text: line.text.clone(),
                                 x,
                                 y: current_y,
-                                width: line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
+                                width: self.report_line_width(line.width, &line.text, content_width), // M11+12 实测宽；P3 悬挂行跳过钳制
                                 height: line_h,
                                 color: if item.is_comment {
                                     Some("#888888".to_string())
@@ -797,11 +803,14 @@ impl LayoutEngine {
                             0.0
                         };
                         char_index += line.char_end - line.char_start + line.newlines_before;
+                        // P3：悬挂行上报 raw 宽（先取再 move text）
+                        let w_report =
+                            self.report_line_width(line.width, &line.text, content_width);
                         entries.push(PageEntry::Text(TextLine {
                             text: line.text,
                             x,
                             y: current_y,
-                            width: line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
+                            width: w_report, // M11+12 实测宽；P3 悬挂行跳过钳制
                             height: line_h,
                             // 本章说：灰色小字；非注释走原始色
                             color: if item.is_comment {
@@ -1172,6 +1181,33 @@ impl LayoutEngine {
             }
         }
 
+        // P3 行尾标点压缩悬挂：二分已把预算排满，若下一字符是行尾可压缩
+        // 标点、且其折半宽能放进剩余空间 → 多吃一个字符。渲染端全宽绘制
+        // 自然悬挂出右缘（该字符恒为行尾字符）。
+        // 折扣按 Skia 单字符自然宽 × (1−率) 计——MeasureCache 缓存的仍是
+        // raw 整串宽，压缩只作用于本判定，不污染缓存（M12 红线）。
+        if self.config.punctuation_compress && best_end_char < total_chars {
+            let next_ch = text[char_indices[best_end_char]..]
+                .chars()
+                .next()
+                .unwrap_or('\0');
+            if kinsoku::is_line_end_compressible(next_ch) {
+                let ext_end_char = best_end_char + 1;
+                let ext_byte = if ext_end_char >= total_chars {
+                    text.len()
+                } else {
+                    char_indices[ext_end_char]
+                };
+                let candidate = &text[..ext_byte];
+                let w_full = self.measure_text_width(candidate, self.config.font_size);
+                let natural = self.measure_text_width(&next_ch.to_string(), self.config.font_size);
+                let discount = kinsoku::compression_discount(natural);
+                if w_full - discount <= max_width + eps {
+                    best_end_char = ext_end_char;
+                }
+            }
+        }
+
         let end_byte = if best_end_char >= total_chars {
             text.len()
         } else {
@@ -1363,6 +1399,20 @@ impl LayoutEngine {
             .unwrap_or(1.0)
     }
 
+    /// P3：行宽上报——悬挂行（压缩开关开 + 行尾可压缩标点）跳过
+    /// content_width 钳制，上报 raw 宽。若仍钳制，Dart 端 2% 超宽检查
+    /// （naturalWidth > width×1.02）会触发整行 canvas.scale 缩小而非悬挂。
+    /// 上报 raw 后 skiaW==rustW，检查天然通过，标点自然悬挂出右缘。
+    fn report_line_width(&self, line_width: f32, line_text: &str, content_width: f32) -> f32 {
+        if self.config.punctuation_compress
+            && line_text.chars().last().map_or(false, kinsoku::is_line_end_compressible)
+        {
+            line_width
+        } else {
+            line_width.min(content_width)
+        }
+    }
+
     /// 对齐折算为行起点 x（width 保持内容宽不变，仅平移原点）
     fn align_line_x(&self, line_width: f32, content_width: f32, align: Option<LayoutAlign>) -> f32 {
         match align {
@@ -1508,6 +1558,27 @@ impl LayoutEngine {
             // M12-v3 修复：动态计算 eps，适应 effective_max_width 的变化
             let eps = Self::line_fill_epsilon(effective_max_width);
             if current_width + w_eff > effective_max_width + eps && !pieces.is_empty() {
+                // P3 行尾标点压缩悬挂：判满且当前字符是行尾可压缩标点、
+                // 折半宽能放进剩余空间 → 以 raw 宽收进本行（pieces 记 raw，
+                // 与记录口径一致）并立即 flush——被压缩字符恒为行尾字符，
+                // 渲染端全宽绘制自然悬挂出右缘
+                if self.config.punctuation_compress
+                    && kinsoku::is_line_end_compressible(ch)
+                    && current_width + w_eff * kinsoku::PUNCT_COMPRESS_RATE
+                        <= effective_max_width + eps
+                {
+                    let g_cnt = grapheme.chars().count();
+                    pieces.push((grapheme, g_cnt, w_eff));
+                    line_chars += g_cnt;
+                    current_width += w_eff;
+                    flush_line!(line_chars);
+                    line_start += line_chars;
+                    pieces.clear();
+                    line_chars = 0;
+                    current_width = 0.0;
+                    gi += g_cnt;
+                    continue;
+                }
                 // M12-v4: 移除 break_line 调试日志，避免刷屏
                 let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
                 let word_boundary = is_word_char(ch)
@@ -1836,6 +1907,7 @@ mod tests {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         
         let engine = LayoutEngine::new(config.clone(), font_manager);
@@ -2962,6 +3034,7 @@ mod tests {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         let engine = LayoutEngine::new(config, font_manager);
         let text = "暮色里，小镇名叫泥瓶巷的僻静地方，有个孤苦伶仃的清瘦少年。此时，他正按照习俗，一手持蜡烛，一手持桃枝，照耀房梁、墙壁、木床等处，用桃枝敲敲打打，试图借此驱赶蛇蝎、蜈蚣等。他嘴里念念有词，是这座小镇祖祖辈辈传下来的老话：二月二，烛照梁，桃打墙，人间蛇虫无处藏。".to_string();
@@ -3097,6 +3170,56 @@ mod tests {
     }
 
     #[test]
+    fn txt_punct_compression_extends_line_fit() {
+        // P3：行尾压缩悬挂——实测口径 fs=16/cw=280/eps=5：
+        // 17 字=272≤285 全收；第 18 字「。」折半预算 280≤285 → 压缩收进行尾；
+        // 关闭开关时 288>285 判满 + 行首禁则回退拉回 1 字（16 字）
+        let para = format!("{}。乙", "甲".repeat(17));
+
+        let (mut engine, _) = create_test_engine();
+        engine.config.punctuation_compress = true;
+        let lines = engine.layout_paragraph_with_oracle(&para, 280.0).unwrap();
+        assert_eq!(
+            lines[0].chars().count(),
+            18,
+            "「。」应以压缩预算收进行尾（实得 {} 字）",
+            lines[0].chars().count()
+        );
+        assert!(lines[0].ends_with('。'), "被压缩字符应恒为行尾字符");
+        assert!(lines[1].starts_with('乙'));
+
+        let (engine2, _) = create_test_engine();
+        let lines2 = engine2.layout_paragraph_with_oracle(&para, 280.0).unwrap();
+        assert_eq!(
+            lines2[0].chars().count(),
+            16,
+            "关闭压缩时行首禁则回退应拉回 1 字（实得 {} 字）",
+            lines2[0].chars().count()
+        );
+    }
+
+    #[test]
+    fn styled_punct_compression_hangs_and_reports_raw_width() {
+        // P3：styled 路径压缩接受 + 悬挂行 width 上报 raw（跳过钳制）
+        let (mut engine, _) = create_test_engine();
+        engine.config.punctuation_compress = true;
+        let items = vec![LayoutItem::text(format!("{}。乙", "甲".repeat(17)))];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let line = match &pages[0].entries[0] {
+            PageEntry::Text(l) => l,
+            other => panic!("应为文本行，实为 {:?}", other),
+        };
+        assert!(line.text.ends_with('。'), "「。」应以压缩预算收进行尾");
+        assert_eq!(line.text.chars().count(), 18);
+        // raw 宽 ≈ 18×16=288 > content_width 280：悬挂行不钳制
+        assert!(
+            line.width > 280.0,
+            "悬挂行 width 应上报 raw 宽（实得 {}）",
+            line.width
+        );
+    }
+
+    #[test]
     fn txt_line_level_ignores_fill_threshold_slider() {
         // M9.2 核心：门槛调低（旧实现会在 fill≥0.5 时整段推页留 188px 空白）
         // 新策略无视门槛行级拆分——长段在剩余空间放置尽可能多的行
@@ -3177,4 +3300,6 @@ mod tests {
             gap
         );
     }
+
 }
+

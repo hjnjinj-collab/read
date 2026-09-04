@@ -418,6 +418,7 @@ abstract class RustLibApi extends BaseApi {
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
     required bool justify,
+    required bool punctuationCompress,
   });
 
   Future<void> crateApiUpdateBookCleaning({required String bookId, required ContentCleaningOptions options});
@@ -2587,6 +2588,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
     required bool justify,
+    required bool punctuationCompress,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2599,6 +2601,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_32(smartSplitThreshold, serializer);
           sse_encode_u_32(aggressiveSplitThreshold, serializer);
           sse_encode_bool(justify, serializer);
+          sse_encode_bool(punctuationCompress, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 72, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
@@ -2611,6 +2614,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           smartSplitThreshold,
           aggressiveSplitThreshold,
           justify,
+          punctuationCompress,
         ],
         apiImpl: this,
       ),
@@ -2627,6 +2631,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "smartSplitThreshold",
       "aggressiveSplitThreshold",
       "justify",
+      "punctuationCompress",
     ],
   );
 

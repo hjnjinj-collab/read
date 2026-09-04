@@ -64,6 +64,33 @@ pub fn justify_gap(
     gap
 }
 
+// ===== P3 标点压缩/悬挂（2026-09-04） =====
+//
+// 语义定案（用户拍板）：
+// - 压缩只作用于 Rust 断行的**宽度预算**（判满比较点），渲染端 Dart 以
+//   全宽字形原样绘制 → 行尾标点自然悬挂出右缘（悬挂语义，约探出半个字宽）
+// - 记录宽度（pieces/LaidLine.width/TextLine.width）保持 raw 口径：
+//   ① justify_gap 的 slack ≤ 0 对悬挂行自动豁免，无需特判
+//   ② TextLine.width 上报 raw 且悬挂行跳过 min(content_width) 钳制，
+//     Dart 端 skiaW==rustW → 2% 超宽缩放分支不触发（否则整行被 canvas.scale
+//     压小而非悬挂）
+// - 行首维持既有避头尾 pull-back 不动；压缩仅发生在「判满失败且该字符
+//   折半宽能放下」的接受瞬间，被压缩字符恒为行尾字符
+
+/// 行尾压缩率：可压缩标点按此比例计入行宽预算
+pub const PUNCT_COMPRESS_RATE: f32 = 0.5;
+
+/// 行尾可压缩判定：闭合类标点（= 行首禁则表成员，句读/引号/括号/省略/破折号）。
+/// 复用 LINE_START_FORBIDDEN 单源——能出现在行尾且挤在边上的正是这类字符。
+pub fn is_line_end_compressible(ch: char) -> bool {
+    LINE_START_FORBIDDEN.contains(&ch)
+}
+
+/// 压缩折扣（px）：自然宽 × (1 − 压缩率)，即该字符在宽度预算中让出的空间
+pub fn compression_discount(natural_width: f32) -> f32 {
+    natural_width * (1.0 - PUNCT_COMPRESS_RATE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +132,18 @@ mod tests {
         assert_eq!(justify_gap(0.0, 200.0, 1, 18.0), 0.0);
         // 已超宽不分配
         assert_eq!(justify_gap(210.0, 200.0, 10, 18.0), 0.0);
+    }
+
+    #[test]
+    fn line_end_compression_semantics() {
+        // 闭合类标点可压缩；汉字与开放类标点不可
+        assert!(is_line_end_compressible('。'));
+        assert!(is_line_end_compressible('”'));
+        assert!(is_line_end_compressible('）'));
+        assert!(!is_line_end_compressible('字'));
+        assert!(!is_line_end_compressible('「'));
+        // 折扣 = 自然宽 × (1 − 0.5)
+        assert!((compression_discount(18.0) - 9.0).abs() < 1e-4);
+        assert!((compression_discount(9.0) - 4.5).abs() < 1e-4);
     }
 }

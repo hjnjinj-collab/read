@@ -109,6 +109,7 @@ mod tests {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         
         // 创建多个章节
@@ -159,6 +160,7 @@ mod tests {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         
         // 创建 10 个较长的章节

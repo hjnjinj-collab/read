@@ -88,6 +88,9 @@ class ReaderSettings {
   /// P2 两端对齐全局开关（EPUB 书内 justify 恒启用；TXT/Left 段跟随）
   final bool justify;
 
+  /// P3 行尾标点压缩悬挂（判满失败且行尾可压缩标点折半宽能放下时收进行尾）
+  final bool punctuationCompress;
+
   final PageTurnMode pageTurnMode;
   final PageTurnSpeed pageTurnSpeed;
 
@@ -117,6 +120,7 @@ class ReaderSettings {
     required this.smartSplitThreshold,
     required this.aggressiveSplitThreshold,
     required this.justify,
+    required this.punctuationCompress,
     required this.pageTurnMode,
     required this.pageTurnSpeed,
     required this.collapse,
@@ -145,6 +149,7 @@ class ReaderSettings {
         smartSplitThreshold: 200,
         aggressiveSplitThreshold: 100,
         justify: false,
+        punctuationCompress: false,
         pageTurnMode: PageTurnMode.simulation,
         pageTurnSpeed: PageTurnSpeed.medium,
         collapse: CollapseStyle.defaults(),
@@ -179,6 +184,7 @@ class ReaderSettings {
         smartSplitThreshold: _i(j, 'smartSplitThreshold', 200),
         aggressiveSplitThreshold: _i(j, 'aggressiveSplitThreshold', 100),
         justify: _b(j, 'justify', false),
+        punctuationCompress: _b(j, 'punctuationCompress', false),
         pageTurnMode:
             _e(PageTurnMode.values, j['pageTurnMode'], PageTurnMode.simulation),
         pageTurnSpeed:

@@ -41,6 +41,7 @@ void main() async {
       smartSplitThreshold: settings.smartSplitThreshold,
       aggressiveSplitThreshold: settings.aggressiveSplitThreshold,
       justify: settings.justify,
+      punctuationCompress: settings.punctuationCompress,
     );
   } catch (_) {}
 

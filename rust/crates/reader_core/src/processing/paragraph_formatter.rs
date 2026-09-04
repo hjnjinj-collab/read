@@ -234,6 +234,7 @@ mod tests {
             smart_split_threshold: crate::processing::SMART_THRESHOLD,
             aggressive_split_threshold: crate::processing::AGGRESSIVE_THRESHOLD,
             justify: false,
+            punctuation_compress: false,
         }
     }
 

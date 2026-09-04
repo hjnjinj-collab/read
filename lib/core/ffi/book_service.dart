@@ -552,6 +552,7 @@ class BookService {
     required int smartSplitThreshold,
     required int aggressiveSplitThreshold,
     required bool justify,
+    required bool punctuationCompress,
   }) async {
     await rust_api.setParagraphFormatSettings(
       enableIndent: enableIndent,
@@ -561,6 +562,7 @@ class BookService {
       smartSplitThreshold: smartSplitThreshold,
       aggressiveSplitThreshold: aggressiveSplitThreshold,
       justify: justify,
+      punctuationCompress: punctuationCompress,
     );
   }
 

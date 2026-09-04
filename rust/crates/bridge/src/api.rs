@@ -276,6 +276,11 @@ fn effective_justify() -> bool {
     PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().justify
 }
 
+/// P3：行尾标点压缩悬挂开关（单源同上）
+fn effective_punct_compress() -> bool {
+    PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().punctuation_compress
+}
+
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
 /// 行为：写入 `tracing` 日志 + 静默返回 Ok，让上层 Dart 代码不因字体
@@ -563,6 +568,7 @@ pub fn set_paragraph_format_settings(
     smart_split_threshold: u32,
     aggressive_split_threshold: u32,
     justify: bool,
+    punctuation_compress: bool,
 ) -> anyhow::Result<()> {
     let mut settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap();
     settings.enable_indent = enable_indent;
@@ -572,6 +578,7 @@ pub fn set_paragraph_format_settings(
     settings.smart_split_threshold = smart_split_threshold.clamp(20, 2000) as usize;
     settings.aggressive_split_threshold = aggressive_split_threshold.clamp(20, 2000) as usize;
     settings.justify = justify;
+    settings.punctuation_compress = punctuation_compress;
     Ok(())
 }
 
@@ -1222,6 +1229,7 @@ pub fn layout_chapter(
         page_fill_threshold: 0.9,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
     
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1266,6 +1274,7 @@ pub fn get_page(
         page_fill_threshold,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1309,6 +1318,7 @@ pub fn get_page_count(
         page_fill_threshold,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
@@ -1369,6 +1379,7 @@ pub fn get_page_processed(
         page_fill_threshold,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     // 2. 处理 + 排版（带缓存，选项变更自动重算）
@@ -1444,6 +1455,7 @@ pub fn get_page_count_processed(
         page_fill_threshold,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     // 2. 处理 + 排版（带缓存）
@@ -2040,6 +2052,7 @@ fn structured_layout_config(
         page_fill_threshold,
         show_comments,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     }
 }
 
@@ -2566,6 +2579,7 @@ pub fn get_page_cached(
         page_fill_threshold: 0.9,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     // 委托统一实现：全关处理选项 = 原文行为；同样享受 options_hash 隔离的 LRU 缓存
@@ -2618,6 +2632,7 @@ pub fn get_page_count_cached(
         page_fill_threshold: 0.9,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     // 委托统一实现（全关处理选项 = 原文行为）
@@ -2670,6 +2685,7 @@ pub fn get_page_cached_processed(
         page_fill_threshold: 0.9,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
     
     // 生成缓存键（需要包含预处理参数）
@@ -2852,6 +2868,7 @@ pub fn create_reading_session(
         page_fill_threshold: 0.9,
         show_comments: true,
         justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
     };
 
     let book_id = format!("session_{}", uuid::Uuid::new_v4());
@@ -3470,6 +3487,7 @@ mod tests {
             smart_split_threshold: reader_core::SMART_THRESHOLD,
             aggressive_split_threshold: reader_core::AGGRESSIVE_THRESHOLD,
             justify: false,
+            punctuation_compress: false,
         }
     }
 
