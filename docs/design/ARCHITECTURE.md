@@ -714,6 +714,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A20 | P2 排版批次：kinsoku 收口扩表 + 两端对齐 justify + EPUB margin-bottom/line-height 物化 | ✅ 2026-09-04 |
 | A21 | P3 行尾标点压缩悬挂：断行预算压缩 + 悬挂渲染 + 设置开关 | ✅ 2026-09-04 |
 | A22 | P4 性能激活（缓存共享/预热键对齐/孤寡行保护/SmartPaginator 退役）+ 智能分段扩展 | ✅ 2026-09-04 |
+| A23 | P3 动画域清理：v15 fallback 删除 + buildSimulation 家族/PageFlipSession/viewport 只写链清退 | ✅ 2026-09-05 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -806,12 +807,27 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   用户拍板：不加新设置项，避免 FFI 签名再膨胀；未来要开关时一次换
   struct 传参。
 
-**所有 A1–A22 + APK 全线落地**。下一阶段候选：
+**A23 详细说明（P3 动画域清理，2026-09-05，用户实测四模式验收）**：
+
+- **删除 ~1120 行**：① buildSimulation 家族（基类抽象 + 4 子类实现 +
+  4 个私有 Simulation 类，基类 _animateTo 自 M10 起走 animateTo +
+  easeOutCubic，Simulation 路径 0 消费）；② revealPageImage（composer
+  恒传 null，paint 零消费，v16.9.3 揭示层已实时矢量直绘）；③
+  PageFlipSession 整文件（M9.5 未接线早期方案，composer 实际用散装
+  互斥旗标）+ 专属测试；④ RipplePainter v15（283 行——仅 shader 加载
+  失败时可达，且直绘无纸色底/无渲染参数违反硬约束 5；shader 失败降级
+  改 curl 直绘，对齐 collapse 先例）；⑤ ReaderRenderViewport 只写发布链
+  （全库零 listener 的"未来契约"，触点/进度由 composer 自有字段承载，
+  git 历史可找回）；⑥ widget_test.dart 模板残留（永久挂红）。
+- **保留确认**：CurlPainter fallback 直绘（collapse fallback + 定格/释放
+  依赖）、互斥旗标体系、快照串行链、PageTurnMode 4 枚举（按 name 持久化，
+  不可改名/删值）。
+- **顺带修复**：page_turn_controller_test 红测试（断言模式数 2 → 4）。
+
+**所有 A1–A23 + APK 全线落地**。下一阶段候选：
 - P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
 - P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
-- P2：性能激活已收官（A22：缓存共享 ✅ / 预热键对齐 ✅ / SmartPaginator 退役定案 / parallel 维持跳过）
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
-- P3：动画域清理（revealPageImage 字段 / buildSimulation 死代码 / RipplePainter v15 fallback 删除评估）
 - P3：Android 真机验证动画体系（手势坐标/dpr/toImage 性能）
 - P4：首字下沉、竖排（远期）
 - 字体：可调字号/行距/字重的预览滑杆、字体持久化（重启自动恢复）

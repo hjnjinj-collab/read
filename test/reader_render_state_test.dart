@@ -48,27 +48,8 @@ FrameSet _set(
 
 void main() {
   group('ReaderRenderStateStore', () {
-    test('viewport 更新不替换结构态 model', () {
-      final store = ReaderRenderStateStore();
-      store.publishFrameSet(_set(store, _page(0, 0)));
-      final structural = store.model;
-
-      store.publishViewport(
-        width: 100,
-        height: 200,
-        startX: 0,
-        startY: 0,
-        touchX: 50,
-        touchY: 0,
-        direction: PageDirection.next,
-        isAnimationRunning: true,
-      );
-
-      // 结构态引用不变
-      expect(identical(structural, store.model), isTrue);
-      // viewport 独立更新
-      expect(store.viewport.animationProgress, closeTo(0.5, 1e-6));
-    });
+    // P3 清理：viewport 通道相关测试已随 ReaderRenderViewport 删除
+    // （只写不读的"未来契约"，git 历史可找回）
 
     test('publishFrameSet 原子发布三页帧与槽位态', () {
       final store = ReaderRenderStateStore();
@@ -105,35 +86,6 @@ void main() {
       expect(pending.frame, isNull);
       expect(pending.outOfRange, isFalse);
       expect(pending.loadFailed, isFalse);
-    });
-
-    test('publishViewport 计算归一化动画进度', () {
-      final store = ReaderRenderStateStore();
-
-      store.publishViewport(
-        width: 400,
-        height: 800,
-        startX: 0,
-        startY: 0,
-        touchX: 200,
-        touchY: 0,
-        direction: PageDirection.next,
-        isAnimationRunning: true,
-      );
-      expect(store.viewport.animationProgress, closeTo(0.5, 1e-6));
-
-      // 进度限制在 [0, 1]
-      store.publishViewport(
-        width: 100,
-        height: 100,
-        startX: 0,
-        startY: 0,
-        touchX: 200,
-        touchY: 300,
-        direction: PageDirection.prev,
-        isAnimationRunning: true,
-      );
-      expect(store.viewport.animationProgress, 1.0);
     });
 
     test('相同页重发时 setRevision 递增', () {
@@ -231,37 +183,6 @@ void main() {
       store.removeModelListener(received.add);
     });
 
-    test('viewport listener 不收到结构态更新', () {
-      final store = ReaderRenderStateStore();
-      var viewportCount = 0;
-
-      store.addViewportListener((_) => viewportCount++);
-
-      store.publishFrameSet(_set(store, _page(0, 0)));
-
-      expect(viewportCount, 0);
-    });
-
-    test('model listener 不收到 viewport 更新', () {
-      final store = ReaderRenderStateStore();
-      var modelCount = 0;
-
-      store.addModelListener((_) => modelCount++);
-
-      store.publishViewport(
-        width: 100,
-        height: 100,
-        startX: 0,
-        startY: 0,
-        touchX: 50,
-        touchY: 0,
-        direction: PageDirection.next,
-        isAnimationRunning: true,
-      );
-
-      expect(modelCount, 0);
-    });
-
     test('publishEmpty 发布无 frame 占位并通知 listener', () {
       final store = ReaderRenderStateStore();
       final received = <ReaderRenderModel>[];
@@ -278,27 +199,14 @@ void main() {
     test('dispose 清理所有 listener', () {
       final store = ReaderRenderStateStore();
       var modelCount = 0;
-      var viewportCount = 0;
 
       store.addModelListener((_) => modelCount++);
-      store.addViewportListener((_) => viewportCount++);
 
       store.dispose();
 
       store.publishFrameSet(_set(store, _page(0, 0)));
-      store.publishViewport(
-        width: 100,
-        height: 100,
-        startX: 0,
-        startY: 0,
-        touchX: 50,
-        touchY: 0,
-        direction: PageDirection.next,
-        isAnimationRunning: false,
-      );
 
       expect(modelCount, 0);
-      expect(viewportCount, 0);
     });
   });
 }

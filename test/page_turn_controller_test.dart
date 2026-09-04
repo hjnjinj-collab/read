@@ -100,10 +100,12 @@ void main() {
   });
 
   group('PageTurnMode 枚举', () {
-    test('包含两种模式', () {
-      expect(PageTurnMode.values.length, 2);
+    test('包含四种模式', () {
+      expect(PageTurnMode.values.length, 4);
       expect(PageTurnMode.values, contains(PageTurnMode.simulation));
       expect(PageTurnMode.values, contains(PageTurnMode.verticalScroll));
+      expect(PageTurnMode.values, contains(PageTurnMode.ripple));
+      expect(PageTurnMode.values, contains(PageTurnMode.collapse));
     });
   });
 

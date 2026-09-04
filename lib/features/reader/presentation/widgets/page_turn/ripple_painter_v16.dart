@@ -26,14 +26,9 @@ class RipplePainterV16 extends CustomPainter {
   final PageInfo? revealPage;
   final double progress;
   final PageDirection direction;
-  
+
   /// 折叠页（旧页）的预生成纹理
   final ui.Image? foldingPageImage;
-
-  /// 揭示页（新页）的预生成纹理
-  /// v16.9.3: 揭示页已改为实时矢量直绘（与完成后渲染同源，消除切换色差），
-  /// 本字段仅为兼容 composer 传参保留，paint 不再消费
-  final ui.Image? revealPageImage;
   final ui.FragmentShader? shredderShader;
 
   const RipplePainterV16({
@@ -49,7 +44,6 @@ class RipplePainterV16 extends CustomPainter {
     this.baseLineHeight = 1.5,
     this.shadowColor = const Color(0xFF333630),
     this.foldingPageImage,
-    this.revealPageImage,
     this.shredderShader,
   });
 
@@ -85,7 +79,6 @@ class RipplePainterV16 extends CustomPainter {
       'direction': direction.toString(),
       'version': 'v16.9.7-dual-wave-ghost',
       'hasFoldingImg': foldingPageImage != null,
-      'hasRevealImg': revealPageImage != null,
     });
 
     if (revealPage == null && foldingPage == null) return;
@@ -134,7 +127,6 @@ class RipplePainterV16 extends CustomPainter {
       readerTrace('ripple.shader.missing', {
         'hasShader': shredderShader != null,
         'hasFoldingImg': foldingPageImage != null,
-        'hasRevealImg': revealPageImage != null,
       });
       if (foldingPageImage != null) {
         canvas.drawImageRect(
@@ -222,7 +214,6 @@ class RipplePainterV16 extends CustomPainter {
            foldingPage != oldDelegate.foldingPage ||
            revealPage != oldDelegate.revealPage ||
            foldingPageImage != oldDelegate.foldingPageImage ||
-           revealPageImage != oldDelegate.revealPageImage ||
            shredderShader != oldDelegate.shredderShader;
   }
 }

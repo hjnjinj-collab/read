@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/simple_models.dart';
 import '../providers/reader_provider.dart';
-import '../providers/reader_render_state.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
@@ -131,22 +130,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         Offset(_dragLastX, _dragLastY),
       );
     }
-
-    // 同时更新 viewport（供后续高级动画使用）——权威 viewport 与排版
-    // LayoutConfig 同源（LayoutBuilder 测量的 SafeArea 内实际区域）
-    final notifier2 = ref.read(readerProvider.notifier);
-    ref
-        .read(readerRenderStoreProvider)
-        .publishViewport(
-          width: notifier2.screenWidth,
-          height: notifier2.screenHeight,
-          startX: _dragStartX,
-          startY: _dragStartY,
-          touchX: local.dx,
-          touchY: local.dy,
-          direction: dx > 0 ? PageDirection.prev : PageDirection.next,
-          isAnimationRunning: true,
-        );
   }
 
   void _onPointerUp(PointerUpEvent event) {
@@ -154,30 +137,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _isDragging = false;
 
     final notifier = ref.read(readerProvider.notifier);
-    final screenWidth = notifier.screenWidth;
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
-
-    // 发布 viewport 最终状态
-    ref
-        .read(readerRenderStoreProvider)
-        .publishViewport(
-          width: screenWidth,
-          height: notifier.screenHeight,
-          startX: _dragStartX,
-          startY: _dragStartY,
-          touchX: _dragLastX,
-          touchY: _dragLastY,
-          direction: PageDirection.none,
-          isAnimationRunning: false,
-        );
 
     // 单次手势判定（此前重复计算两遍，已合并）
     final result = resolveGesture(
       dx: dx,
       dy: dy,
       velocityX: _releaseVelocityX,
-      screenWidth: screenWidth,
+      screenWidth: notifier.screenWidth,
     );
 
     // composer 正在拖拽 → 由其执行收尾动画
@@ -358,10 +326,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             final notifier = ref.read(readerProvider.notifier);
             // 权威 viewport = LayoutBuilder.constraints（已含 SafeArea 扣减）；
             // 此即 CustomPaint 实际画布尺寸（祖先约束逐层 strict 透传）。
-            // 调试日志附 MediaQuery.sizeOf/viewPaddingOf 用于裁切不一致时
-            // （曲面屏/分屏）溯源——三者中 constraints 与 sizeOf-paddingOf
-            // 不等才是真正的 cutout 残留，Flutter 自身问题。
-            final mq = MediaQuery.of(context);
+            // 与 MediaQuery.sizeOf/viewPaddingOf 不等才是真正的 cutout 残留
+            // （曲面屏/分屏），Flutter 自身问题——需要溯源时再临时取用。
             // v7 回退：用 constraints.maxWidth 而非 biggest + 不减 viewPadding
             //（SafeArea 已扣；viewPadding 已在 SafeArea 路径中处理）——
             // 回归 v1「同源 SafeArea 内 constraints」原意。最大约束

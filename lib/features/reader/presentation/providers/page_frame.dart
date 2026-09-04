@@ -115,10 +115,9 @@ class PageFrame {
     required this.resourceState,
   });
 
-  bool get frameReady => resourceState == FrameResourceState.ready;
-
   /// 不变量 4：图片全部 ready（或稳定 failed）才可用于动画。
   /// failed 是稳定终态（恒画占位），不构成随机跳变源。
+  /// （P3 清理：frameReady getter 已删——composer 消费 usableForAnimation）
   bool get usableForAnimation =>
       resourceState == FrameResourceState.ready ||
       resourceState == FrameResourceState.failed;
@@ -184,17 +183,16 @@ class FrameSet {
 }
 
 /// 待决手势：门控未满足时挂起的翻页意图（不变量 4 的等待载体）
+/// （P3 清理：registeredAt 字段已删——只写不读，composer 用自有 _pendingSince）
 @immutable
 class PendingTurnGesture {
   final PageDirection direction;
   final bool isTap;
-  final DateTime registeredAt;
   final int epoch;
 
   const PendingTurnGesture({
     required this.direction,
     required this.isTap,
-    required this.registeredAt,
     required this.epoch,
   });
 }

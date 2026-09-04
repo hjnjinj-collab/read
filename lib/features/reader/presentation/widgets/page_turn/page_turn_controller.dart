@@ -12,7 +12,7 @@ import 'page_turn_types.dart';
 /// 1. 手势直接驱动 — 拖拽时 [dragTo] 直接设置 progress
 /// 2. 自动播放 — 松手后 [animateTurn] 或 [animateSnapBack] 自动播放到目标值
 ///
-/// 子类只需覆写 [buildSimulation] 提供不同的动画曲线。
+/// 子类通过覆写 [turnDuration] 调节动画时长（如水波纹快/中/慢三档）。
 abstract class PageTurnAnimationController {
   PageTurnAnimationController({
     required TickerProvider vsync,
@@ -30,7 +30,7 @@ abstract class PageTurnAnimationController {
 
   /// 自动翻页动画时长（子类可覆写以调节速度，如水波纹快/中/慢三档）。
   /// 注意：这是实际生效的唯一时长来源——animateTo 显式传 duration，
-  /// 构造参数 duration 与 buildSimulation 均已不再被消费。
+  /// 构造参数 duration 不再被消费。
   Duration get turnDuration => const Duration(milliseconds: 300);
 
   PageDirection get direction;
@@ -109,11 +109,6 @@ abstract class PageTurnAnimationController {
   void stop() {
     _controller.stop();
   }
-
-  /// 子类提供动画曲线实现
-  ///
-  /// [from] 当前进度，[to] 目标进度（0.0=未翻，1.0=翻完）
-  Simulation buildSimulation({required double from, required double to});
 
   void _onTick() {
     onProgressUpdate(_controller.value);

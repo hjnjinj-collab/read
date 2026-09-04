@@ -14,7 +14,6 @@ import '../services/book_image_store.dart';
 import 'page_turn/page_turn_controller.dart';
 import 'page_turn/page_turn_types.dart';
 import 'page_turn/curl_painter.dart';
-import 'page_turn/ripple_painter.dart';
 import 'page_turn/ripple_painter_v16.dart';
 import 'page_turn/collapse_painter.dart';
 import 'reader_page_widget.dart';
@@ -1437,11 +1436,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final progress = _turnController!.progress;
     final notifier = ref.read(readerProvider.notifier);  // v16.9.5: 渲染参数同源
 
-    // v16.4: 折叠页 = current（当前页被粉碎）；revealPageImage 自
-    // v16.9.3 起不被 paint 消费（揭示层实时矢量直绘），恒传 null
+    // v16.4: 折叠页 = current（当前页被粉碎）；揭示层实时矢量直绘
+    // （v16.9.3），revealPageImage 恒 null 的遗留传参已随 P3 清理删除
     final ui.Image? foldingImg = _snapshotFor(widget.currentPage);
-    const ui.Image? revealImg = null;
-    
+
     // v16: 使用 shader 粉碎效果（如果 shader 和 image 都已准备好）
     if (_rippleShredderShader != null && foldingImg != null) {
       return SizedBox.expand(
@@ -1461,25 +1459,16 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
             baseLineHeight: notifier.lineHeight,
             waveSeed: _rippleSeed,
             foldingPageImage: foldingImg,
-            revealPageImage: revealImg,
             shredderShader: _rippleShredderShader,
           ),
         ),
       );
     }
     
-    // Fallback: 使用 v15 canvas 方块（shader 未加载或 image 未转换完成）
-    return SizedBox.expand(
-      child: CustomPaint(
-        size: Size.infinite,
-        painter: RipplePainter(
-          foldingPage: widget.currentPage,
-          revealPage: _targetFrame?.page,
-          progress: progress,
-          direction: _turnDirection,
-        ),
-      ),
-    );
+    // Fallback: shader/纹理未就绪 → 退化为 curl 直翻（保功能不冻结）。
+    // P3 清理：v15 canvas fallback 已删——其直绘无纸色底/无渲染参数，
+    // 违反硬约束 5（fallback 直绘须与正式渲染同源），curl 降级对齐 collapse。
+    return _buildCurlTransition();
   }
 
   /// 方块坍塌溶解过渡（collapse）—— 2026-09-04 M3

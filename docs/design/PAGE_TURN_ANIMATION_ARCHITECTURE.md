@@ -306,10 +306,16 @@ didUpdateWidget → _settledMatchesCurrentPage（identity/三元等价）
 
 | # | 候选 | 说明 |
 |---|---|---|
-| 1 | **设置持久化** | 翻页模式/速度/字体等均为内存态，重启回默认（drift 库已有，缺 settings 表或 shared_preferences） |
-| 2 | **坍塌参数设置化** | 阴影色 uShadowColor / COLLAPSE_FRAC / 方块大小 36 / 中心区阈值 30%~70% 已是常量旋钮，可接入设置面板 |
-| 3 | **暗黑主题** | `PageContentRenderer.paperColor` 硬编码 0xFFF5F1E8，无主题字段；阴影色已可配置可顺势接入 |
-| 4 | ripple 遗留清理 | `revealPageImage` 字段（paint 不消费）、`buildSimulation` 死代码路径、`RipplePainter`（v15 fallback）可评估删除 |
+| 1 | ~~设置持久化~~ | ✅ P1 落地（drift AppSettings 表，翻页模式/速度/坍塌参数/主题重启恢复） |
+| 2 | ~~坍塌参数设置化~~ | ✅ P1 落地（CollapseStyle block/slide/shadow 设置面板即时生效） |
+| 3 | ~~暗黑主题~~ | ✅ P1 落地（ReaderTheme light/dark 色板 + 缓存键主题分量） |
+| 4 | ~~ripple 遗留清理~~ | ✅ A23 删除：revealPageImage / buildSimulation 家族 / RipplePainter v15（shader 失败降级改 curl 直绘）；PageFlipSession 与 viewport 只写链一并清退 |
 | 5 | Android 真机验证 | 手势坐标系/dpr/toImage 性能（本体系全部在 Windows 验证） |
 | 6 | 拖拽坍塌中心插值 | 拖拽中坍塌中心恒为松手点/起手点，可做实时触点跟随 |
 | 7 | 速度档位平滑 | easeOutCubic 全档共用；慢档可考虑线性尾段避免「结尾拖沓感」 |
+
+> **A23 清理记录（2026-09-05）**：动画域死代码清退 ~1120 行——buildSimulation
+> 家族（基类已走 animateTo+easeOutCubic）、revealPageImage（paint 零消费）、
+> PageFlipSession（M9.5 未接线早期方案，互斥旗标即现状权威）、RipplePainter
+> v15（无纸色底/无渲染参数，违反硬约束 5；shader 失败降级改 curl 直绘）、
+> ReaderRenderViewport 只写链（零订阅者）。硬约束 1-11 不受影响。

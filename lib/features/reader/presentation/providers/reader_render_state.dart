@@ -74,55 +74,25 @@ class ReaderRenderModel {
   });
 }
 
-/// 高频 viewport 与动画状态
-///
-/// 承载触点坐标、动画进度等高频变化数据，与结构态 [ReaderRenderModel]
-/// 独立更新，避免触点事件替换整个结构态导致不必要的 rebuild。
-@immutable
-class ReaderRenderViewport {
-  final double width;
-  final double height;
-  final double startX;
-  final double startY;
-  final double touchX;
-  final double touchY;
-  final PageDirection direction;
-  final bool isAnimationRunning;
-  final double animationProgress;
-
-  const ReaderRenderViewport({
-    this.width = 0,
-    this.height = 0,
-    this.startX = 0,
-    this.startY = 0,
-    this.touchX = 0,
-    this.touchY = 0,
-    this.direction = PageDirection.none,
-    this.isAnimationRunning = false,
-    this.animationProgress = 0,
-  });
-}
-
 /// 双通道只读渲染状态存储
 ///
 /// - 低频 [model]：FrameSet（三页帧）、选择、朗读高亮、loading
-/// - 高频 [viewport]：触点坐标、方向、动画进度
 ///
 /// FrameSet 发布协议：
 /// - [publishFrameSet] 原子替换当前集合（整体提交，无半更新）
 /// - [advanceSession] 使旧会话全部帧作废（换书/设置/窗口变化）
 /// - 待决手势（[registerPendingTurn]/[consumePendingTurn]）承载
 ///   「帧未就绪时挂起的翻页意图」，发布落地后由订阅者重试
+///
+/// P3 清理：高频 viewport 通道已删——publishViewport/addViewportListener
+/// 全库零订阅者（只写不读的"未来契约"），触点/进度由 composer 自有
+/// 字段直接承载（git 历史可找回）。
 class ReaderRenderStateStore {
   ReaderRenderModel _model;
-  ReaderRenderViewport _viewport;
 
-  ReaderRenderStateStore()
-    : _model = const ReaderRenderModel(),
-      _viewport = const ReaderRenderViewport();
+  ReaderRenderStateStore() : _model = const ReaderRenderModel();
 
   ReaderRenderModel get model => _model;
-  ReaderRenderViewport get viewport => _viewport;
 
   // ── FrameSet / 会话身份 ──
 
@@ -149,7 +119,6 @@ class ReaderRenderStateStore {
   // ── listener 管理（对齐 StateFlow collect） ──
 
   final List<void Function(ReaderRenderModel)> _modelListeners = [];
-  final List<void Function(ReaderRenderViewport)> _viewportListeners = [];
 
   void addModelListener(void Function(ReaderRenderModel) listener) {
     _modelListeners.add(listener);
@@ -159,17 +128,8 @@ class ReaderRenderStateStore {
     _modelListeners.remove(listener);
   }
 
-  void addViewportListener(void Function(ReaderRenderViewport) listener) {
-    _viewportListeners.add(listener);
-  }
-
-  void removeViewportListener(void Function(ReaderRenderViewport) listener) {
-    _viewportListeners.remove(listener);
-  }
-
   void dispose() {
     _modelListeners.clear();
-    _viewportListeners.clear();
   }
 
   // ── 发布方法 ──
@@ -252,7 +212,6 @@ class ReaderRenderStateStore {
     final gesture = PendingTurnGesture(
       direction: direction,
       isTap: isTap,
-      registeredAt: DateTime.now(),
       epoch: _sessionEpoch,
     );
     _pendingTurn = gesture;
@@ -289,42 +248,4 @@ class ReaderRenderStateStore {
   /// 2026-09-02 阶段2优化：允许 reader_provider 检测挂起的翻页方向，
   /// 优先预热目标方向的资源。
   PageDirection? get pendingTurnDirection => _pendingTurn?.direction;
-
-  /// 发布高频 viewport 状态（触点/动画进度）
-  ///
-  /// width/height 口径 = 权威 viewport（reader_provider.screenWidth/Height，
-  /// 即 LayoutBuilder 测量的 SafeArea 内实际可用区域）——调用方
-  /// reader_page 已单源化，勿传 MediaQuery.size 全屏值。
-  void publishViewport({
-    required double width,
-    required double height,
-    required double startX,
-    required double startY,
-    required double touchX,
-    required double touchY,
-    required PageDirection direction,
-    required bool isAnimationRunning,
-  }) {
-    final xProgress = width > 0 ? (touchX - startX).abs() / width : 0.0;
-    final yProgress = height > 0 ? (touchY - startY).abs() / height : 0.0;
-
-    _viewport = ReaderRenderViewport(
-      width: width,
-      height: height,
-      startX: startX,
-      startY: startY,
-      touchX: touchX,
-      touchY: touchY,
-      direction: direction,
-      isAnimationRunning: isAnimationRunning,
-      animationProgress: (xProgress > yProgress ? xProgress : yProgress).clamp(
-        0.0,
-        1.0,
-      ),
-    );
-
-    for (final listener in _viewportListeners) {
-      listener(_viewport);
-    }
-  }
 }
