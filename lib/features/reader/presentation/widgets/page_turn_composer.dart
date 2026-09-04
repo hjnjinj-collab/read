@@ -16,7 +16,7 @@ import 'page_turn/page_turn_types.dart';
 import 'page_turn/curl_painter.dart';
 import 'page_turn/ripple_painter.dart';
 import 'page_turn/ripple_painter_v16.dart';
-import 'page_turn/ripple_turn_controller.dart';
+import 'page_turn/collapse_painter.dart';
 import 'reader_page_widget.dart';
 import '../diagnostics/reader_trace.dart';
 
@@ -33,10 +33,14 @@ class PageTurnComposer extends ConsumerStatefulWidget {
   final PageInfo currentPage;
   final PageTurnMode mode;
 
+  /// 翻页动画速度（快/中/慢三档，当前作用于水波纹动画时长）
+  final PageTurnSpeed speed;
+
   const PageTurnComposer({
     super.key,
     required this.currentPage,
     required this.mode,
+    this.speed = PageTurnSpeed.medium,
   });
 
   @override
@@ -142,20 +146,67 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 水波纹 v16 shader（2026-09-03 新增）
   ui.FragmentShader? _rippleShredderShader;
 
+  /// 方块坍塌溶解 shader（2026-09-04 M3 新增，与水波纹各自独立加载）
+  ui.FragmentShader? _collapseShader;
+
   /// v16.9.7: 每次翻页随机种子（shader 双波叠加波形不规则化）
+  /// 坍塌模式复用（波次抖动不规则化）
   double _rippleSeed = 0.0;
 
-  /// 水波纹 v16 页面纹理缓存（预转换的 ui.Image）
-  /// 2026-09-03 v16.1: 修复"纹理错位"——以 frameSet.setRevision 为键，
-  /// frameSet 切换时立刻淘汰旧纹理，绝不跨 setRevision 复用
-  ui.Image? _currentPageImage;
-  int? _currentImagePageId;
-  ui.Image? _nextPageImage;
-  int? _nextImagePageId;
-  ui.Image? _prevPageImage;
-  int? _prevImagePageId;
-  /// 翻页方向（决定显示哪一侧的纹理）
-  PageDirection? _prewarmDirection;
+  /// 2026-09-04: 排队的点击翻页意图（快速连点时被守卫拒绝的点击，
+  /// 覆盖式只留最后一次）。本轮翻页完全落地回 idle 后由
+  /// [_maybeRunQueuedTurn] 补一次完整动画翻页。
+  PageDirection? _queuedTapTurn;
+  Offset? _queuedTapPosition;
+
+  /// 消费排队点击：回到 idle 后补一次完整动画翻页（走完整门控——
+  /// 若此时邻帧未就绪会正常挂起/直翻，与直接点击同语义）。
+  /// postFrame 触发：让 release 后的 build 先落地，避免同帧二次 setState。
+  void _maybeRunQueuedTurn() {
+    final d = _queuedTapTurn;
+    if (d == null) return;
+    _queuedTapTurn = null;
+    final pos = _queuedTapPosition;
+    _queuedTapPosition = null;
+    readerTrace('turn.queued.run', {'direction': d});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      onTapTurn(d, tapPosition: pos);
+    });
+  }
+
+  /// 方块类 shader 模式（水波纹/坍塌共用纹理预热与拖拽跟手管线）
+  bool get _isBlockShaderMode =>
+      widget.mode == PageTurnMode.ripple ||
+      widget.mode == PageTurnMode.collapse;
+
+  /// 2026-09-04: 页面快照 LRU 缓存（按「页」键控，替代原按 setRevision
+  /// 键控的三张固定纹理）。
+  ///
+  /// 动机：revision 键控下每次翻页提交三张纹理全部作废重生成——紧接着的
+  /// 点击/拖拽必然撞上 ~50-150ms 的 toImage 生成窗口（动画启动延迟，
+  /// 拖拽期间手指无跟随）。纹理内容只取决于页面实例+尺寸+dpr+渲染参数，
+  /// 与 revision 无关；翻页提交后新当前页 = 上一轮预热的 next 页实例
+  /// （键含实例身份哈希）→ 命中零延迟。
+  ///
+  /// 键 = pageId(实例哈希)|chapter/page|视口尺寸|dpr|渲染参数——任一变化
+  /// 都生成新键，杜绝过时内容（实例重建/设置变更/窗口缩放）。
+  final Map<String, ui.Image> _snapshotCache = <String, ui.Image>{};
+  static const int _snapshotCacheCapacity = 8;
+
+  /// 2026-09-04 快照生成串行链：所有 _pageToImage 调用经 [_serializeSnapshot]
+  /// 排队执行——publish 触发的 _prewarmAllPageImages 与翻页启动的即时生成
+  /// 可能并发，串行化消除「并发写同一缓存字段 / 先 dispose 后赋值」窗口
+  Future<void>? _snapshotChain;
+
+  /// 2026-09-04: 快照就绪门控窗口（_startTurnAnimated await 期间）内
+  /// 手指抬起挂起的 drag end——启动完成后补跑，否则手势被吞、动画
+  /// 冻结在 0 进度
+  bool? _pendingDragEndShouldTurn;
+
+  /// 2026-09-04: tap 挂起超时轮次（跨重挂累计）。_clearPending 每轮都会
+  /// 重置 _pendingRetryCount，tap 的等待轮次必须用独立计数
+  int _tapWaitRounds = 0;
 
   @override
   void initState() {
@@ -170,21 +221,35 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     store.addModelListener(_onModelPublished);
   }
   
-  /// 加载水波纹 shaders（v16 新增 ripple_shredder）
+  /// 加载水波纹 shaders（v16 新增 ripple_shredder）+ 坍塌 shader（M3）
   Future<void> _loadShaders() async {
+    // 水波纹粉碎 shader
     try {
-      // 加载 v16 粉碎效果 shader
       final shredderProgram = await ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
       if (mounted) {
         setState(() {
           _rippleShredderShader = shredderProgram.fragmentShader();
         });
         readerTrace('ripple.shader.loaded', {'shader': 'ripple_shredder'});
-        // v16.1: shader 加载完成后立即预热当前页面纹理
-        _prewarmAllPageImages();
       }
     } catch (e) {
       readerTrace('ripple.shader.load.error', {'error': e.toString()});
+    }
+    // 坍塌溶解 shader（独立 try：一个失败不影响另一个）
+    try {
+      final collapseProgram = await ui.FragmentProgram.fromAsset('shaders/block_collapse.frag');
+      if (mounted) {
+        setState(() {
+          _collapseShader = collapseProgram.fragmentShader();
+        });
+        readerTrace('collapse.shader.loaded', {'shader': 'block_collapse'});
+      }
+    } catch (e) {
+      readerTrace('collapse.shader.load.error', {'error': e.toString()});
+    }
+    // v16.1: 任一方块类 shader 就绪后立即预热当前页面纹理
+    if (_rippleShredderShader != null || _collapseShader != null) {
+      _prewarmAllPageImages();
     }
   }
   
@@ -241,111 +306,116 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     }
   }
   
-  /// 预热当前页面纹理（翻页启动前调用）
-  /// 2026-09-03 v16.1: 取消幂等保护——每次调用都基于当前 pageId 重新生成
-  /// 防止"纹理错位"（旧 pageId 的 image 被复用到新 page）
-  Future<void> _prewarmCurrentPageImage() async {
-    if (widget.mode != PageTurnMode.ripple) return;
-    final size = _viewport;
-    final store = ref.read(readerRenderStoreProvider);
-    final set = store.frameSet;
-    if (set == null) return;
-    final currentId = set.setRevision;
-    final currentPage = set.current.page;
-    
-    // 仅在 pageId 变化时重新生成（避免每帧重复 toImage）
-    if (_currentImagePageId != currentId || _currentPageImage == null) {
-      final img = await _pageToImage(currentPage, size);
-      if (img == null) return;
-      if (!mounted) {
-        img.dispose();
-        return;
+  /// 快照生成串行链：所有 _pageToImage 调用经此排队执行（2026-09-04
+  /// 接入纹理预缓存体系）。publish 预热与翻页启动的即时生成可能并发，
+  /// 串行化消除「并发写同一缓存字段 / 先 dispose 后赋值」窗口。
+  Future<T> _serializeSnapshot<T>(Future<T> Function() task) {
+    final prev = _snapshotChain ?? Future<void>.value();
+    final completer = Completer<void>();
+    _snapshotChain = completer.future;
+    return prev.then((_) async {
+      try {
+        return await task();
+      } finally {
+        completer.complete();
       }
-      // 释放旧 image（避免内存泄漏）
-      _currentPageImage?.dispose();
-      _currentPageImage = img;
-      _currentImagePageId = currentId;
+    });
+  }
+
+  /// 快照缓存键：页实例身份 + 章节页码 + 视口尺寸 + dpr + 渲染参数。
+  /// 任一变化即新键——实例重建（重排）/设置变更/窗口缩放都不会命中
+  /// 过时内容。
+  String _snapshotKey(PageInfo page) {
+    final size = _viewport;
+    final dpr = View.of(context).devicePixelRatio;
+    final notifier = ref.read(readerProvider.notifier);
+    // 2026-09-04 P1 暗黑主题：主题分量入键——深浅两套快照天然隔离，
+    // 切主题后旧条目不命中（由 LRU 淘汰），门控按新主题重新生成
+    return '${readerPageId(page)}|${page.chapterIndex}/${page.pageIndex}'
+        '|${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}'
+        '|$dpr|${notifier.fontSize}|${notifier.lineHeight}'
+        '|${notifier.boldEnabled}|${notifier.italicEnabled}'
+        '|${notifier.boldEnabled && !notifier.renderAsEpub}'
+        '|${PageContentRenderer.theme.name}';
+  }
+
+  /// 取页面快照（LRU touch：命中即刷新访问序，动画在用的纹理不会被淘汰）
+  ui.Image? _snapshotFor(PageInfo? page) {
+    if (page == null) return null;
+    final key = _snapshotKey(page);
+    final img = _snapshotCache.remove(key);
+    if (img != null) {
+      _snapshotCache[key] = img;
+    }
+    return img;
+  }
+
+  /// 确保页面快照已生成（缓存命中直接返回；未命中经串行链生成入库）
+  Future<void> _ensureSnapshotFor(PageInfo page) async {
+    final key = _snapshotKey(page);
+    if (_snapshotCache.containsKey(key)) return;
+    final img = await _serializeSnapshot(() => _pageToImage(page, _viewport));
+    if (img == null) return;
+    if (!mounted) {
+      img.dispose();
+      return;
+    }
+    // await 后复查：生成期间并发预热可能已入库同一页
+    if (_snapshotCache.containsKey(key)) {
+      img.dispose();
+      return;
+    }
+    _snapshotCache[key] = img;
+    // LRU 淘汰：容量上限，最旧访问序先出（动画在用的纹理每次 build
+    // 都被 _snapshotFor touch，恒为最新，不会被淘汰）
+    while (_snapshotCache.length > _snapshotCacheCapacity) {
+      final oldestKey = _snapshotCache.keys.first;
+      _snapshotCache.remove(oldestKey)?.dispose();
     }
   }
-  
-  /// 预热所有相邻页面纹理（current + next + prev）
-  /// 2026-09-03 v16.1: 在 _onModelPublished 中调用，确保 shader 始终
-  /// 拿到"当前正在翻页的"页面的真实纹理，杜绝"内容错位"
+
+  /// 确保旧页快照已生成（坍塌/水波纹动画启动门控）
+  ///
+  /// 2026-09-04 接入纹理预缓存体系：此前 _beginTurn 调用
+  /// _prewarmCurrentPageImage（async）不 await 就启动动画 → 快速点击时
+  /// 首帧用上一轮过时快照或空快照 = 「动画直接消失/过时纹理翻页」根因。
+  /// 现在与仿真翻页的 usableForAnimation 门控同级：快照未就绪不启动动画。
+  ///
+  /// 2026-09-04 v2：按页 LRU 缓存后本门控常态走快路径（上一轮 publish
+  /// 预热已生成当前页），动画启动零延迟；仅首次遇到全新页时才有
+  /// 一次 toImage 生成（~30-60ms）。
+  Future<bool> _ensureCurrentSnapshotReady() async {
+    final set = ref.read(readerRenderStoreProvider).frameSet;
+    if (set == null) return false;
+    final page = set.current.page;
+    // 快路径：按页缓存命中
+    if (_snapshotCache.containsKey(_snapshotKey(page))) return true;
+    final sw = Stopwatch()..start();
+    await _ensureSnapshotFor(page);
+    final ok = _snapshotCache.containsKey(_snapshotKey(page));
+    readerTrace('turn.snapshot', {
+      'ok': ok,
+      'waitMs': sw.elapsedMilliseconds,
+      'page': '${page.chapterIndex}/${page.pageIndex}',
+    });
+    return ok;
+  }
+
+  /// 预热当前页快照（publish 触发）。
+  /// 2026-09-04 v2: 按页缓存后邻居页纹理不再需要——坍塌不消费 reveal
+  /// 纹理（层1 实时矢量直绘），水波纹 revealPageImage 自 v16.9.3 起也不被
+  /// paint 消费。只预热 current：翻页提交后上一轮的目标页实例已在缓存
+  /// （键含实例身份），成为新当前页时命中零延迟。
   Future<void> _prewarmAllPageImages() async {
-    if (widget.mode != PageTurnMode.ripple) return;
-    if (_rippleShredderShader == null) return; // shader 未加载完成时跳过
-    
-    final size = _viewport;
-    final store = ref.read(readerRenderStoreProvider);
-    final set = store.frameSet;
+    if (!_isBlockShaderMode) return;
+    if (_rippleShredderShader == null && _collapseShader == null) {
+      return; // shader 未加载完成时跳过
+    }
+    final set = ref.read(readerRenderStoreProvider).frameSet;
     if (set == null) return;
-    
-    // 并行预热 3 个页面纹理（current/next/prev）
-    final futures = <Future<void>>[];
-    
-    // 1. 当前页
-    final currentId = set.setRevision;
-    if (_currentImagePageId != currentId || _currentPageImage == null) {
-      futures.add(() async {
-        final img = await _pageToImage(set.current.page, size);
-        if (img == null) return;
-        if (!mounted) {
-          img.dispose();
-          return;
-        }
-        _currentPageImage?.dispose();
-        _currentPageImage = img;
-        _currentImagePageId = currentId;
-      }());
-    }
-    
-    // 2. 下一页
-    final nextSlot = set.next;
-    if (nextSlot != null && nextSlot.frame != null) {
-      final nextFrame = nextSlot.frame!;
-      // 用 setRevision + chapterIndex/pageIndex 复合 key（避免 next 变化时 key 变化）
-      final nextId = set.setRevision * 1000 + nextFrame.identity.chapterIndex * 100 + nextFrame.identity.pageIndex;
-      if (_nextImagePageId != nextId || _nextPageImage == null) {
-        futures.add(() async {
-          final img = await _pageToImage(nextFrame.page, size);
-          if (img == null) return;
-          if (!mounted) {
-            img.dispose();
-            return;
-          }
-          _nextPageImage?.dispose();
-          _nextPageImage = img;
-          _nextImagePageId = nextId;
-        }());
-      }
-    }
-    
-    // 3. 上一页
-    final prevSlot = set.previous;
-    if (prevSlot != null && prevSlot.frame != null) {
-      final prevFrame = prevSlot.frame!;
-      // prev 用负数 key 避免和 next 冲突
-      final prevId = -(set.setRevision * 1000 + prevFrame.identity.chapterIndex * 100 + prevFrame.identity.pageIndex);
-      if (_prevImagePageId != prevId || _prevPageImage == null) {
-        futures.add(() async {
-          final img = await _pageToImage(prevFrame.page, size);
-          if (img == null) return;
-          if (!mounted) {
-            img.dispose();
-            return;
-          }
-          _prevPageImage?.dispose();
-          _prevPageImage = img;
-          _prevImagePageId = prevId;
-        }());
-      }
-    }
-    
-    // 等待所有预热完成
-    if (futures.isNotEmpty) {
-      await Future.wait(futures);
-      if (mounted) setState(() {});
-    }
+    final existed = _snapshotCache.containsKey(_snapshotKey(set.current.page));
+    await _ensureSnapshotFor(set.current.page);
+    if (mounted && !existed) setState(() {});
   }
 
   @override
@@ -357,12 +427,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _turnController?.stop();
     _turnController?.dispose();
     // v16.1: 释放所有预热的页面纹理（避免内存泄漏）
-    _currentPageImage?.dispose();
-    _currentPageImage = null;
-    _nextPageImage?.dispose();
-    _nextPageImage = null;
-    _prevPageImage?.dispose();
-    _prevPageImage = null;
+    for (final img in _snapshotCache.values) {
+      img.dispose();
+    }
+    _snapshotCache.clear();
     super.dispose();
   }
 
@@ -378,6 +446,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 永远等不到 retry success。J 项用 _pendingRetryCount 上限
     // 兜底 + 此守卫避免无谓重入。
     if (_pendingDirection != null) return;
+
+    // 新手势开始：重置 tap 超时轮次
+    _tapWaitRounds = 0;
 
     final result = _targetFrameFor(direction);
     readerTrace('turn.start', {
@@ -400,22 +471,42 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         // true），FrameSet 发布落地后 listener 也会主动重试。
         _registerPending(direction, isTap: false, touch: localTouch);
         return;
-      case TargetReady(:final frame):
+      case TargetReady():
         _clearPending(reason: 'started');
-        _beginTurn(direction, frame, localTouch);
+        unawaited(_startTurnAnimated(direction, localTouch, isTap: false, autoPlay: false));
     }
   }
 
   /// 拖拽更新：驱动动画进度 + 记录实时触点
   void onDragUpdate(double progress, Offset localTouch) {
     if (!_isActive || _turnController == null) return;
+    // 2026-09-04 关键守卫：自动动画播放中拒绝拖拽驱动。
+    // AnimationController.value setter 内部会 stop() 打断进行中的收尾
+    // 动画——此前拖拽位移会静默取消动画，而 _runAuto 的裸 await 在
+    // TickerFuture 被取消后永不完成 → _turnEndInFlight 永久 true →
+    // 所有后续手势被吞 → 界面永久冻结在中途帧（600ms 中档必现）。
+    if (_turnController!.isAnimating) return;
     _lastTouchLocal = localTouch;
     _turnController!.dragTo(progress.clamp(0.0, 1.0));
   }
 
   /// 拖拽结束：根据判定结果执行自动动画
-  Future<void> onDragEnd({required bool shouldTurn}) async {
-    if (!_isActive || _turnController == null) return;
+  ///
+  /// [direction]：本手势判定的翻页方向。动画在途时飘来的 drag-end 若带
+  /// 翻页意图，按此方向排队补一次动画翻页（可空，退化用当前动画方向）。
+  Future<void> onDragEnd({
+    required bool shouldTurn,
+    PageDirection? direction,
+  }) async {
+    if (!_isActive) return;
+    if (_turnController == null) {
+      // 2026-09-04: 快照就绪门控窗口（_startTurnAnimated await 期间）——
+      // 手指已抬起但动画尚未启动。挂起本次收尾由启动封装补跑；
+      // 直接 return 会吞掉手势 → 动画冻结在 0 进度
+      _pendingDragEndShouldTurn = shouldTurn;
+      readerTrace('turn.drag-end.pending', {'shouldTurn': shouldTurn});
+      return;
+    }
     // M9.5-J：挂起中收到 drag end（FrameSet 期间 gesture 中断）→ 走直翻保功能
     // 不创建新 controller（避免与 listener retry 竞争）
     if (_pendingDirection != null) {
@@ -427,13 +518,38 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         'shouldTurn': shouldTurn,
       });
       if (shouldTurn) {
+        // 2026-09-04 修复"动画直接消失"：挂起窗口内帧往往已就绪
+        // （发布/解码在几十 ms 内完成），此时补跑完整动画而非直翻；
+        // 仅越界（章节边界/加载失败）才直翻保功能。
+        final result = _targetFrameFor(d);
+        if (result is TargetReady) {
+          await _startTurnAnimated(d, _dragFirstTouch, isTap: false, autoPlay: true);
+          return;
+        }
         await _directFlip(d);
       }
       return;
     }
-    // 互斥：上一次 turn.end 还在跑（断线重发/系统粘性 pointer up），拒绝重入。
-    // 否则重复 _runAuto 会重置正在 ticking 的 controller，导致上一轮动画"复现"。
-    if (_turnEndInFlight) return;
+    // 互斥：上一次 turn.end 还在跑（断线重发/系统粘性 pointer up / tap
+    // 自动播放在途），拒绝重入。否则重复 _runAuto 的 animateTo 内部
+    // stop() 会打断在途动画 → turn.aborted → "动画消失、页面不翻"。
+    // 2026-09-04：带翻页意图的飘来 drag-end 转入排队（动画落地后补一次
+    // 完整动画翻页），纯误触（shouldTurn=false）安全吞掉。
+    if (_turnEndInFlight) {
+      if (shouldTurn) {
+        final queued = direction ?? _turnDirection;
+        if (queued != PageDirection.none) {
+          _queuedTapTurn = queued;
+          _queuedTapPosition = null;
+          readerTrace('turn.queued', {
+            'direction': queued,
+            'source': 'drag-end-inflight',
+          });
+        }
+      }
+      readerTrace('turn.end.swallowed', {'shouldTurn': shouldTurn});
+      return;
+    }
     _turnEndInFlight = true;
     readerTrace('turn.end', {'shouldTurn': shouldTurn});
     _releaseTouch = _lastTouchLocal;
@@ -445,16 +561,28 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
 
   /// 点击翻页（合成一个屏幕边缘起手的短卷曲动画）
-  Future<void> onTapTurn(PageDirection direction) async {
+  ///
+  /// [tapPosition]：真实点击坐标。坍塌模式用作坍塌中心（起手触点即它，
+  /// 动画收尾松手插值自然从点击点出发）；其他模式忽略，保持合成边缘触点。
+  Future<void> onTapTurn(PageDirection direction, {Offset? tapPosition}) async {
     // 与 onDragStart 同等重入守卫：动画中/拖拽中/定格提交窗口期一律
     // 拒绝——此前只查 isAnimating，提交窗口期点击会 dispose 在用控制器
     // 并双提交（动画前后闪烁根因之一）。
+    // 2026-09-04 快速连点优化：被拒的点击不再丢弃，排队（覆盖式只留
+    // 最后一次意图），本轮翻页完全落地后自动补一次完整动画翻页——
+    // 此前连点时点击被静默吞掉，观感为"点了没反应/动画突然没了"。
     if (_isActive ||
         _holdingFinalFrame ||
         _commitInFlight ||
         _turnController?.isAnimating == true) {
+      _queuedTapTurn = direction;
+      _queuedTapPosition = tapPosition;
+      readerTrace('turn.queued', {'direction': direction});
       return;
     }
+
+    // 新手势开始：重置 tap 超时轮次
+    _tapWaitRounds = 0;
 
     final result = _targetFrameFor(direction);
     if (result is TargetOutOfRange) {
@@ -464,20 +592,22 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     if (result is TargetWait) {
       // tap 无 pointer-move 重试来源 → 挂起后由 listener/超时驱动；
       // 超时保功能直翻。
-      _registerPending(direction, isTap: true, touch: Offset.zero);
+      // 2026-09-04: 登记真实点击坐标（坍塌模式重试动画的坍塌中心）
+      _registerPending(direction, isTap: true, touch: tapPosition ?? Offset.zero);
       return;
     }
-    final frame = (result as TargetReady).frame;
     _clearPending(reason: 'started');
 
     final size = _viewport;
     // 合成起手触点：next 从右缘中下起手，prev 从左缘
-    final start = direction == PageDirection.next
-        ? Offset(size.width * 0.92, size.height * 0.8)
-        : Offset(size.width * 0.08, size.height * 0.8);
+    // 坍塌模式：起手触点 = 真实点击位置（松手插值/坍塌中心与点击点同源）
+    final start = widget.mode == PageTurnMode.collapse && tapPosition != null
+        ? tapPosition
+        : direction == PageDirection.next
+            ? Offset(size.width * 0.92, size.height * 0.8)
+            : Offset(size.width * 0.08, size.height * 0.8);
 
-    _beginTurn(direction, frame, start);
-    await _runAuto(true);
+    await _startTurnAnimated(direction, start, isTap: true, autoPlay: true);
   }
 
   // ── 内部流程 ──
@@ -546,8 +676,27 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     return TargetReady(frame);
   }
 
-  /// 启动翻页动画（方向 + 目标帧 + 起手触点）
-  void _beginTurn(PageDirection direction, PageFrame frame, Offset localTouch) {
+  /// 统一启动封装：同步置位 → 快照就绪门控 → 门控重查收场 → 启动动画
+  ///
+  /// 2026-09-04 接入纹理预缓存体系（替代原 _beginTurn）：坍塌/水波纹的
+  /// 折叠层快照生成是异步的，此前不 await 就启动动画 → 快速点击时首帧
+  /// 用上一轮过时纹理 = 「动画直接消失/过时纹理翻页」根因。
+  ///
+  /// - **同步置位段先于任何 await**：isIdle 立即变 false → reader_page 的
+  ///   pointer-move 停止重发 startDrag（无重入死循环）；onTapTurn 命中
+  ///   排队守卫；await 窗口内状态对外一致
+  /// - await 后用**新一轮 _targetFrameFor** 收场（publish 可能使帧失效）：
+  ///   Ready→用新 frame 启动；Wait→重新挂起走原重试链；OutOfRange→直翻
+  /// - 快照超时（500ms）→ 保功能：tap 直翻；drag 复位由 pointer-move
+  ///   重发 startDrag 重试
+  /// - [autoPlay]：true = 启动后立即收尾播放（tap 语义）；
+  ///   false = 等待拖拽跟手 / 挂起的 drag end（drag 语义）
+  Future<void> _startTurnAnimated(
+    PageDirection direction,
+    Offset localTouch, {
+    required bool isTap,
+    required bool autoPlay,
+  }) async {
     // turn.wait 指标：从挂起登记到真正启动的等待时长
     final since = _pendingSince;
     if (since != null) {
@@ -557,25 +706,84 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       });
       _pendingSince = null;
     }
+
+    // —— 同步置位段（无 await）——
     _turnDirection = direction;
-    _targetFrame = frame;
     _isActive = true;
     _dragFirstTouch = localTouch;
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
-    _prewarmDirection = direction;
-
-    // v16.9.7: 每次翻页随机种子——shader 双波叠加波形不规则化
     _rippleSeed = math.Random().nextDouble() * 100.0;
 
-    // v16.1: 翻页前同步预热当前页纹理（不再幂等跳过）
-    // 如果 pageId 变了，必须立即重生成——否则 shader 用旧纹理（用户报告"内容错位"）
-    if (widget.mode == PageTurnMode.ripple) {
-      _prewarmCurrentPageImage();
+    // —— 快照就绪门控（接入预缓存体系的核心）——
+    var snapshotReady = true;
+    if (_isBlockShaderMode) {
+      try {
+        snapshotReady = await _ensureCurrentSnapshotReady()
+            .timeout(const Duration(milliseconds: 500), onTimeout: () => false);
+      } catch (e) {
+        snapshotReady = false;
+      }
+    }
+    if (!mounted) return;
+
+    // —— await 后重查门控 ——
+    final result = _targetFrameFor(direction);
+    final frame = result is TargetReady ? result.frame : null;
+
+    if (frame == null || !snapshotReady) {
+      // 收场：复位本轮启动状态，按门控结果走既有语义
+      _resetState();
+      switch (result) {
+        case TargetReady():
+          // 帧就绪但快照超时 → tap 直翻保功能；drag 复位后由 pointer-move
+          // 重发 startDrag 重试（快照生成通常 <60ms，下轮即好）
+          if (isTap && !snapshotReady) {
+            await _directFlip(direction);
+          }
+          break;
+        case TargetWait():
+          _registerPending(direction, isTap: isTap, touch: localTouch);
+          break;
+        case TargetOutOfRange():
+          await _directFlip(direction);
+          break;
+      }
+      return;
     }
 
+    // —— 启动 ——
+    _targetFrame = frame;
     _replaceController();
     setState(() {});
+
+    // 快照等待窗口内手指已抬起 → 补跑收尾动画（否则手势被吞、冻结在 0 进度）
+    final deferredEnd = _pendingDragEndShouldTurn;
+    _pendingDragEndShouldTurn = null;
+    if (deferredEnd != null) {
+      readerTrace('turn.drag-end.deferred', {'shouldTurn': deferredEnd});
+      _releaseTouch = _lastTouchLocal;
+      _turnEndInFlight = true;
+      try {
+        await _runAuto(deferredEnd);
+      } finally {
+        _turnEndInFlight = false;
+      }
+      return;
+    }
+    if (autoPlay) {
+      // 2026-09-04 关键修复：tap 语义的自动播放同样持有 _turnEndInFlight
+      // 互斥——否则动画在途时飘来的 drag end（快速连点第二击的 pointer-up）
+      // 会穿透守卫，其 animateSnapBack 内部的 stop() 打断本动画 →
+      // turn.aborted → 复位 = "动画消失、页面不翻"。
+      // 持有互斥后，飘来的 drag end 在 onDragEnd 入口被安全吞掉/排队。
+      _turnEndInFlight = true;
+      try {
+        await _runAuto(true);
+      } finally {
+        _turnEndInFlight = false;
+      }
+    }
   }
 
   // ── 待决手势管理 ──
@@ -585,6 +793,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 之前实现靠"pointer-move 重试会终有一次成功"假设，但 FrameSet
   /// 未发布时是死循环（100ms × N），手感"动画消失"主因。
   static const int _pendingRetryLimit = 5;
+
+  /// 2026-09-04: tap 挂起重挂上限。tap 无 pointer-move 重试来源，此前
+  /// 单次超时（400ms）就无动画直翻 = "点击翻页动画直接消失"主因。
+  /// 现在超时先复查门控（就绪→补动画），仍未就绪重挂继续等（每轮
+  /// 重挂计数+1），3 轮（~1.2s）后才直翻保功能。
+  static const int _tapPendingRetryLimit = 3;
 
   /// M9.5-J：当前挂起的 registerPending 调用次数（同手势累计）
   int _pendingRetryCount = 0;
@@ -617,13 +831,25 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // M9.5-J：超上限后丢弃手势，保功能走 _directFlip。
     // 之前 _pendingTimer 倒计时会被每次 register 重置（拖拽持续中
     // 永远到不了 600ms），现在改用"同手势累计 register 次数"硬上限。
+    // 2026-09-04：tap 不再用 register 计数——_clearPending 每轮超时都会
+    // 重置它，轮次无法累计；tap 改用独立的 _tapWaitRounds（timer 回调
+    // 维护，跨重挂累计，3 轮后直翻保功能）。
     if (!isTap && _pendingRetryCount >= _pendingRetryLimit) {
       readerTrace('turn.drop', {
         'reason': 'retry-limit',
         'retries': _pendingRetryCount,
         'direction': direction,
+        'isTap': isTap,
       });
       _clearPending(reason: 'retry-limit');
+      // 若期间已有新手势/动画在途，直翻会造成内容跳变 → 安全丢弃
+      if (_isActive ||
+          _holdingFinalFrame ||
+          _commitInFlight ||
+          _turnController?.isAnimating == true) {
+        readerTrace('turn.drop.busy', {'direction': direction});
+        return;
+      }
       _directFlip(direction);
       return;
     }
@@ -632,7 +858,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _pendingIsTap = isTap;
     _pendingTouch = touch;
     _pendingSince = DateTime.now();
-    if (!isTap) _pendingRetryCount++;
+    _pendingRetryCount++;
     final store = ref.read(readerRenderStoreProvider);
     store.registerPendingTurn(direction, isTap: isTap);
     _pendingTimer?.cancel();
@@ -643,21 +869,66 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     
     _pendingTimer = Timer(
       Duration(milliseconds: timeout),
-      () {
+      () async {
         if (!mounted || _pendingDirection == null) return;
         final d = _pendingDirection!;
         final wasTap = _pendingIsTap;
+        final touch = _pendingTouch;
         _clearPending(reason: 'timeout');
         readerTrace('turn.pending.timeout', {
           'direction': d,
           'isTap': wasTap,
           'timeoutMs': timeout,
         });
-        if (wasTap) {
-          // 保功能：等待超时后无动画直翻
-          _directFlip(d);
+        if (!wasTap) return; // drag：手指仍在屏，后续 pointer-move 会重试 startDrag
+
+        // 2026-09-04 修复"点击翻页动画直接消失"：超时不再无脑直翻。
+        // ① 若期间已有新手势/动画在途（用户连点），丢弃本次意图——在
+        //    动画下方直翻会造成内容跳变；
+        // ② 门控已就绪（挂起窗口内 FrameSet 发布/资源解码完成）→ 补跑
+        //    完整动画，而非跳过动画直翻；
+        // ③ 确实仍不就绪 → 重挂继续等（_tapWaitRounds 跨重挂累计，
+        //    3 轮 ~1.2s 后直翻保功能）。
+        if (_isActive ||
+            _holdingFinalFrame ||
+            _commitInFlight ||
+            _turnController?.isAnimating == true) {
+          readerTrace('turn.drop', {
+            'reason': 'timeout-busy',
+            'direction': d,
+          });
+          return;
         }
-        // drag：手指仍在屏，后续 pointer-move 会重试 startDrag
+        final result = _targetFrameFor(d);
+        if (result is TargetReady) {
+          final size = _viewport;
+          // 坍塌模式：挂起时登记的真实点击坐标作为起手触点/坍塌中心
+          final start = widget.mode == PageTurnMode.collapse && touch != Offset.zero
+              ? touch
+              : d == PageDirection.next
+                  ? Offset(size.width * 0.92, size.height * 0.8)
+                  : Offset(size.width * 0.08, size.height * 0.8);
+          await _startTurnAnimated(d, start, isTap: true, autoPlay: true);
+          return;
+        }
+        if (result is TargetOutOfRange) {
+          _directFlip(d);
+          return;
+        }
+        // 仍未就绪：重挂继续等（轮次跨重挂累计——_clearPending 每轮重置
+        // _pendingRetryCount，故用独立 _tapWaitRounds），3 轮后直翻保功能
+        _tapWaitRounds++;
+        if (_tapWaitRounds >= _tapPendingRetryLimit) {
+          _tapWaitRounds = 0;
+          readerTrace('turn.drop', {
+            'reason': 'tap-wait-rounds-limit',
+            'direction': d,
+            'rounds': _tapPendingRetryLimit,
+          });
+          await _directFlip(d);
+          return;
+        }
+        _registerPending(d, isTap: true, touch: touch);
       },
     );
   }
@@ -691,9 +962,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// FrameSet 发布回调：有待决手势时在通知栈外重试启动
   /// 2026-09-03 v16.1: 同时预热所有相邻页面纹理，防止 shader 用旧 pageId
   void _onModelPublished(ReaderRenderModel model) {
-    // v16.1: 每次 frameSet 发布都预热（无论是否 pending），确保 shader 纹理
+    // v16.1: 每次发布都预热（无论是否 pending），确保方块类 shader 纹理
     // 始终与当前 frameSet 同步——杜绝"内容错位"
-    if (widget.mode == PageTurnMode.ripple && _rippleShredderShader != null) {
+    // 2026-09-04: 门控扩展到坍塌模式（原遗漏，仅查 ripple）
+    if (_isBlockShaderMode &&
+        (_rippleShredderShader != null || _collapseShader != null)) {
       _prewarmAllPageImages();
     }
     
@@ -704,7 +977,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     });
   }
 
-  void _retryPendingTurn() {
+  Future<void> _retryPendingTurn() async {
     final direction = _pendingDirection;
     if (direction == null) return;
     final store = ref.read(readerRenderStoreProvider);
@@ -720,18 +993,22 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
     final result = _targetFrameFor(direction);
     if (result is TargetReady) {
-      final frame = result.frame;
       if (isTap) {
         final size = _viewport;
-        final start = direction == PageDirection.next
-            ? Offset(size.width * 0.92, size.height * 0.8)
-            : Offset(size.width * 0.08, size.height * 0.8);
-        _beginTurn(direction, frame, start);
-        _runAuto(true);
+        // 2026-09-04: 坍塌模式用登记的真实点击坐标作为坍塌中心
+        final start = widget.mode == PageTurnMode.collapse && touch != Offset.zero
+            ? touch
+            : direction == PageDirection.next
+                ? Offset(size.width * 0.92, size.height * 0.8)
+                : Offset(size.width * 0.08, size.height * 0.8);
+        await _startTurnAnimated(direction, start, isTap: true, autoPlay: true);
       } else {
-        _beginTurn(direction, frame, touch == Offset.zero
-            ? _dragFirstTouch
-            : touch);
+        unawaited(_startTurnAnimated(
+          direction,
+          touch == Offset.zero ? _dragFirstTouch : touch,
+          isTap: false,
+          autoPlay: false,
+        ));
       }
     } else if (result is TargetOutOfRange) {
       if (isTap) _directFlip(direction);
@@ -760,6 +1037,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       direction: _turnDirection,
       vsync: this,
       onProgressUpdate: (_) => setState(() {}),
+      speed: widget.speed,
     );
   }
 
@@ -770,11 +1048,25 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _autoIsTurn = shouldTurn;
     _autoFromProgress = controller.progress;
     if (shouldTurn) {
-      await controller.animateTurn();
+      final completed = await controller.animateTurn();
+      if (!completed) {
+        // 动画被打断（TickerCanceled）：不得提交翻页，复位回空闲态。
+        // 此前该 await 永不完成，_turnEndInFlight 悬置 → 手势全被吞。
+        readerTrace('turn.aborted', {
+          'direction': _turnDirection,
+          'reason': 'ticker-canceled',
+          'progress': controller.progress,
+        });
+        _resetState();
+        _maybeRunQueuedTurn();
+        return;
+      }
       await _commitPageTurn();
     } else {
       await controller.animateSnapBack();
       _resetState();
+      // 2026-09-04: 回弹落地回 idle → 补跑排队的点击翻页
+      _maybeRunQueuedTurn();
     }
   }
 
@@ -873,6 +1165,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 了一次 build，再 setState 会引发同帧第二次 setState → build → 多一次
     // _buildPage 重绘（page.paint 重复 = 闪烁）。仅清动画状态即可。
     _resetState(clearTarget: false, scheduleRebuild: false);
+    // 2026-09-04: 完全落地回 idle → 补跑排队的点击翻页
+    _maybeRunQueuedTurn();
   }
 
   void _armSettledSafetyTimer() {
@@ -892,6 +1186,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _turnController?.stop();
     _turnController?.dispose();
     _turnController = null;
+    // 2026-09-04: 复位即本轮翻页生命周期结束，丢弃挂起的 drag end
+    //（快照门控窗口内抬起、但随后走入收场/复位路径的情形）
+    _pendingDragEndShouldTurn = null;
     if (scheduleRebuild && mounted) setState(() {});
   }
 
@@ -940,6 +1237,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         return _buildScrollTransition();
       } else if (widget.mode == PageTurnMode.ripple) {
         return _buildRippleTransition();
+      } else if (widget.mode == PageTurnMode.collapse) {
+        return _buildCollapseTransition();
       } else {
         return _buildCurlTransition();
       }
@@ -1128,18 +1427,20 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     );
   }
 
+  /// painter 层纹理获取（2026-09-04 v2）：按页 LRU 缓存直接取用。
+  /// 键含页实例身份/尺寸/dpr/渲染参数——命中即内容正确，无"过时纹理"
+  /// 可能（原 revision 校验随之废除）；未命中返回 null → painter 走
+  /// 矢量 fallback（启动门控已保证常态命中）。
+  ///
   /// 水波纹过渡（ripple）—— 2026-09-03 v16.1: Shader 粉碎效果
   Widget _buildRippleTransition() {
     final progress = _turnController!.progress;
     final notifier = ref.read(readerProvider.notifier);  // v16.9.5: 渲染参数同源
-    
-    // v16.4: 根据翻页方向选择正确的两张纹理
-    // next 方向：折叠页 = current（当前页被粉碎），揭示页 = next
-    // prev 方向：折叠页 = current（当前页被粉碎），揭示页 = prev（上一页从左侧揭示）
-    // （v16.1-v16.3 中 prev 的 folding/reveal 赋值颠倒，导致 prev 翻页出现分割线）
-    final isNext = _turnDirection == PageDirection.next;
-    final ui.Image? foldingImg = _currentPageImage;
-    final ui.Image? revealImg = isNext ? _nextPageImage : _prevPageImage;
+
+    // v16.4: 折叠页 = current（当前页被粉碎）；revealPageImage 自
+    // v16.9.3 起不被 paint 消费（揭示层实时矢量直绘），恒传 null
+    final ui.Image? foldingImg = _snapshotFor(widget.currentPage);
+    const ui.Image? revealImg = null;
     
     // v16: 使用 shader 粉碎效果（如果 shader 和 image 都已准备好）
     if (_rippleShredderShader != null && foldingImg != null) {
@@ -1179,6 +1480,52 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         ),
       ),
     );
+  }
+
+  /// 方块坍塌溶解过渡（collapse）—— 2026-09-04 M3
+  ///
+  /// 坍塌中心语义：
+  /// - 点击翻页：起手触点即真实点击位置（onTapTurn 已传入）→ _releaseTouch
+  /// - 拖拽翻页：松手点（_releaseTouch 在 onDragEnd 已更新）
+  /// _startTurnAnimated 将 localTouch 存入 _dragFirstTouch/_releaseTouch/
+  /// _lastTouchLocal 三个字段（tap 路径 localTouch==点击点，drag 路径
+  /// onDragEnd 刷成松手点），所以中心恒取 _releaseTouch 即可覆盖两种触发方式。
+  Widget _buildCollapseTransition() {
+    final progress = _turnController!.progress;
+    final notifier = ref.read(readerProvider.notifier);  // 渲染参数同源
+
+    // 2026-09-04 v2: 按页 LRU 缓存取快照（键含实例身份/尺寸/参数——
+    // 命中即内容正确；未命中走 curl fallback，常态被启动门控保证命中）
+    final ui.Image? foldingImg = _snapshotFor(widget.currentPage);
+
+    if (_collapseShader != null && foldingImg != null) {
+      return SizedBox.expand(
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: CollapsePainter(
+            foldingPage: widget.currentPage,
+            revealPage: _targetFrame?.page,
+            progress: progress,
+            center: _releaseTouch,
+            waveSeed: _rippleSeed,
+            applyBold: notifier.boldEnabled,
+            applyItalic: notifier.italicEnabled,
+            applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+            baseFontSize: notifier.fontSize,
+            baseLineHeight: notifier.lineHeight,
+            // 2026-09-04 P1: 坍塌样式参数（设置面板即时生效+持久化）
+            blockSize: notifier.collapseStyle.blockSize,
+            slideDistance: notifier.collapseStyle.slideDistance,
+            shadowColor: Color(notifier.collapseStyle.shadowColorValue),
+            foldingPageImage: foldingImg,
+            collapseShader: _collapseShader,
+          ),
+        ),
+      );
+    }
+
+    // Fallback: shader/纹理未就绪 → 退化为 curl 画直翻（保功能不冻结）
+    return _buildCurlTransition();
   }
 
   Widget _buildPage(PageInfo pageInfo) {

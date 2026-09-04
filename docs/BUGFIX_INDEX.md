@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-09-02
+> 最后更新: 2026-09-04
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -44,6 +44,7 @@
 | **阅读页右侧留白总会比左侧多 / 左右边距不对称** | ttf-parser hmtx 原始 advance ≠ Skia HarfBuzz 整形后宽度（连字、kerning、GSUB/GPOS、CJK 标点宽度类）→ Rust 断行位置偏差 → rustW ≠ skiaW → 右侧留白过大 | [bugfixes/2026-09-02_左右边距不对称修复_M10-B_M11_M12](./bugfixes/2026-09-02_左右边距不对称修复_M10-B_M11_M12.md) ⭐ M10-B MeasureCache 架构（Dart TextPainter 实测宽度缓存）+ M11 width 字段语义修复 + M12 命中率优化（0%→95%+）|
 | **翻页动画中纯文字页出现两页文字重影（图片页正常）/ 动画中及完成后色差** | `_pageToImage` 快照没画纸色底（`paintPage` 契约"不含纸色底——调用方自绘"）→ 快照透明背景，两层文字笔画互相透叠；图片不透明盖住下层所以"碰巧正常"；仿真翻页自画 `_paperColor` 所以无此问题 | [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md) ⭐ 快照补纸色底 + `PageContentRenderer.paperColor` 公开同源 + 块级波浪/jitter 减法/两段式崩解（次生根因） |
 | **翻页动画完成瞬间闪烁一下（新旧两模式均见过）** | ①Flutter Ticker 尾随帧：progress 触顶后回退 0.9996~0.9999，完成短路阈值 `>=1.0` 不命中 → 残迹帧（仿真翻页 8-28 报告，阈值放宽 0.9995）②水波纹：短路路径直绘漏纸色底 + 渲染参数用默认值而非 notifier 同源 → trailing 帧与正式渲染不一致 | [bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹](./bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹.md) + [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md)（v16.9.5 段）⭐ 短路直绘必须与正式渲染逐像素同源（纸色底+渲染参数） |
+| **翻页动画卡死在中途某帧，之后所有翻页手势永久失效（调慢速度档位后必现）** | 双缺陷叠加：①`onDragUpdate` 只查 `_isActive` 不查 `isAnimating`——动画播放中第二次触摸的 dragTo 走到 `AnimationController.value setter`（内部隐式 `stop()`）静默打断动画 ②裸 `await animateTo` 的 TickerFuture 被取消后**永不完成** → `_runAuto` 挂死 → `_turnEndInFlight`/`_isActive` 永久 true → 后续手势全被守卫吞 | [bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持](./bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持.md) ⭐ `animateTo` 必须 `.orCancel`+catch；拖拽驱动入口必须挡 `isAnimating`；调慢动画是时序竞态的时间放大镜 |
 
 ## 二、按错误信息查找
 
@@ -91,6 +92,13 @@
 7. **修改 Rust 代码后必须使用 `fix_sync.ps1` 重新构建** —— 直接 `cargo build` 只会生成
    `rust/target/release/bridge.dll`，但 Flutter 从 `rust/crates/bridge/target/release/bridge.dll`
    加载。不复制 DLL 会导致运行的是旧代码，出现"修改无效"的假象。（2026-09-02 M12 阶段）
+8. **裸 `await AnimationController.animateTo()/forward()` 是挂死陷阱** —— TickerFuture 被
+   `stop()`/value 赋值/dispose 打断后永不 complete（`.orCancel` 才会抛 `TickerCanceled`）。
+   "await 动画完成再提交"的管线必须 `.orCancel` + catch，并把完整播完与否显式传回调用方。
+   （2026-09-04 翻页动画卡死根因）
+9. **`AnimationController.value` 赋值 = 隐式 `stop()`** —— 任何可能发生在动画播放期间的
+   拖拽驱动入口（dragTo → value setter）都会静默杀死动画。驱动入口必须显式挡住
+   `isAnimating`；"非空闲"包含拖拽中与动画中两种相位，只有前者接受 dragTo。
 
 ## 四、记录规范
 

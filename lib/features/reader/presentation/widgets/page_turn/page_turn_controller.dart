@@ -28,6 +28,11 @@ abstract class PageTurnAnimationController {
   final AnimationController _controller;
   final void Function(double progress) onProgressUpdate;
 
+  /// 自动翻页动画时长（子类可覆写以调节速度，如水波纹快/中/慢三档）。
+  /// 注意：这是实际生效的唯一时长来源——animateTo 显式传 duration，
+  /// 构造参数 duration 与 buildSimulation 均已不再被消费。
+  Duration get turnDuration => const Duration(milliseconds: 300);
+
   PageDirection get direction;
 
   /// 当前动画进度 [0.0, 1.0]
@@ -54,37 +59,50 @@ abstract class PageTurnAnimationController {
   /// 用 AnimationController.animateTo + CurvedAnimation 替代原 SpringSimulation
   /// 路径：弹簧在欠阻尼下需要完整振荡周期才能让 isDone 判定收敛（stiffness=180
   /// damping=20 特征周期 ~700ms），兜底逻辑层层加锁仍有边缘 bug（commit 链
-  /// 路死锁、setState 时序错乱）。改用 300ms 固定时长 + easeOutCubic 曲线：
+  /// 路死锁、setState 时序错乱）。改用固定时长 + easeOutCubic 曲线：
   /// duration 走完必定 complete、progress 终值必定 1.0，curl_painter
   /// autoProgress>=0.9995 短路命中 → 纹理一致。
-  Future<void> animateTurn() async {
-    await _animateTo(
+  ///
+  /// 返回 false = 动画被外部打断（TickerCanceled），调用方不得提交翻页。
+  Future<bool> animateTurn() async {
+    return _animateTo(
       from: _controller.value,
       to: 1.0,
-      duration: const Duration(milliseconds: 300),
+      duration: turnDuration,
     );
   }
 
   /// 反向播放回弹动画（从当前值到 0.0）
-  Future<void> animateSnapBack() async {
-    await _animateTo(
+  Future<bool> animateSnapBack() async {
+    return _animateTo(
       from: _controller.value,
       to: 0.0,
       duration: const Duration(milliseconds: 300),
     );
   }
 
-  /// 通用动画播放：用 AnimationController.animateTo + CurvedAnimation 直接
-  /// 驱动，不再走 Simulation 路径——简化掉仿真收敛、兜底、TickerCanceled
-  /// catch 一连串易错点。duration 走完必定 complete、终值必定 to。
-  Future<void> _animateTo({
+  /// 通用动画播放：用 AnimationController.animateTo 直接驱动。
+  ///
+  /// 2026-09-04 关键修复：必须用 `.orCancel` + 捕获 TickerCanceled。
+  /// 裸 await animateTo 的 TickerFuture 在动画被打断（stop/value setter/
+  /// dispose）时**永不完成**——await 挂死 → _runAuto 悬置 →
+  /// _turnEndInFlight 永久 true → 所有后续手势被吞 → 界面永久冻结在
+  /// 中途帧（"动画卡死"根因，600ms 档位拉长了触发窗口）。
+  Future<bool> _animateTo({
     required double from,
     required double to,
     required Duration duration,
   }) async {
     _controller.stop();
     _controller.value = from;
-    await _controller.animateTo(to, duration: duration, curve: Curves.easeOutCubic);
+    try {
+      await _controller
+          .animateTo(to, duration: duration, curve: Curves.easeOutCubic)
+          .orCancel;
+      return true;
+    } on TickerCanceled {
+      return false;
+    }
   }
 
   /// 停止当前动画（dispose 前必须调用，避免销毁正在 tick 的控制器断言失败）
