@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -12,6 +14,9 @@ import '../services/book_image_store.dart';
 import 'page_turn/page_turn_controller.dart';
 import 'page_turn/page_turn_types.dart';
 import 'page_turn/curl_painter.dart';
+import 'page_turn/ripple_painter.dart';
+import 'page_turn/ripple_painter_v16.dart';
+import 'page_turn/ripple_turn_controller.dart';
 import 'reader_page_widget.dart';
 import '../diagnostics/reader_trace.dart';
 
@@ -114,13 +119,233 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   int _lastFoldingPaintId = 0;
   int _lastRevealPaintId = 0;
 
+  /// viewport.mismatch 诊断节流（仅状态翻转时输出）
+  bool _lastViewportMismatch = false;
+
+  /// 空闲帧（PagePainter 路径）mismatch 诊断节流
+  bool _lastIdleViewportMismatch = false;
+
+  /// 绘制层自愈兜底的防抖标记（帧末一次性调度）
+  bool _viewportFixInFlight = false;
+
+  /// 权威 viewport（SafeArea 内实际可用区域，逻辑像素）
+  ///
+  /// viewport 尺寸单源化：翻页起手/横扫终点几何、scroll 平移高度、
+  /// paintContent 绘制 size 全部取自 readerProvider 的测量值
+  /// （reader_page LayoutBuilder 登记的 canvas 实际尺寸）。
+  /// 禁止 MediaQuery.size——那是全屏值，移动端含状态栏/手势条区域。
+  Size get _viewport => Size(
+        ref.read(readerProvider.notifier).screenWidth,
+        ref.read(readerProvider.notifier).screenHeight,
+      );
+
+  /// 水波纹 v16 shader（2026-09-03 新增）
+  ui.FragmentShader? _rippleShredderShader;
+
+  /// v16.9.7: 每次翻页随机种子（shader 双波叠加波形不规则化）
+  double _rippleSeed = 0.0;
+
+  /// 水波纹 v16 页面纹理缓存（预转换的 ui.Image）
+  /// 2026-09-03 v16.1: 修复"纹理错位"——以 frameSet.setRevision 为键，
+  /// frameSet 切换时立刻淘汰旧纹理，绝不跨 setRevision 复用
+  ui.Image? _currentPageImage;
+  int? _currentImagePageId;
+  ui.Image? _nextPageImage;
+  int? _nextImagePageId;
+  ui.Image? _prevPageImage;
+  int? _prevImagePageId;
+  /// 翻页方向（决定显示哪一侧的纹理）
+  PageDirection? _prewarmDirection;
+
   @override
   void initState() {
     super.initState();
     final store = ref.read(readerRenderStoreProvider);
     _store = store;
+    
+    // 加载 shader
+    _loadShaders();
+    
     // FrameSet 发布监听：首次真实订阅者。帧未就绪时挂起的手势在此重试。
     store.addModelListener(_onModelPublished);
+  }
+  
+  /// 加载水波纹 shaders（v16 新增 ripple_shredder）
+  Future<void> _loadShaders() async {
+    try {
+      // 加载 v16 粉碎效果 shader
+      final shredderProgram = await ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
+      if (mounted) {
+        setState(() {
+          _rippleShredderShader = shredderProgram.fragmentShader();
+        });
+        readerTrace('ripple.shader.loaded', {'shader': 'ripple_shredder'});
+        // v16.1: shader 加载完成后立即预热当前页面纹理
+        _prewarmAllPageImages();
+      }
+    } catch (e) {
+      readerTrace('ripple.shader.load.error', {'error': e.toString()});
+    }
+  }
+  
+  /// 将 PageInfo 转换为 ui.Image（用于 shader 纹理采样）
+  /// 2026-09-03 v16.3: 按 devicePixelRatio 生成高分辨率快照——
+  /// 修复"新页纹理模糊 + 动画完成后闪烁"（1x 快照被 GPU 放大 → 与矢量渲染对比闪烁）
+  Future<ui.Image?> _pageToImage(PageInfo? page, Size size) async {
+    if (page == null) return null;
+
+    try {
+      final dpr = View.of(context).devicePixelRatio;
+      final pixelWidth = (size.width * dpr).round();
+      final pixelHeight = (size.height * dpr).round();
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.scale(dpr);  // 矢量内容按 dpr 缩放绘制，快照原生清晰
+
+      // v16.9.3 核心修复：先画纸色底——paintPage 不含纸色底（调用方自绘），
+      // 缺失导致快照透明背景 → 文字笔画间透出下层另一页内容 = 双重文字重影
+      //（图片页因图片不透明而"看起来正常"，这正是"文字页重叠/图片页正常"的根因）
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = PageContentRenderer.paperColor,
+      );
+
+      final notifier = ref.read(readerProvider.notifier);
+      PageContentRenderer.paintPage(
+        canvas,
+        page,
+        size: size,
+        onImageNeeded: () {},
+        applyBold: notifier.boldEnabled,
+        applyItalic: notifier.italicEnabled,
+        applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+        baseFontSize: notifier.fontSize,
+        baseLineHeight: notifier.lineHeight,
+      );
+
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(pixelWidth, pixelHeight);
+
+      readerTrace('ripple.image.converted', {
+        'page': '${page.chapterIndex}/${page.pageIndex}',
+        'size': '${size.width}x${size.height}',
+        'pixels': '${pixelWidth}x${pixelHeight}',
+        'dpr': dpr.toStringAsFixed(2),
+      });
+
+      return image;
+    } catch (e) {
+      readerTrace('ripple.image.error', {'error': e.toString()});
+      return null;
+    }
+  }
+  
+  /// 预热当前页面纹理（翻页启动前调用）
+  /// 2026-09-03 v16.1: 取消幂等保护——每次调用都基于当前 pageId 重新生成
+  /// 防止"纹理错位"（旧 pageId 的 image 被复用到新 page）
+  Future<void> _prewarmCurrentPageImage() async {
+    if (widget.mode != PageTurnMode.ripple) return;
+    final size = _viewport;
+    final store = ref.read(readerRenderStoreProvider);
+    final set = store.frameSet;
+    if (set == null) return;
+    final currentId = set.setRevision;
+    final currentPage = set.current.page;
+    
+    // 仅在 pageId 变化时重新生成（避免每帧重复 toImage）
+    if (_currentImagePageId != currentId || _currentPageImage == null) {
+      final img = await _pageToImage(currentPage, size);
+      if (img == null) return;
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
+      // 释放旧 image（避免内存泄漏）
+      _currentPageImage?.dispose();
+      _currentPageImage = img;
+      _currentImagePageId = currentId;
+    }
+  }
+  
+  /// 预热所有相邻页面纹理（current + next + prev）
+  /// 2026-09-03 v16.1: 在 _onModelPublished 中调用，确保 shader 始终
+  /// 拿到"当前正在翻页的"页面的真实纹理，杜绝"内容错位"
+  Future<void> _prewarmAllPageImages() async {
+    if (widget.mode != PageTurnMode.ripple) return;
+    if (_rippleShredderShader == null) return; // shader 未加载完成时跳过
+    
+    final size = _viewport;
+    final store = ref.read(readerRenderStoreProvider);
+    final set = store.frameSet;
+    if (set == null) return;
+    
+    // 并行预热 3 个页面纹理（current/next/prev）
+    final futures = <Future<void>>[];
+    
+    // 1. 当前页
+    final currentId = set.setRevision;
+    if (_currentImagePageId != currentId || _currentPageImage == null) {
+      futures.add(() async {
+        final img = await _pageToImage(set.current.page, size);
+        if (img == null) return;
+        if (!mounted) {
+          img.dispose();
+          return;
+        }
+        _currentPageImage?.dispose();
+        _currentPageImage = img;
+        _currentImagePageId = currentId;
+      }());
+    }
+    
+    // 2. 下一页
+    final nextSlot = set.next;
+    if (nextSlot != null && nextSlot.frame != null) {
+      final nextFrame = nextSlot.frame!;
+      // 用 setRevision + chapterIndex/pageIndex 复合 key（避免 next 变化时 key 变化）
+      final nextId = set.setRevision * 1000 + nextFrame.identity.chapterIndex * 100 + nextFrame.identity.pageIndex;
+      if (_nextImagePageId != nextId || _nextPageImage == null) {
+        futures.add(() async {
+          final img = await _pageToImage(nextFrame.page, size);
+          if (img == null) return;
+          if (!mounted) {
+            img.dispose();
+            return;
+          }
+          _nextPageImage?.dispose();
+          _nextPageImage = img;
+          _nextImagePageId = nextId;
+        }());
+      }
+    }
+    
+    // 3. 上一页
+    final prevSlot = set.previous;
+    if (prevSlot != null && prevSlot.frame != null) {
+      final prevFrame = prevSlot.frame!;
+      // prev 用负数 key 避免和 next 冲突
+      final prevId = -(set.setRevision * 1000 + prevFrame.identity.chapterIndex * 100 + prevFrame.identity.pageIndex);
+      if (_prevImagePageId != prevId || _prevPageImage == null) {
+        futures.add(() async {
+          final img = await _pageToImage(prevFrame.page, size);
+          if (img == null) return;
+          if (!mounted) {
+            img.dispose();
+            return;
+          }
+          _prevPageImage?.dispose();
+          _prevPageImage = img;
+          _prevImagePageId = prevId;
+        }());
+      }
+    }
+    
+    // 等待所有预热完成
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -131,6 +356,13 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _imageTick.dispose();
     _turnController?.stop();
     _turnController?.dispose();
+    // v16.1: 释放所有预热的页面纹理（避免内存泄漏）
+    _currentPageImage?.dispose();
+    _currentPageImage = null;
+    _nextPageImage?.dispose();
+    _nextPageImage = null;
+    _prevPageImage?.dispose();
+    _prevPageImage = null;
     super.dispose();
   }
 
@@ -238,7 +470,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final frame = (result as TargetReady).frame;
     _clearPending(reason: 'started');
 
-    final size = MediaQuery.of(context).size;
+    final size = _viewport;
     // 合成起手触点：next 从右缘中下起手，prev 从左缘
     final start = direction == PageDirection.next
         ? Offset(size.width * 0.92, size.height * 0.8)
@@ -256,30 +488,61 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final store = ref.read(readerRenderStoreProvider);
     final set = store.frameSet;
     // 会话推进后 frame 被作废 → 等新会话批次
-    if (set == null) return const TargetWait();
+    if (set == null) {
+      readerTrace('turn.gate.wait', {'reason': 'frameSet==null'});
+      return const TargetWait();
+    }
     if (set.sessionEpoch != store.sessionEpoch ||
         set.configFingerprint != store.configFingerprint) {
+      readerTrace('turn.gate.wait', {
+        'reason': 'epoch/fingerprint mismatch',
+        'setEpoch': set.sessionEpoch,
+        'storeEpoch': store.sessionEpoch,
+        'setFp': set.configFingerprint,
+        'storeFp': store.configFingerprint,
+      });
       return const TargetWait();
     }
     // 模型未跟上可见页（提交/加载窗口期）→ 等待，
     // 杜绝「当前页翻给当前页」与旧批次邻居回写
     if (!set.current.identity.matchesPage(widget.currentPage)) {
+      readerTrace('turn.gate.wait', {
+        'reason': 'current identity mismatch',
+        'setPage': '${set.current.identity.chapterIndex}/${set.current.identity.pageIndex}',
+        'widgetPage': '${widget.currentPage.chapterIndex}/${widget.currentPage.pageIndex}',
+      });
       return const TargetWait();
     }
     final bookId = ref.read(readerProvider).bookId;
     if (bookId == null || set.current.identity.bookId != bookId) {
+      readerTrace('turn.gate.wait', {
+        'reason': 'bookId mismatch',
+        'setBookId': set.current.identity.bookId,
+        'currentBookId': bookId,
+      });
       return const TargetWait();
     }
     final slot = set.slotFor(direction);
     if (slot.outOfRange || slot.loadFailed) {
       // 越界是结构性边界；加载失败等待无意义（下次发布自愈）→ 直翻
+      readerTrace('turn.gate.outOfRange', {
+        'outOfRange': slot.outOfRange,
+        'loadFailed': slot.loadFailed,
+      });
       return const TargetOutOfRange();
     }
     final frame = slot.frame;
     if (frame == null || !frame.usableForAnimation) {
       // 资源解码中 → 等待（不变量 4：就绪或稳定 failed 才启动）
+      readerTrace('turn.gate.wait', {
+        'reason': 'frame not usable',
+        'frameNull': frame == null,
+        'usableForAnimation': frame?.usableForAnimation,
+        'resourceState': frame?.resourceState.toString(),
+      });
       return const TargetWait();
     }
+    readerTrace('turn.gate.ready', {'direction': direction});
     return TargetReady(frame);
   }
 
@@ -300,6 +563,16 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _dragFirstTouch = localTouch;
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
+    _prewarmDirection = direction;
+
+    // v16.9.7: 每次翻页随机种子——shader 双波叠加波形不规则化
+    _rippleSeed = math.Random().nextDouble() * 100.0;
+
+    // v16.1: 翻页前同步预热当前页纹理（不再幂等跳过）
+    // 如果 pageId 变了，必须立即重生成——否则 shader 用旧纹理（用户报告"内容错位"）
+    if (widget.mode == PageTurnMode.ripple) {
+      _prewarmCurrentPageImage();
+    }
 
     _replaceController();
     setState(() {});
@@ -315,6 +588,26 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   /// M9.5-J：当前挂起的 registerPending 调用次数（同手势累计）
   int _pendingRetryCount = 0;
+
+  /// 2026-09-02 阶段2优化：根据页面复杂度动态计算超时时间
+  int _computeDynamicTimeout(PageFrame? frame) {
+    const int baseTap = 400;
+    const int baseDrag = 600;
+    int base = _pendingIsTap ? baseTap : baseDrag;
+    
+    if (frame == null) return base;
+    
+    // 复杂度加成
+    int imageCount = frame.manifest.hrefs.length;
+    int entryCount = frame.page.entries.length;
+    
+    // 每张图片 +150ms，每 50 个 entry +50ms
+    int imageBonus = imageCount * 150;
+    int complexityBonus = (entryCount ~/ 50) * 50;
+    
+    // 总超时上限 2000ms
+    return (base + imageBonus + complexityBonus).clamp(base, 2000);
+  }
 
   void _registerPending(
     PageDirection direction, {
@@ -343,16 +636,23 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     final store = ref.read(readerRenderStoreProvider);
     store.registerPendingTurn(direction, isTap: isTap);
     _pendingTimer?.cancel();
+    
+    // 2026-09-02 阶段2优化：根据目标页面复杂度动态调整超时
+    final targetFrame = _getTargetFrame(direction);
+    final timeout = _computeDynamicTimeout(targetFrame);
+    
     _pendingTimer = Timer(
-      isTap
-          ? const Duration(milliseconds: 400)
-          : const Duration(milliseconds: 600),
+      Duration(milliseconds: timeout),
       () {
         if (!mounted || _pendingDirection == null) return;
         final d = _pendingDirection!;
         final wasTap = _pendingIsTap;
         _clearPending(reason: 'timeout');
-        readerTrace('turn.pending.timeout', {'direction': d, 'isTap': wasTap});
+        readerTrace('turn.pending.timeout', {
+          'direction': d,
+          'isTap': wasTap,
+          'timeoutMs': timeout,
+        });
         if (wasTap) {
           // 保功能：等待超时后无动画直翻
           _directFlip(d);
@@ -360,6 +660,22 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         // drag：手指仍在屏，后续 pointer-move 会重试 startDrag
       },
     );
+  }
+  
+  /// 辅助方法：获取目标方向的 PageFrame（用于动态超时计算）
+  PageFrame? _getTargetFrame(PageDirection direction) {
+    final store = ref.read(readerRenderStoreProvider);
+    final set = store.frameSet;
+    if (set == null) return null;
+    
+    switch (direction) {
+      case PageDirection.next:
+        return set.next.frame;
+      case PageDirection.prev:
+        return set.previous.frame;
+      default:
+        return null;
+    }
   }
 
   void _clearPending({required String reason}) {
@@ -373,7 +689,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
 
   /// FrameSet 发布回调：有待决手势时在通知栈外重试启动
+  /// 2026-09-03 v16.1: 同时预热所有相邻页面纹理，防止 shader 用旧 pageId
   void _onModelPublished(ReaderRenderModel model) {
+    // v16.1: 每次 frameSet 发布都预热（无论是否 pending），确保 shader 纹理
+    // 始终与当前 frameSet 同步——杜绝"内容错位"
+    if (widget.mode == PageTurnMode.ripple && _rippleShredderShader != null) {
+      _prewarmAllPageImages();
+    }
+    
     if (!mounted || _isActive || _pendingDirection == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _isActive || _pendingDirection == null) return;
@@ -399,7 +722,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     if (result is TargetReady) {
       final frame = result.frame;
       if (isTap) {
-        final size = MediaQuery.of(context).size;
+        final size = _viewport;
         final start = direction == PageDirection.next
             ? Offset(size.width * 0.92, size.height * 0.8)
             : Offset(size.width * 0.08, size.height * 0.8);
@@ -612,9 +935,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       return _buildCurlTransition();
     }
     if (_isActive && _turnController != null && _targetFrame != null) {
-      return widget.mode == PageTurnMode.verticalScroll
-          ? _buildScrollTransition()
-          : _buildCurlTransition();
+      // 2026-09-03: 根据动画模式选择不同的过渡效果
+      if (widget.mode == PageTurnMode.verticalScroll) {
+        return _buildScrollTransition();
+      } else if (widget.mode == PageTurnMode.ripple) {
+        return _buildRippleTransition();
+      } else {
+        return _buildCurlTransition();
+      }
     }
     // 释放路径：_turnController==null 但 _targetFrame 保留，revealPage 与
     // widget.currentPage 相同（identical）—— 走 CurlPainter 短路避免切换到
@@ -628,7 +956,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   /// 卷曲过渡（simulation）
   Widget _buildCurlTransition() {
-    final size = MediaQuery.of(context).size;
+    final size = _viewport;
     // 三支 build 走到这里时的 autoProgress 取值：
     // - _holdingFinalFrame（commit 进行中）→ 1.0 短路画 revealPage
     // - _isActive && _turnController != null（拖拽 OR 动画中，build L629 已守卫）→
@@ -682,7 +1010,31 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       effTouch = Offset.lerp(_releaseTouch, sweepTarget, t)!;
     }
 
-    void paintContent(Canvas canvas, PageInfo page) {
+    void paintContent(Canvas canvas, PageInfo page, Size canvasSize) {
+      // P0-2 防回归：排版 viewport 与绘制 canvas 必须一致——不一致 =
+      // 「翻页前后背景纹理尺寸跳变」/「内容偏右/左」类几何错位的直接证据。
+      // 静态节流：仅 mismatch 状态翻转时输出（含 layout/canvas/MediaQuery
+      // 全套数字，便于切曲面屏/分屏/旋转屏场景溯源）。
+      final vw = notifier.screenWidth;
+      final vh = notifier.screenHeight;
+      final mismatch = (vw - canvasSize.width).abs() > 0.5 ||
+          (vh - canvasSize.height).abs() > 0.5;
+      if (mismatch != _lastViewportMismatch) {
+        _lastViewportMismatch = mismatch;
+        final mq = MediaQuery.maybeOf(context);
+        readerTrace('viewport.mismatch', {
+          'mismatch': mismatch,
+          'layout': '${vw}x$vh',
+          'canvas': '${canvasSize.width}x${canvasSize.height}',
+          if (mq != null) ...{
+            'mqSize': '${mq.size.width}x${mq.size.height}',
+            'mqViewPad':
+                '${mq.viewPadding.left}_${mq.viewPadding.top}_${mq.viewPadding.right}_${mq.viewPadding.bottom}',
+            'mqPad':
+                '${mq.padding.left}_${mq.padding.top}_${mq.padding.right}_${mq.padding.bottom}',
+          },
+        });
+      }
       final pageId = readerPageId(page);
       final isFolding = identical(page, widget.currentPage);
       if (isFolding
@@ -710,7 +1062,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       PageContentRenderer.paintPage(
         canvas,
         page,
-        size: size,
+        // 绘制 size = CurlPainter 传入的画布实际尺寸（单源化：与
+        // LayoutConfig 排版空间同源，禁止 MediaQuery.size 全屏值）
+        size: canvasSize,
         // 图片解码完成：走 repaint listenable 直达 markNeedsPaint，
         // 不 setState——动画中 touch 不变时新 painter 字段全同，
         // shouldRepaint 会抑制重绘（占位冻结根因）。scheduleFrame
@@ -751,7 +1105,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 滚动过渡（verticalScroll）：Y 轴平移 + 带状露出
   Widget _buildScrollTransition() {
     final progress = _turnController!.progress;
-    final size = MediaQuery.of(context).size;
+    final size = _viewport;
     final goingNext = _turnDirection == PageDirection.next;
     final offset = size.height * progress * (goingNext ? -1 : 1);
 
@@ -774,22 +1128,121 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     );
   }
 
-  Widget _buildPage(PageInfo pageInfo) {
-    final notifier = ref.watch(readerProvider.notifier);
-    return RepaintBoundary(
-      child: ReaderPageWidget(
-        // 页面 identity 变化时强制替换 StatefulWidget，避免动画 CustomPaint
-        // 切回普通页面时复用旧页面节点/旧 repaint notifier。
-        key: ValueKey(
-          '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
+  /// 水波纹过渡（ripple）—— 2026-09-03 v16.1: Shader 粉碎效果
+  Widget _buildRippleTransition() {
+    final progress = _turnController!.progress;
+    final notifier = ref.read(readerProvider.notifier);  // v16.9.5: 渲染参数同源
+    
+    // v16.4: 根据翻页方向选择正确的两张纹理
+    // next 方向：折叠页 = current（当前页被粉碎），揭示页 = next
+    // prev 方向：折叠页 = current（当前页被粉碎），揭示页 = prev（上一页从左侧揭示）
+    // （v16.1-v16.3 中 prev 的 folding/reveal 赋值颠倒，导致 prev 翻页出现分割线）
+    final isNext = _turnDirection == PageDirection.next;
+    final ui.Image? foldingImg = _currentPageImage;
+    final ui.Image? revealImg = isNext ? _nextPageImage : _prevPageImage;
+    
+    // v16: 使用 shader 粉碎效果（如果 shader 和 image 都已准备好）
+    if (_rippleShredderShader != null && foldingImg != null) {
+      return SizedBox.expand(
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: RipplePainterV16(
+            foldingPage: widget.currentPage,
+            revealPage: _targetFrame?.page,
+            progress: progress,
+            direction: _turnDirection,
+            // v16.9.5: 渲染参数与正式渲染/CurlPainter 同源（notifier）——
+            // 动画中实时直绘的新页与完成后渲染逐像素一致，消除完成闪烁
+            applyBold: notifier.boldEnabled,
+            applyItalic: notifier.italicEnabled,
+            applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+            baseFontSize: notifier.fontSize,
+            baseLineHeight: notifier.lineHeight,
+            waveSeed: _rippleSeed,
+            foldingPageImage: foldingImg,
+            revealPageImage: revealImg,
+            shredderShader: _rippleShredderShader,
+          ),
         ),
-        pageInfo: pageInfo,
-        applyBold: notifier.boldEnabled,
-        applyItalic: notifier.italicEnabled,
-        applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
-        baseFontSize: notifier.fontSize,
-        baseLineHeight: notifier.lineHeight,
+      );
+    }
+    
+    // Fallback: 使用 v15 canvas 方块（shader 未加载或 image 未转换完成）
+    return SizedBox.expand(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: RipplePainter(
+          foldingPage: widget.currentPage,
+          revealPage: _targetFrame?.page,
+          progress: progress,
+          direction: _turnDirection,
+        ),
       ),
     );
+  }
+
+  Widget _buildPage(PageInfo pageInfo) {
+    final notifier = ref.watch(readerProvider.notifier);
+    // 空闲帧 viewport 一致性诊断（curl 帧 paintContent 内已有同款检查，
+    // 此处补 PagePainter 路径覆盖）：constraints = 页面 widget 实际画布
+    // 约束，必须与排版 LayoutConfig（notifier.screenWidth/Height）一致；
+    // 不一致 = 移动端「内容偏右/右侧空白消失」类几何错位的直接证据。
+    return LayoutBuilder(builder: (context, constraints) {
+      final mismatch =
+          (constraints.maxWidth - notifier.screenWidth).abs() > 0.5 ||
+              (constraints.maxHeight - notifier.screenHeight).abs() > 0.5;
+      if (mismatch != _lastIdleViewportMismatch) {
+        _lastIdleViewportMismatch = mismatch;
+        final mq = MediaQuery.maybeOf(context);
+        readerTrace('viewport.mismatch.idle', {
+          'mismatch': mismatch,
+          'layout': '${notifier.screenWidth}x${notifier.screenHeight}',
+          'canvas': '${constraints.maxWidth}x${constraints.maxHeight}',
+          if (mq != null) ...{
+            'mqSize': '${mq.size.width}x${mq.size.height}',
+            'mqViewPad':
+                '${mq.viewPadding.left}_${mq.viewPadding.top}_${mq.viewPadding.right}_${mq.viewPadding.bottom}',
+            'mqPad':
+                '${mq.padding.left}_${mq.padding.top}_${mq.padding.right}_${mq.padding.bottom}',
+          },
+        });
+      }
+      // 绘制层自愈兜底（第二道防线）：画布约束 ≠ 排版宽说明重排链
+      // 某环被吞（如 resize 事件与 openBook 竞态）——帧末强制按当前
+      // 约束重排一次。onWindowResized 自带判等守卫 + 分页缓存键隔离，
+      // 与 reader_page 的 LayoutBuilder 调度重复调用幂等。
+      if (mismatch && !_viewportFixInFlight) {
+        _viewportFixInFlight = true;
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _viewportFixInFlight = false;
+          if (!mounted) return;
+          ref.read(readerProvider.notifier).onWindowResized(w, h);
+        });
+      }
+      // v6 修复（重影根因）：resize 风暴期间 mismatch=true 时绘制旧尺寸
+      // page 与新尺寸 canvas 错位 → 视觉重影/左右偏。mismatch 时返回空
+      // SizedBox 不绘制任何内容，让重排 commit 后再渲染——避免错误
+      // size 的 page 在屏幕上闪现，也避免双版本共存视觉重影。
+      if (mismatch) {
+        return const SizedBox.expand();
+      }
+      return RepaintBoundary(
+        child: ReaderPageWidget(
+          // 页面 identity 变化时强制替换 StatefulWidget，避免动画 CustomPaint
+          // 切回普通页面时复用旧页面节点/旧 repaint notifier。
+          key: ValueKey(
+            '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
+          ),
+          pageInfo: pageInfo,
+          applyBold: notifier.boldEnabled,
+          applyItalic: notifier.italicEnabled,
+          applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+          baseFontSize: notifier.fontSize,
+          baseLineHeight: notifier.lineHeight,
+        ),
+      );
+    });
   }
 }

@@ -5,10 +5,12 @@ class PageTurnGestureConstants {
   const PageTurnGestureConstants();
 
   /// 拖拽距离超过屏幕宽度此比例时触发翻页
-  double get turnDistanceRatio => 0.25;
+  /// 2026-09-03 优化：25% → 15%，提升灵敏度
+  double get turnDistanceRatio => 0.15;
 
   /// 速度超过此阈值时即使距离不够也触发翻页（px/s）
-  double get turnVelocityThreshold => 600.0;
+  /// 2026-09-03 优化：600 → 400，更容易触发
+  double get turnVelocityThreshold => 400.0;
 
   /// 距离小于此值视为点击（px）
   double get tapDistanceThreshold => 18.0;

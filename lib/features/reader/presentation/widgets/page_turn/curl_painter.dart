@@ -223,7 +223,11 @@ class CurlPainter extends CustomPainter {
   final PageInfo revealPage;
 
   /// 页面内容渲染回调（复用 PageContentRenderer，由 composer 注入绘制参数）
-  final void Function(Canvas canvas, PageInfo page) paintContent;
+  ///
+  /// 第三参 canvasSize = 本 painter 收到的画布尺寸：调用方（composer 闭包）
+  /// 必须用它作为绘制 size，禁止自行取 MediaQuery.size（全屏值，SafeArea
+  /// 内不一致 → 背景纹理在翻页前后尺寸跳变的根因）。
+  final void Function(Canvas canvas, PageInfo page, Size canvasSize) paintContent;
 
   /// 触点/动画插值触点（本地坐标）
   final Offset touch;
@@ -320,7 +324,7 @@ class CurlPainter extends CustomPainter {
     _shouldTraceThisFrame();
     if (isSettled) {
       canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
-      paintContent(canvas, revealPage);
+      paintContent(canvas, revealPage, size);
       return;
     }
     final page = size;
@@ -371,7 +375,7 @@ class CurlPainter extends CustomPainter {
         Path.combine(PathOperation.difference, pageRectPath, path0);
     canvas.save();
     canvas.clipPath(frontVisible);
-    paintContent(canvas, foldingPage);
+    paintContent(canvas, foldingPage, size);
     canvas.restore();
 
     // ② 目标页露出区：五边形 start1→v1→v2→start2→corner ∩ path0
@@ -394,7 +398,7 @@ class CurlPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(revealArea);
     canvas.drawRect(Offset.zero & page, Paint()..color = _paperColor);
-    paintContent(canvas, revealPage);
+    paintContent(canvas, revealPage, size);
     // MD3 drawNextPageAreaAndShadow：下一页的投影只画在
     // path0 ∩ path1（即 revealArea）内，以 start1 为旋转锚点，宽度为
     // dis / 4。这个矩形渐变正是卷页下方的投影，不是卷页边缘描边。
@@ -431,7 +435,7 @@ class CurlPainter extends CustomPainter {
       //    正/背面内容像素连续（legado f8/f9 矩阵等价实现）
       canvas.save();
       canvas.transform(foldMirrorMatrix(p).storage);
-      paintContent(canvas, foldingPage);
+      paintContent(canvas, foldingPage, size);
       canvas.restore();
       // 卷曲镜面暂不绘制 MD3 folder shadow。
       // 该阴影属于翻起页背面自身的光影，而不是下一页上的投影；

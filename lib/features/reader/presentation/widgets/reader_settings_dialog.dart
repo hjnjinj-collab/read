@@ -130,29 +130,59 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     // 先收编输入框里未添加的规则，再统一应用：
     // 更新选项 → 失效缓存 → 带锚点重载当前页（即时生效，保持进度）
     _collectPendingRule();
-    await ref.read(readerProvider.notifier).applyContentProcessingSettings(
-      removeDuplicateTitle: _removeDuplicateTitle,
-      chineseConvert: _chineseConvert,
-      replaceRules: List.of(_replaceRules),
-      removeHtmlTags: _removeHtmlTags,
-      removeAds: _removeAds,
-      boldEnabled: _boldEnabled,
-      italicEnabled: _italicEnabled,
-      pageFillThreshold: _pageFillThreshold,
-      showComments: _showComments,
-      enableIndent: _enableIndent,
-      indentSizeChars: _indentSizeChars,
-      paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
-      reParagraphMode: _reParagraphMode,
-      smartSplitThreshold: _smartSplitThreshold,
-      aggressiveSplitThreshold: _aggressiveSplitThreshold,
-    );
-
+    
+    // 2026-09-02 优化：显示 loading 进度提示
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('设置已应用（替换规则 ${_replaceRules.length} 条）')),
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(),
+      ),
     );
-    Navigator.of(context).pop();
+    
+    try {
+      await ref.read(readerProvider.notifier).applyContentProcessingSettings(
+        removeDuplicateTitle: _removeDuplicateTitle,
+        chineseConvert: _chineseConvert,
+        replaceRules: List.of(_replaceRules),
+        removeHtmlTags: _removeHtmlTags,
+        removeAds: _removeAds,
+        boldEnabled: _boldEnabled,
+        italicEnabled: _italicEnabled,
+        pageFillThreshold: _pageFillThreshold,
+        showComments: _showComments,
+        enableIndent: _enableIndent,
+        indentSizeChars: _indentSizeChars,
+        paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
+        reParagraphMode: _reParagraphMode,
+        smartSplitThreshold: _smartSplitThreshold,
+        aggressiveSplitThreshold: _aggressiveSplitThreshold,
+      );
+
+      if (!mounted) return;
+      
+      // 关闭 loading 对话框
+      Navigator.of(context).pop();
+      
+      // 显示成功提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('设置已应用（替换规则 ${_replaceRules.length} 条）')),
+      );
+      
+      // 关闭设置对话框
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      
+      // 关闭 loading 对话框
+      Navigator.of(context).pop();
+      
+      // 显示错误提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('设置应用失败：$e')),
+      );
+    }
   }
 
   @override

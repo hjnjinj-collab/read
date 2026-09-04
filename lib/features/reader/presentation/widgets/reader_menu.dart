@@ -117,7 +117,7 @@ class ReaderMenu extends ConsumerWidget {
 
             const Divider(height: 1),
 
-            // P5: 翻页模式选择
+            // P5: 翻页模式选择 (2026-09-03: 添加水波纹选项)
             if (onPageTurnModeChanged != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -130,6 +130,13 @@ class ReaderMenu extends ConsumerWidget {
                     _PageTurnModeChip(
                       label: '卷曲',
                       mode: PageTurnMode.simulation,
+                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                      onSelected: onPageTurnModeChanged!,
+                    ),
+                    const SizedBox(width: 8),
+                    _PageTurnModeChip(
+                      label: '水波纹',
+                      mode: PageTurnMode.ripple,
                       currentMode: pageTurnMode ?? PageTurnMode.simulation,
                       onSelected: onPageTurnModeChanged!,
                     ),
