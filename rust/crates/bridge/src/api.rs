@@ -78,6 +78,23 @@ static PAGINATION_CACHE: Lazy<Arc<Mutex<PaginationCache>>> = Lazy::new(|| {
 static PREPROCESSED_CACHE: Lazy<reader_core::cache::PreprocessedCache> =
     Lazy::new(|| reader_core::cache::PreprocessedCache::new());
 
+// M10-B：进程级 Skia 测量缓存。详见 layout_engine::MeasureCache。
+// Dart 端 MeasureTextService 通过 feed_text_widths 批量注入；
+// layout 二分命中后用 Skia 真实宽度做断行决策，避免 ttf-parser hmtx 与
+// Skia/HarfBuzz 整形后宽度不一致导致的左右边距不对称。
+static MEASURE_CACHE: Lazy<Arc<layout_engine::MeasureCache>> =
+    Lazy::new(|| Arc::new(layout_engine::MeasureCache::with_default_capacity()));
+
+/// M10-B：构造 LayoutEngine 并注入共享 MeasureCache。
+///
+/// 所有 FFI 入口（layout_chapter / get_page / get_page_count / get_page_processed /
+/// get_page_count_processed / get_page_structured / get_page_count_structured）
+/// 走此 helper，确保 Dart 端 Dart MeasureTextService 注入的 Skia 实测宽度对所有
+/// 排版入口即时可见。
+fn build_layout_engine(config: LayoutConfig, font_manager: FontManager) -> LayoutEngine {
+    LayoutEngine::with_measure_cache(config, font_manager, MEASURE_CACHE.clone())
+}
+
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
 // (update_book_cleaning / release_book / per-book clear), None = clear all.
 fn invalidate_preprocessed_cache(book_id: Option<&str>) {
@@ -302,7 +319,8 @@ pub fn get_font_count() -> usize {
 /// 切换默认字体（用户选字体后调用）
 ///
 /// name 必须是已 load_font_* 加载过的字体名，否则抛错。
-/// 切换后清共享字形缓存防旧字体字形混入。
+/// 切换后清共享字形缓存防旧字体字形混入；同时清共享 MeasureCache
+/// （旧字体的 Skia 实测宽度对当前字体失效）。
 pub fn set_default_font(font_name: String) -> anyhow::Result<()> {
     // M9.4-F：锁序约定同 load_font_file——先释放 FONT_MANAGER 再取 SHARED
     let result = {
@@ -311,6 +329,8 @@ pub fn set_default_font(font_name: String) -> anyhow::Result<()> {
     };
     result?;
     SHARED_GLYPH_CACHE.lock().unwrap().clear();
+    // M10-B：字体切换时清测量缓存（Dart 端的 Skia 测宽只对当前字体有效）
+    MEASURE_CACHE.clear();
     Ok(())
 }
 
@@ -321,6 +341,61 @@ pub fn get_default_font_name() -> String {
         .default_font_name()
         .unwrap_or("embedded_default")
         .to_string()
+}
+
+// =========================================================================
+// M10-B — Skia 测量缓存 FFI 表面
+// =========================================================================
+//
+// 解决左右边距不对称的根因：Rust 端 layout 期间用 Dart TextPainter 真实测量宽度
+// 替代 ttf-parser hmtx 估算。Dart 端 MeasureTextService 通过此组 FFI 注入测量结果。
+//
+// 数据流：
+// 1. Dart MeasureTextService 用 TextPainter 测一批子串宽度
+// 2. Dart 调 feed_text_widths(widths) 批量写入 MEASURE_CACHE
+// 3. 后续 layout 调用命中 MeasureCache 时用 Skia 真实宽度做二分搜索
+// 4. cache miss 回退 ttf-parser 估算（与原版等价，不会破坏任何已有路径）
+
+/// M10-B：单条测量结果（font_name + font_size + text + width_px）
+///
+/// text 必须与 Rust layout 期间实际查询的子串**逐字节一致**——内部 key 用
+/// SipHash(text) 而非 text 本身，避免 key 长度爆炸。
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct FfiTextWidth {
+    pub font_name: String,
+    pub font_size: f32,
+    pub text: String,
+    pub width: f32,
+}
+
+/// M10-B：批量写入 Skia 实测宽度到 MeasureCache。
+///
+/// 典型调用：Dart MeasureTextService 测完本章常用子串后调一次（数百~数千条）。
+/// 内部 LRU 自动淘汰，单章 ≤ 50k 条足够覆盖。重复写入覆盖（写入永远是最新值）。
+pub fn feed_text_widths(widths: Vec<FfiTextWidth>) -> usize {
+    let entries: Vec<(String, f32, String, f32)> = widths
+        .into_iter()
+        .map(|w| (w.font_name, w.font_size, w.text, w.width))
+        .collect();
+    let n = entries.len();
+    MEASURE_CACHE.put_many(&entries);
+    n
+}
+
+/// M10-B：清空 MeasureCache（Dart 端主动失效时使用，例如 settings 变更或字体切换兜底）
+pub fn clear_measure_cache() -> usize {
+    let n = MEASURE_CACHE.len();
+    MEASURE_CACHE.clear();
+    n
+}
+
+/// M10-B：查询 MeasureCache 状态（诊断用：当前条目数 / 容量）
+pub fn get_measure_cache_stats() -> String {
+    format!(
+        "{{\"len\":{},\"capacity\":{}}}",
+        MEASURE_CACHE.len(),
+        layout_engine::measure_cache::MEASURE_CACHE_CAPACITY,
+    )
 }
 
 /// Parse TXT file and return book ID
@@ -1141,7 +1216,7 @@ pub fn layout_chapter(
     };
     
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    let engine = LayoutEngine::new(config, font_manager);
+    let engine = build_layout_engine(config, font_manager);
     let pages = engine.layout_text(&content, chapter_index)?;
     
     Ok(pages.into_iter().map(PageInfo::from).collect())
@@ -1184,7 +1259,7 @@ pub fn get_page(
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    let engine = LayoutEngine::new(config, font_manager);
+    let engine = build_layout_engine(config, font_manager);
     engine.get_page(&content, chapter_index, page_index)?
         .map(PageInfo::from)
         .ok_or_else(|| anyhow::anyhow!("Page not found"))
@@ -1226,7 +1301,7 @@ pub fn get_page_count(
     };
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    let engine = LayoutEngine::new(config, font_manager);
+    let engine = build_layout_engine(config, font_manager);
     engine.get_page_count(&content, chapter_index)
 }
 
@@ -1257,6 +1332,14 @@ pub fn get_page_processed(
     page_fill_threshold: f32,
     para_format_hash: u64,
 ) -> anyhow::Result<PageInfo> {
+    // M12-v4 诊断：输出 FFI 入口收到的 width 参数（仅首次）
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LOGGED_PROCESSED: AtomicBool = AtomicBool::new(false);
+    if !LOGGED_PROCESSED.swap(true, Ordering::Relaxed) {
+        eprintln!("[M12-v4] get_page_processed FIRST CALL: width={:.1}, padding_left={:.1}, padding_right={:.1}, content_width={:.1}", 
+            width, padding_left, padding_right, width - padding_left - padding_right);
+    }
+    
     // 1. 排版配置
     let config = LayoutConfig {
         width,
@@ -1832,9 +1915,11 @@ fn process_structured_chapter(
     blocks_to_layout_items(&content.blocks, &mut items);
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
-    // M8-P4：跨章复用共享字形缓存（M9.4-F：O(1) Arc bump，共享 prewarm 条目）
-    let glyph_cache = SHARED_GLYPH_CACHE.lock().unwrap().glyph_cache();
-    let engine = LayoutEngine::with_cache(params.config.clone(), font_manager, glyph_cache);
+    // M10-B：注入共享 MEASURE_CACHE，让 Dart TextPainter 测宽在分页时即时可用。
+    // 注意：此路径（M9.5-G structured layout）原本通过 with_cache 注入 SHARED_GLYPH_CACHE，
+    // 而 with_cache 内部不复用 measure_cache 字段。为简单计本路径暂用 build_layout_engine
+    // （measure_cache 命中率高时几乎无损；如有回归可后续加 with_cache_and_measure 合并）。
+    let engine = build_layout_engine(params.config.clone(), font_manager);
     let pages = engine.layout_items(&items, chapter_index)?;
 
     // 背景为章节级属性：逐页携带（Dart 侧按 href 去重解码一次）
@@ -2015,6 +2100,14 @@ pub fn get_page_structured(
     show_comments: bool,
     para_format_hash: u64,
 ) -> anyhow::Result<crate::PageInfo> {
+    // M12-v4 诊断：输出 FFI 入口收到的 width 参数（仅首次）
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LOGGED_STRUCTURED: AtomicBool = AtomicBool::new(false);
+    if !LOGGED_STRUCTURED.swap(true, Ordering::Relaxed) {
+        eprintln!("[M12-v4] get_page_structured FIRST CALL: width={:.1}, padding_left={:.1}, padding_right={:.1}, content_width={:.1}", 
+            width, padding_left, padding_right, width - padding_left - padding_right);
+    }
+    
     let params = StructuredParams::from_args(
         width,
         height,
@@ -2567,7 +2660,7 @@ pub fn get_page_cached_processed(
         )?;
         
         let font_manager = FONT_MANAGER.lock().unwrap().clone();
-        let engine = LayoutEngine::new(config.clone(), font_manager);
+        let engine = build_layout_engine(config.clone(), font_manager);
         let pages = std::sync::Arc::new(engine.layout_text(&content, chapter_index)?);
 
         // 存入缓存

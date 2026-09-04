@@ -74,6 +74,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiReplaceRule dco_decode_ffi_replace_rule(dynamic raw);
 
   @protected
+  FfiTextWidth dco_decode_ffi_text_width(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
@@ -81,6 +84,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FfiReplaceRule> dco_decode_list_ffi_replace_rule(dynamic raw);
+
+  @protected
+  List<FfiTextWidth> dco_decode_list_ffi_text_width(dynamic raw);
 
   @protected
   List<PageEntryInfo> dco_decode_list_page_entry_info(dynamic raw);
@@ -194,6 +200,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiReplaceRule sse_decode_ffi_replace_rule(SseDeserializer deserializer);
 
   @protected
+  FfiTextWidth sse_decode_ffi_text_width(SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
@@ -201,6 +210,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FfiReplaceRule> sse_decode_list_ffi_replace_rule(SseDeserializer deserializer);
+
+  @protected
+  List<FfiTextWidth> sse_decode_list_ffi_text_width(SseDeserializer deserializer);
 
   @protected
   List<PageEntryInfo> sse_decode_list_page_entry_info(SseDeserializer deserializer);
@@ -317,6 +329,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_ffi_replace_rule(FfiReplaceRule self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_text_width(FfiTextWidth self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
@@ -324,6 +339,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_ffi_replace_rule(List<FfiReplaceRule> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_text_width(List<FfiTextWidth> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_page_entry_info(List<PageEntryInfo> self, SseSerializer serializer);

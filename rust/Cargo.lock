@@ -1465,6 +1465,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "lru",
+ "owned_ttf_parser",
  "rayon",
  "serde",
  "unicode-segmentation",

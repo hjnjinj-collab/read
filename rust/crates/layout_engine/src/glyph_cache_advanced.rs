@@ -69,20 +69,18 @@ impl AdvancedGlyphCache {
             }
         }
 
-        // 批量测量未缓存的字符
+        // 批量测量未缓存的字符（measure_char 已切按字体名寻址，删 font 句柄）
         if !uncached_chars.is_empty() {
             let manager = self.font_manager.lock().unwrap();
-            if let Ok(font) = manager.get_font(font_name) {
-                for (i, &ch) in uncached_chars.iter().enumerate() {
-                    let metrics = manager.measure_char(&font, ch, font_size);
+            for (i, &ch) in uncached_chars.iter().enumerate() {
+                let metrics = manager.measure_char(font_name, ch, font_size);
 
-                    let key = GlyphKey::new(ch, font_size, font_name);
-                    self.cache.put(key, metrics);
+                let key = GlyphKey::new(ch, font_size, font_name);
+                self.cache.put(key, metrics);
 
-                    // 更新结果
-                    if let Some(&idx) = uncached_indices.get(i) {
-                        results[idx] = metrics;
-                    }
+                // 更新结果
+                if let Some(&idx) = uncached_indices.get(i) {
+                    results[idx] = metrics;
                 }
             }
         }
@@ -101,13 +99,9 @@ impl AdvancedGlyphCache {
 
         // 缓存未命中，测量并缓存
         let manager = self.font_manager.lock().unwrap();
-        if let Ok(font) = manager.get_font(font_name) {
-            let metrics = manager.measure_char(&font, ch, font_size);
-            self.cache.put(key, metrics);
-            metrics.width
-        } else {
-            0.0
-        }
+        let metrics = manager.measure_char(font_name, ch, font_size);
+        self.cache.put(key, metrics);
+        metrics.width
     }
 
     /// 测量文本的总宽度

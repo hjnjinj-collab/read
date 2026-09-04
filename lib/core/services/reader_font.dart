@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show ByteData, FontLoader, rootBundle;
 
 import '../ffi/rust_bridge.dart/api.dart' as rust_api;
+// M10-B：与 MeasureTextService 形成单向 import（reader_font → measure_text，
+// 反向不再 import reader_font），打破循环依赖
+import 'measure_text_service.dart';
 
 /// 阅读器字体管理器（M9 字体架构重写）
 ///
@@ -95,6 +98,13 @@ class ReaderFont {
       family = name;
       displayName = displayLabel;
       debugPrint('✓ Custom font loaded: $name ($displayLabel)');
+
+      // M10-B：字体切换后清空 Dart 端测量缓存（key 包含 fontFamily）。
+      // 直接 import MeasureTextService；为了避免循环依赖，
+      // MeasureTextService 不 import reader_font.dart（见 measure_text_service.dart 顶部说明）。
+      // ignore: unawaited_futures
+      MeasureTextService.instance.invalidateForFont(name);
+
       return true;
     } catch (e) {
       debugPrint('✗ Failed to load custom font: $e');

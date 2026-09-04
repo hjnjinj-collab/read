@@ -1,5 +1,8 @@
+import 'dart:ui' show PictureRecorder;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:legado_flutter/core/models/simple_models.dart';
 import 'package:legado_flutter/features/reader/presentation/widgets/page_turn/curl_painter.dart';
 import 'package:legado_flutter/features/reader/presentation/widgets/page_turn/page_turn_types.dart';
 
@@ -262,6 +265,52 @@ void main() {
       final c = applyM(foldMirrorMatrix(p), const Offset(400, 800));
       // 若误用 start1 枢轴，镜像角点会横向偏移约 (corner.x−ctrl1.x)
       expect(c.dx, closeTo(p.touch.dx, 1e-6));
+    });
+  });
+
+  group('paintContent canvasSize 传递（viewport 尺寸单源化）', () {
+    // CurlPainter 必须把自己的画布尺寸传给 paintContent 第三参，
+    // 调用方（composer 闭包）用它做绘制 size——禁止 MediaQuery.size
+    // 全屏值（移动端 SafeArea 内不一致 → 翻页前后背景纹理尺寸跳变）
+    test('isSettled 短路帧：canvasSize == paint 收到的 size', () {
+      final pageInfo = PageInfo(pageIndex: 0, startCharIndex: 0, endCharIndex: 0);
+      Size? received;
+      final painter = CurlPainter(
+        foldingPage: pageInfo,
+        revealPage: pageInfo, // identical → isSettled 短路直绘
+        paintContent: (canvas, p, canvasSize) => received = canvasSize,
+        touch: Offset.zero,
+        direction: PageDirection.next,
+        autoProgress: null,
+        washScale: 1.0,
+        repaint: ValueNotifier<int>(0),
+      );
+      final recorder = PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(360, 700));
+      recorder.endRecording().dispose();
+      expect(received, const Size(360, 700));
+    });
+
+    test('拖拽帧（reveal≠folding）：每次 paintContent 收到的都是画布尺寸', () {
+      final folding = PageInfo(pageIndex: 0, startCharIndex: 0, endCharIndex: 0);
+      final reveal = PageInfo(pageIndex: 1, startCharIndex: 10, endCharIndex: 20);
+      final received = <Size>[];
+      final painter = CurlPainter(
+        foldingPage: folding,
+        revealPage: reveal,
+        paintContent: (canvas, p, canvasSize) => received.add(canvasSize),
+        touch: const Offset(100, 400),
+        direction: PageDirection.next,
+        autoProgress: null,
+        washScale: 1.0,
+        repaint: ValueNotifier<int>(0),
+      );
+      final recorder = PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(412, 850));
+      recorder.endRecording().dispose();
+      // 正面剩余区 + 露出区 + 背面镜像区至少各一次，全部等于画布尺寸
+      expect(received, isNotEmpty);
+      expect(received.every((s) => s == const Size(412, 850)), isTrue);
     });
   });
 }

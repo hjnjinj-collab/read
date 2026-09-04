@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/ffi/book_service.dart';
+import '../../../../core/services/measure_text_service.dart';
+import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import 'page_frame.dart';
@@ -80,6 +82,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 异步页面/frame 请求代际。旧请求完成后不得覆盖新阅读位置。
   int _requestGeneration = 0;
 
+  /// 排版参数指纹变更重排的递归深度护栏（_loadCurrentPage 内自增/递减）。
+  /// 连续 resize 逐次收敛属正常；≥4 说明参数在极速抖动，放弃本次、
+  /// 交给绘制层 mismatch 兜底与下一次 LayoutBuilder 触发。
+  int _fpReloadDepth = 0;
+
   /// 会话世代：换书/设置/窗口变化递增，旧 FrameSet 全部作废（不变量 6）。
   int _sessionEpoch = 0;
 
@@ -118,6 +125,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _screenHeight = height;
   }
 
+  /// 权威 viewport（SafeArea 内实际可用区域，逻辑像素）
+  ///
+  /// viewport 尺寸单源化：排版 LayoutConfig、绘制 canvas、翻页几何
+  /// 三者同源于此。reader_page 的 LayoutBuilder 负责测量与登记——
+  /// 任何代码不得再从 MediaQuery.size 取排版/绘制尺寸（那是全屏值，
+  /// 含状态栏/手势条区域，移动端与 SafeArea 内 canvas 不一致）。
+  double get screenWidth => _screenWidth;
+  double get screenHeight => _screenHeight;
+
+  /// 是否已开书（viewport 尺寸变化时决定走锚点重排还是仅同步登记）
+  bool get hasBook => state.bookId != null;
+
   /// 窗口尺寸变化：更新布局参数并带锚点重排当前页
   ///
   /// 分页缓存键含排版配置，新旧尺寸的页互不污染；锚点保证
@@ -134,6 +153,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   void setFontSize(double fontSize) {
     _fontSize = fontSize;
+    // M10-B：字号变更 → 清 Dart 端测量缓存（key 包含 fontSize）
+    MeasureTextService.instance.configure(
+      fontFamily: ReaderFont.family,
+      fontSize: _fontSize,
+    );
     _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
     _invalidateFrames(reason: 'font-size'); // 旧指纹 FrameSet 作废
     // Reload current page with new settings
@@ -146,6 +170,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   ///
   /// 统一处理净化选项与阅读级选项：更新 parser 净化器、失效缓存后
   /// 仅触发一次带锚点的页面重载，避免双重加载竞态。
+  /// 
+  /// 2026-09-02 优化：区分净化选项和段落格式变更，避免过度清空缓存。
   Future<void> applyContentProcessingSettings({
     required bool removeDuplicateTitle,
     required ChineseConvertType chineseConvert,
@@ -166,6 +192,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 设置开始变化即使旧页面请求失效，避免在等待 Rust 同步期间回写旧帧。
     ++_requestGeneration;
     _invalidateFrames(reason: 'settings'); // 旧指纹 FrameSet 与待决手势作废
+    
+    // 检测净化选项是否变更（影响 PreprocessedCache）
+    final bool needsCleaningUpdate = (
+      _removeHtmlTags != removeHtmlTags ||
+      _removeAds != removeAds ||
+      _chineseConvert != chineseConvert ||
+      _replaceRules.length != replaceRules.length ||
+      !_listEquals(_replaceRules, replaceRules)
+    );
+    
     _removeDuplicateTitle = removeDuplicateTitle;
     _chineseConvert = chineseConvert;
     _replaceRules = replaceRules;
@@ -193,6 +229,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
     _paraFormatHash = _computeParaFormatHash();
 
+    // 2026-09-03 修复：_paraFormatHash 更新后，需要再次更新 store.configFingerprint
+    // 确保 store.configFingerprint 与后续发布的 FrameSet.configFingerprint 一致
+    _renderStore.advanceSession(
+      sessionEpoch: _sessionEpoch,  // 复用已递增的 epoch
+      configFingerprint: layoutFingerprint(),  // 使用更新后的 fingerprint
+    );
+
     _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
 
     if (state.bookId == null) return;
@@ -207,19 +250,36 @@ class ReaderNotifier extends Notifier<ReadingState> {
       return;
     }
 
-    // 更新 parser 净化器并失效相关缓存（含全局选项同步）；
-    // 智能分段为净化层内部行为恒开（M9.3 起不暴露设置项）
-    await _bookService.updateBookCleaning(
-      state.bookId!,
-      removeHtmlTags: removeHtmlTags,
-      removeAds: removeAds,
-      smartParagraph: true,
-      traditionalized: chineseConvert == ChineseConvertType.s2t,
-      simplified: chineseConvert == ChineseConvertType.t2s,
-    );
+    // 2026-09-02 优化：仅当净化选项变更时才清空所有缓存
+    // 段落格式变更仅触发自然换键（L1/L2 缓存键含 para_format_hash）
+    if (needsCleaningUpdate) {
+      // 更新 parser 净化器并失效相关缓存（含全局选项同步）；
+      // 智能分段为净化层内部行为恒开（M9.3 起不暴露设置项）
+      await _bookService.updateBookCleaning(
+        state.bookId!,
+        removeHtmlTags: removeHtmlTags,
+        removeAds: removeAds,
+        smartParagraph: true,
+        traditionalized: chineseConvert == ChineseConvertType.s2t,
+        simplified: chineseConvert == ChineseConvertType.t2s,
+      );
+    }
 
     // 单次重载：简繁/规则经 options_hash 隔离缓存自然重算，锚点保持进度
     await _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+  }
+  
+  /// 辅助方法：比较两个 ReplaceRuleItem 列表是否相等
+  bool _listEquals(List<ReplaceRuleItem> a, List<ReplaceRuleItem> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].pattern != b[i].pattern || 
+          a[i].replacement != b[i].replacement ||
+          a[i].isRegex != b[i].isRegex) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Open a book file
@@ -298,6 +358,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (state.bookId == null) return;
 
     final generation = ++_requestGeneration;
+    // 排版参数指纹快照：FFI 返回时若指纹已变（窗口 resize/系统栏 insets
+    // 就位/设置变更发生在 FFI await 途中），本次排版结果作废——否则
+    // 「旧宽度排版画新宽度画布」= 内容偏右/右侧空白消失（曲面屏实测）。
+    final fpSnapshot = layoutFingerprint();
     final requestedBookId = state.bookId!;
     final requestedChapterIndex = state.currentChapterIndex;
     final requestedPageIndex = state.currentPageIndex;
@@ -331,6 +395,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingTop: _paddingVertical,
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
+          fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
           anchorCharOffset: anchorCharOffset,
           chineseConvert: chineseConvertCode,
           pageFillThreshold: _pageFillThreshold,
@@ -358,6 +423,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingTop: _paddingVertical,
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
+          fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
           removeDuplicateTitle: _removeDuplicateTitle,
           reSegment: false, // M9.3：旧重排已被 ParagraphFormatter 取代，恒关
           chineseConvert: chineseConvertCode,
@@ -378,6 +444,32 @@ class ReaderNotifier extends Notifier<ReadingState> {
           'requested': '$requestedChapterIndex/$requestedPageIndex',
           'actual': '${state.currentChapterIndex}/${state.currentPageIndex}',
         });
+        return;
+      }
+
+      // 排版参数指纹校验（通用根治）：FFI 途中 layoutFingerprint 变更
+      // （窗口 resize、曲面屏 insets 就位、旋转屏、设置变更）时，本次
+      // 结果是旧参数排版——丢弃并立即用当前参数重排一次。重排内部会
+      // 以新指纹再快照，连续变更天然逐次收敛；深度护栏防极端抖动。
+      if (fpSnapshot != layoutFingerprint()) {
+        if (_fpReloadDepth >= 4) {
+          readerTrace('page.load.fp-reload.giveup', {
+            'generation': generation,
+            'depth': _fpReloadDepth,
+          });
+          return;
+        }
+        readerTrace('page.load.fp-reload', {
+          'generation': generation,
+          'snapshot': fpSnapshot,
+          'current': layoutFingerprint(),
+        });
+        _fpReloadDepth++;
+        try {
+          await _loadCurrentPage(anchorCharOffset: anchorCharOffset);
+        } finally {
+          _fpReloadDepth--;
+        }
         return;
       }
 
@@ -439,7 +531,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> _prepareAndPublishFrameSet(PageInfo currentPage) async {
     final generation = _requestGeneration;
     final epoch = _sessionEpoch;
-    final fingerprint = layoutFingerprint();
     final requestedBookId = state.bookId;
     final requestedChapterIndex = state.currentChapterIndex;
     final requestedPageIndex = state.currentPageIndex;
@@ -461,19 +552,47 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // 三页资源统一预热（背景图 + 图片 entry 去重），完成后 frame 资源态
       // 聚合为终态、动画门控据此判定可用性。
-      // 顺序：next 槽（用户最可能的翻页方向）→ current → prev，组内并发、
-      // 组间串行——目标帧资源最先就绪，门控最早放行；跨组共享 href 由
-      // states 表去重，不重复解码。
+      // 
+      // 2026-09-02 阶段2优化：检测挂起的翻页手势方向，优先预热目标方向
       final states = <String, BookImageState>{};
-      final resourceGroups = <Set<String>>[
-        slots[1].frame != null
-            ? ResourceManifest.of(slots[1].frame!.page).hrefs
-            : <String>{},
-        ResourceManifest.of(currentPage).hrefs,
-        slots[0].frame != null
-            ? ResourceManifest.of(slots[0].frame!.page).hrefs
-            : <String>{},
-      ];
+      final pendingDirection = _renderStore.pendingTurnDirection;
+      
+      final List<Set<String>> resourceGroups;
+      if (pendingDirection == PageDirection.next) {
+        // 用户想往后翻 → 优先预热 next
+        resourceGroups = [
+          slots[1].frame != null
+              ? ResourceManifest.of(slots[1].frame!.page).hrefs
+              : <String>{},
+          ResourceManifest.of(currentPage).hrefs,
+          slots[0].frame != null
+              ? ResourceManifest.of(slots[0].frame!.page).hrefs
+              : <String>{},
+        ];
+      } else if (pendingDirection == PageDirection.prev) {
+        // 用户想往前翻 → 优先预热 prev
+        resourceGroups = [
+          slots[0].frame != null
+              ? ResourceManifest.of(slots[0].frame!.page).hrefs
+              : <String>{},
+          ResourceManifest.of(currentPage).hrefs,
+          slots[1].frame != null
+              ? ResourceManifest.of(slots[1].frame!.page).hrefs
+              : <String>{},
+        ];
+      } else {
+        // 无挂起手势 → 默认顺序（next → current → prev）
+        resourceGroups = [
+          slots[1].frame != null
+              ? ResourceManifest.of(slots[1].frame!.page).hrefs
+              : <String>{},
+          ResourceManifest.of(currentPage).hrefs,
+          slots[0].frame != null
+              ? ResourceManifest.of(slots[0].frame!.page).hrefs
+              : <String>{},
+        ];
+      }
+      
       for (final group in resourceGroups) {
         final pending = group.where((h) => !states.containsKey(h)).toSet();
         if (pending.isEmpty) continue;
@@ -502,12 +621,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
         _buildFrame(currentPage, generation: generation, epoch: epoch),
         states,
       );
+      
+      // 2026-09-03 修复：在发布前重新捕获 fingerprint
+      // 原因：异步操作期间 para_format_hash 可能已改变
+      final finalFingerprint = layoutFingerprint();
+      
       _publishPinned(FrameSet(
         setRevision: _renderStore.nextSetRevision(),
         current: current,
         previous: _finalizeSlot(slots[0], states),
         next: _finalizeSlot(slots[1], states),
-        configFingerprint: fingerprint,
+        configFingerprint: finalFingerprint,
         sessionEpoch: epoch,
       ));
       readerTrace('frame.commit', {
@@ -526,6 +650,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
         return;
       }
       // 邻居/预热异常：发布 current + failed 槽位（绝不 null 邻居不留标记）
+      // 2026-09-03 修复：在发布前重新捕获 fingerprint
+      final finalFingerprint = layoutFingerprint();
+      
       _publishPinned(FrameSet(
         setRevision: _renderStore.nextSetRevision(),
         current: _frameWithResources(
@@ -534,7 +661,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         ),
         previous: const FrameSlot.failed(),
         next: const FrameSlot.failed(),
-        configFingerprint: fingerprint,
+        configFingerprint: finalFingerprint,
         sessionEpoch: epoch,
       ));
     } finally {
@@ -653,6 +780,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// FrameSet 发布统一出口：pin 资源清单（存活帧引用的图片不淘汰）
   /// 后原子发布。pin/unpin 收敛在此单点，保证 dispose 安全。
+  /// 
+  /// 2026-09-02 阶段2优化：投机性资源预解码
+  /// 2026-09-02 阶段2修复：资源状态监控，确保资源就绪后重新通知监听器
   void _publishPinned(FrameSet set) {
     final hrefs = <String>{...set.current.manifest.hrefs};
     for (final slot in [set.previous, set.next]) {
@@ -661,6 +791,142 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
     BookImageStore.instance.setPinned(hrefs);
     _renderStore.publishFrameSet(set);
+    
+    // 🔍 资源状态监控：如果资源仍在 loading，定期检查并在就绪时重新通知
+    _startResourceMonitoring(set);
+    
+    // 🚀 投机性预热：假设用户会继续翻下一页
+    unawaited(_speculativePrewarmNext());
+  }
+  
+  Timer? _resourceMonitorTimer;
+  
+  /// 监控 FrameSet 的资源状态，当资源从 pending 变为 ready 时重新通知监听器
+  /// 
+  /// 关键修复（2026-09-02）：解决"参数变更后动画永久失效"问题
+  /// - 问题：FrameSet 发布时资源状态可能是 pending（图片解码中）
+  /// - 结果：frame.usableForAnimation == false → 动画门控一直返回 TargetWait()
+  /// - 即使图片最终解码完成，也没有事件触发 _retryPendingTurn()
+  /// - 解决：定期轮询资源状态，当全部就绪时重新发布 FrameSet（触发监听器）
+  void _startResourceMonitoring(FrameSet set) {
+    _resourceMonitorTimer?.cancel();
+    
+    // 检查是否有资源需要监控
+    final allHrefs = <String>{};
+    allHrefs.addAll(set.current.manifest.hrefs);
+    for (final slot in [set.previous, set.next]) {
+      final frame = slot.frame;
+      if (frame != null) allHrefs.addAll(frame.manifest.hrefs);
+    }
+    
+    if (allHrefs.isEmpty) return;
+    
+    // 检查是否已经全部就绪
+    if (BookImageStore.instance.isManifestReady(allHrefs)) {
+      return; // 已经就绪，无需监控
+    }
+    
+    // 启动监控定时器（每 100ms 检查一次，最多 10 秒）
+    int checkCount = 0;
+    const maxChecks = 100; // 10 秒 / 100ms
+    final monitorEpoch = _sessionEpoch; // 捕获当前 epoch
+    
+    _resourceMonitorTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (timer) {
+        checkCount++;
+        
+        // 超时或会话已变更（参数再次变更 → epoch 递增 → 停止监控旧 FrameSet）
+        if (checkCount >= maxChecks || monitorEpoch != _sessionEpoch) {
+          timer.cancel();
+          _resourceMonitorTimer = null;
+          return;
+        }
+        
+        // 检查资源状态
+        if (BookImageStore.instance.isManifestReady(allHrefs)) {
+          timer.cancel();
+          _resourceMonitorTimer = null;
+          
+          // 资源已就绪！重新发布 FrameSet 触发监听器
+          readerTrace('frame.resources.monitor.ready', {
+            'set': set.id,
+            'checkCount': checkCount,
+            'timeMs': checkCount * 100,
+          });
+          
+          // 重新发布会触发 _onModelPublished → _retryPendingTurn
+          _renderStore.publishFrameSet(set);
+        }
+      },
+    );
+  }
+  
+  /// 投机性预热：在 FrameSet 发布后立即预热下一页的资源
+  /// 
+  /// 2026-09-02 阶段2优化：用户连续翻页时几乎无等待
+  Future<void> _speculativePrewarmNext() async {
+    try {
+      // 获取当前页信息
+      final currentChapter = state.currentChapterIndex;
+      final currentPageIndex = state.currentPageIndex;
+      
+      // 计算 N+2 页（当前 FrameSet 已包含 N+1）
+      int nextChapter = currentChapter;
+      int nextPageIndex = currentPageIndex + 2;
+      
+      // 检查是否跨章
+      final currentChapterPageCount = await _pageCountOf(currentChapter);
+      if (nextPageIndex >= currentChapterPageCount) {
+        // 跨到下一章
+        nextChapter = currentChapter + 1;
+        nextPageIndex = nextPageIndex - currentChapterPageCount;
+        
+        // 检查章节是否越界
+        final totalChapters = state.chapters.length;
+        if (nextChapter >= totalChapters) {
+          return; // 已到最后一章,无需预热
+        }
+      }
+      
+      // 异步预热，不阻塞当前发布
+      unawaited(_speculativeLoadPage(
+        chapterIndex: nextChapter,
+        pageIndex: nextPageIndex,
+      ));
+    } catch (e) {
+      // 投机预热失败不影响主流程，静默忽略
+      readerTrace('speculative.prewarm.error', {'error': e.toString()});
+    }
+  }
+  
+  /// 投机性加载页面：加载并预热 N+2 页的资源
+  Future<void> _speculativeLoadPage({
+    required int chapterIndex,
+    required int pageIndex,
+  }) async {
+    try {
+      // 加载页面
+      final page = await _loadSinglePage(chapterIndex, pageIndex);
+      
+      // 预热该页的图片资源
+      final manifest = ResourceManifest.of(page);
+      if (manifest.hrefs.isNotEmpty) {
+        await BookImageStore.instance.prewarmManifest(manifest.hrefs);
+        readerTrace('speculative.prewarm.done', {
+          'chapter': chapterIndex,
+          'page': pageIndex,
+          'imageCount': manifest.hrefs.length,
+        });
+      }
+    } catch (e) {
+      // 投机预热失败不影响主流程
+      readerTrace('speculative.load.error', {
+        'chapter': chapterIndex,
+        'page': pageIndex,
+        'error': e.toString(),
+      });
+    }
   }
 
   /// 加载邻居槽位：越界→outOfRange；FFI 异常→failed（永不静默 null）。
@@ -736,6 +1002,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingTop: _paddingVertical,
         paddingRight: _paddingHorizontal,
         paddingBottom: _paddingVertical,
+        fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
         chineseConvert: chineseConvertCode,
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
@@ -759,6 +1026,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingTop: _paddingVertical,
         paddingRight: _paddingHorizontal,
         paddingBottom: _paddingVertical,
+        fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
         removeDuplicateTitle: _removeDuplicateTitle,
         reSegment: false,
         chineseConvert: chineseConvertCode,
@@ -1199,6 +1467,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// Close current book
   Future<void> closeBook() async {
     ++_requestGeneration;
+    
+    // 2026-09-02 清理资源监控定时器
+    _resourceMonitorTimer?.cancel();
+    _resourceMonitorTimer = null;
+    
     if (state.bookId != null) {
       await _bookService.releaseBook(state.bookId!);
     }

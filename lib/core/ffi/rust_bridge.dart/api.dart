@@ -7,9 +7,9 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_paragraph_spacing`, `ensure_epub_cleaned_cache`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_paragraph_spacing`, `ensure_epub_cleaned_cache`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
@@ -29,12 +29,26 @@ Future<BigInt> getFontCount() => RustLib.instance.api.crateApiGetFontCount();
 /// 切换默认字体（用户选字体后调用）
 ///
 /// name 必须是已 load_font_* 加载过的字体名，否则抛错。
-/// 切换后清共享字形缓存防旧字体字形混入。
+/// 切换后清共享字形缓存防旧字体字形混入；同时清共享 MeasureCache
+/// （旧字体的 Skia 实测宽度对当前字体失效）。
 Future<void> setDefaultFont({required String fontName}) =>
     RustLib.instance.api.crateApiSetDefaultFont(fontName: fontName);
 
 /// 获取当前默认字体名
 Future<String> getDefaultFontName() => RustLib.instance.api.crateApiGetDefaultFontName();
+
+/// M10-B：批量写入 Skia 实测宽度到 MeasureCache。
+///
+/// 典型调用：Dart MeasureTextService 测完本章常用子串后调一次（数百~数千条）。
+/// 内部 LRU 自动淘汰，单章 ≤ 50k 条足够覆盖。重复写入覆盖（写入永远是最新值）。
+Future<BigInt> feedTextWidths({required List<FfiTextWidth> widths}) =>
+    RustLib.instance.api.crateApiFeedTextWidths(widths: widths);
+
+/// M10-B：清空 MeasureCache（Dart 端主动失效时使用，例如 settings 变更或字体切换兜底）
+Future<BigInt> clearMeasureCache() => RustLib.instance.api.crateApiClearMeasureCache();
+
+/// M10-B：查询 MeasureCache 状态（诊断用：当前条目数 / 容量）
+Future<String> getMeasureCacheStats() => RustLib.instance.api.crateApiGetMeasureCacheStats();
 
 /// Parse TXT file and return book ID
 Future<String> parseTxtFile({required String filePath, String? bookName}) =>
@@ -904,4 +918,30 @@ class FfiReplaceRule {
           replacement == other.replacement &&
           ruleType == other.ruleType &&
           enabled == other.enabled;
+}
+
+/// M10-B：单条测量结果（font_name + font_size + text + width_px）
+///
+/// text 必须与 Rust layout 期间实际查询的子串**逐字节一致**——内部 key 用
+/// SipHash(text) 而非 text 本身，避免 key 长度爆炸。
+class FfiTextWidth {
+  final String fontName;
+  final double fontSize;
+  final String text;
+  final double width;
+
+  const FfiTextWidth({required this.fontName, required this.fontSize, required this.text, required this.width});
+
+  @override
+  int get hashCode => fontName.hashCode ^ fontSize.hashCode ^ text.hashCode ^ width.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiTextWidth &&
+          runtimeType == other.runtimeType &&
+          fontName == other.fontName &&
+          fontSize == other.fontSize &&
+          text == other.text &&
+          width == other.width;
 }

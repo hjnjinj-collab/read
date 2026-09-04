@@ -284,7 +284,17 @@ class ReaderRenderStateStore {
     readerTrace('turn.pending.cancel', {'reason': reason});
   }
 
+  /// 获取待决手势的方向（供资源预热优先级调整使用）
+  /// 
+  /// 2026-09-02 阶段2优化：允许 reader_provider 检测挂起的翻页方向，
+  /// 优先预热目标方向的资源。
+  PageDirection? get pendingTurnDirection => _pendingTurn?.direction;
+
   /// 发布高频 viewport 状态（触点/动画进度）
+  ///
+  /// width/height 口径 = 权威 viewport（reader_provider.screenWidth/Height，
+  /// 即 LayoutBuilder 测量的 SafeArea 内实际可用区域）——调用方
+  /// reader_page 已单源化，勿传 MediaQuery.size 全屏值。
   void publishViewport({
     required double width,
     required double height,

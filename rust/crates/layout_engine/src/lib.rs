@@ -1,6 +1,7 @@
 mod font_manager;
 mod glyph_cache;
 mod parallel;
+pub mod measure_cache;
 pub mod text_boundary;
 pub mod glyph_cache_advanced;
 pub mod pagination;
@@ -12,10 +13,12 @@ pub use glyph_cache_advanced::{
     AdvancedGlyphCache, gb2312_level1_chars, gb2312_level1_count, gb2312_level2_chars,
 };
 pub use pagination::{SmartPaginator, SmartPaginatorConfig};
+pub use measure_cache::MeasureCache;
 
 use unicode_segmentation::UnicodeSegmentation;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Text layout configuration
 #[derive(Debug, Clone)]
@@ -262,25 +265,50 @@ pub struct LayoutEngine {
     config: LayoutConfig,
     font_manager: FontManager,
     glyph_cache: GlyphCache,
+    /// M10-B：Dart Skia 实测宽度缓存（替代 ttf-parser hmtx 估算）。
+    /// 命中 → 返回 Skia 真实宽度；miss → 回退 ttf-parser 估算（不影响 layout 完成）。
+    /// 字体切换时通过 `set_measure_cache` 全量 clear()。
+    measure_cache: Arc<MeasureCache>,
 }
 
 impl LayoutEngine {
     /// Create layout engine with font manager
     pub fn new(config: LayoutConfig, font_manager: FontManager) -> Self {
-        Self {
-            config,
-            font_manager,
-            glyph_cache: GlyphCache::new(),
-        }
+        Self::with_measure_cache(config, font_manager, Arc::new(MeasureCache::with_default_capacity()))
     }
-    
+
     /// Create layout engine with existing cache (for parallel use)
     pub fn with_cache(config: LayoutConfig, font_manager: FontManager, cache: GlyphCache) -> Self {
         Self {
             config,
             font_manager,
             glyph_cache: cache,
+            measure_cache: Arc::new(MeasureCache::with_default_capacity()),
         }
+    }
+
+    /// Create layout engine with explicit measure cache（M10-B：Dart prefill 后调用）
+    pub fn with_measure_cache(
+        config: LayoutConfig,
+        font_manager: FontManager,
+        measure_cache: Arc<MeasureCache>,
+    ) -> Self {
+        Self {
+            config,
+            font_manager,
+            glyph_cache: GlyphCache::new(),
+            measure_cache,
+        }
+    }
+
+    /// 替换 measure cache（Dart prefill 完成后接管）
+    pub fn set_measure_cache(&mut self, cache: Arc<MeasureCache>) {
+        self.measure_cache = cache;
+    }
+
+    /// 当前 measure cache（FFI 暴露给 Dart 用于批量写入）
+    pub fn measure_cache(&self) -> Arc<MeasureCache> {
+        Arc::clone(&self.measure_cache)
     }
 
     /// Calculate pages from text content with real font metrics
@@ -306,11 +334,19 @@ impl LayoutEngine {
         // 必须定义在上述可变绑定之后（macro_rules 标识符按定义点解析）
         macro_rules! emit_line {
             ($line_text:expr, $line_char_count:expr) => {{
+                // M11：width 改用本行实测宽度（cache 命中即 Skia 实宽，
+                // miss 仍走 ttf-parser 估算——总比 content_width 硬编码更接近 Skia 实际）
+                // M12：传入 effective_font_size=TXT 路径始终 baseFontSize
+                let measured_w = self.measure_text_width($line_text, self.config.font_size);
+                // M12 必修3 兜底：width 不超过 content_width，避免绘制端"行宽声明 > 实际"
+                // （仅影响 TextLine.width 报告值，不影响二分搜索路径——二分搜索用 raw 宽度）
+                let content_width = self.content_width();
+                let clamped_w = measured_w.min(content_width);
                 current_lines.push(TextLine {
                     text: $line_text.clone(),
                     x: self.config.padding.left,
                     y: current_y,
-                    width: content_width,
+                    width: clamped_w,
                     height: line_height,
                     color: None,
                     font_scale: None,
@@ -324,8 +360,10 @@ impl LayoutEngine {
             }};
         }
 
-        // Get font for measuring
-        let font = self.font_manager.get_font(&self.config.font_name)?;
+        // Get font for measuring（layout_paragraph 仍消费 FontRef；
+        // measure_char 已切到按字体名直读 ttf-parser，font 句柄仅
+        // 满足旧签名，删除 font 后所有调用点会编译失败）
+        let _font = self.font_manager.get_font(&self.config.font_name)?;
 
         // Split into paragraphs
         for paragraph in text.split('\n') {
@@ -334,8 +372,10 @@ impl LayoutEngine {
                 continue;
             }
 
-            // Layout paragraph into lines
-            let para_lines = self.layout_paragraph(paragraph, content_width, font)?;
+            // M10-B：layout_paragraph_with_oracle 走 MeasureCache + 二分搜索，
+            // 优先用 Dart TextPainter 测的真实 Skia 宽度；
+            // cache miss 时仍用 ttf-parser 估算（与原版等价）。
+            let para_lines = self.layout_paragraph_with_oracle(paragraph, content_width)?;
 
             // 收集当前段落的所有行
             pending_paragraph_lines.clear();
@@ -592,7 +632,7 @@ impl LayoutEngine {
                                 text: first_line.text.clone(),
                                 x,
                                 y: current_y,
-                                width: content_width,
+                                width: first_line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
                                 height: line_h,
                                 color: if item.is_comment {
                                     Some("#888888".to_string())
@@ -635,7 +675,7 @@ impl LayoutEngine {
                                 text: line.text.clone(),
                                 x,
                                 y: current_y,
-                                width: content_width,
+                                width: line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
                                 height: line_h,
                                 color: if item.is_comment {
                                     Some("#888888".to_string())
@@ -680,7 +720,7 @@ impl LayoutEngine {
                             text: line.text,
                             x,
                             y: current_y,
-                            width: content_width,
+                            width: line.width.min(content_width), // M11+12：实测宽度，clamp 到 content_width
                             height: line_h,
                             // 本章说：灰色小字；非注释走原始色
                             color: if item.is_comment {
@@ -833,10 +873,15 @@ impl LayoutEngine {
 
     /// Layout a single paragraph into lines with real glyph measurement
     ///
-    /// M7-P4 断行精修：
+    /// M7-P4 断行精修（保留为参考实现，M10-B 后由 `layout_paragraph_with_oracle` 取代）：
     /// - 行首禁则（。，」等不得居行首）：断行点命中禁则时回退上一行末片段；
     /// - 英文整词移行：断点落在词字符内时，把上一行尾部连续词字符整体带下。
     /// 两种回退只在相邻行间搬移已计宽片段，Σ字符数不变 ⇒ 锚点口径不变。
+    ///
+    /// 缺点：逐字累加 width，无法捕捉 HarfBuzz 整形（连字/kerning/标点宽度类），
+    /// 与 Skia 渲染宽度有系统性偏差 → 断行位置与 Skia 实绘不一致 →
+    /// 左右边距视觉不对称（content偏右/偏左）。已被 `layout_paragraph_with_oracle` 替代。
+    #[allow(dead_code)]
     fn layout_paragraph(
         &self,
         paragraph: &str,
@@ -956,12 +1001,252 @@ impl LayoutEngine {
 
         Ok(finished)
     }
-    
-    /// 判满安全余量（M7）：吸收 Skia 相对 ab_glyph 的正向测量偏差。
-    /// 混合式 max(1px, 0.5%)、上限 2%——纯固定值大宽度占比失衡，
-    /// 纯百分比窄列失效
+
+    /// M10-B：用 MeasureCache + 二分搜索重写 layout_paragraph
+    ///
+    /// 关键变化：
+    /// - **不再逐 grapheme 累加 width**（逐字累加无法捕捉 HarfBuzz 整形）
+    /// - **二分搜索**：对每行候选 mid 子串整串调 `measure_text_width` 拿 Skia 真实宽度
+    /// - **保留禁则逻辑**：与原版一致的行首/行尾禁则字符处理
+    /// - **缓存 miss 回退 ttf-parser**：保证 layout 永不阻塞
+    ///
+    /// 返回的 lines 与原 `layout_paragraph` 一一对应，调用方可直接替换
+    fn layout_paragraph_with_oracle(
+        &self,
+        paragraph: &str,
+        max_width: f32,
+    ) -> Result<Vec<String>> {
+        const LINE_START_FORBIDDEN: &[char] = &[
+            '，', '。', '、', '；', '：', '？', '！', '”', '’', '」', '』', '）',
+            '】', '〉', '》', '…', '—', '～', '·', '%', '％',
+        ];
+        const LINE_END_FORBIDDEN: &[char] = &['「', '『', '（', '【', '〈', '《'];
+        fn is_word_char(c: char) -> bool {
+            c.is_ascii_alphanumeric() || c == '_'
+        }
+
+        if paragraph.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut finished: Vec<String> = Vec::new();
+        let mut remaining = paragraph.to_string();
+
+        while !remaining.is_empty() {
+            // 二分搜索：在 remaining 中找最长前缀 prefix，使得
+            // measure_text_width(prefix) ≤ max_width
+            let (line_text, after) = self.find_longest_fit(&remaining, max_width);
+
+            // 处理禁则/词边界回退（返回 owned String 以便循环使用）
+            let (committed_line, leftover) =
+                self.apply_linebreak_rules(&line_text, &after, is_word_char, LINE_START_FORBIDDEN, LINE_END_FORBIDDEN);
+
+            finished.push(committed_line);
+
+            // 推进 remaining：若 leftover 非空，则用 leftover 作为下一轮起点
+            // （pulled_back 字符 + after 剩余）；否则用 after
+            if !leftover.is_empty() {
+                remaining = leftover;
+            } else if !after.is_empty() {
+                remaining = after.to_string();
+            } else {
+                break;
+            }
+
+            // 安全防卡死：若 remaining 完全没变化，break
+            if remaining == line_text {
+                break;
+            }
+        }
+
+        Ok(finished)
+    }
+
+    /// 二分搜索 text 中最长的前缀 prefix，使得 measure_text_width(prefix) ≤ max_width
+    /// 返回 (prefix, remaining_after_prefix)
+    fn find_longest_fit(&self, text: &str, max_width: f32) -> (String, String) {
+        // 先做 UTF-8 安全二分：在 char boundary 上做索引
+        let char_indices: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+        let total_chars = char_indices.len();
+        if total_chars == 0 {
+            return (String::new(), text.to_string());
+        }
+
+        // M12 修复：允许略微超出 max_width（在 epsilon 范围内），
+        // 让文字排得更满，减少右侧留白
+        let eps = Self::line_fill_epsilon(max_width);
+
+        let mut low = 1usize; // 至少 1 个字符
+        let mut high = total_chars;
+        let mut best_end_char = 1usize;
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            let end_byte = if mid >= total_chars {
+                text.len()
+            } else {
+                char_indices[mid]
+            };
+            let candidate = &text[..end_byte];
+            // M12：find_longest_fit 在 TXT 路径，effective_font_size = config.font_size
+            let w = self.measure_text_width(candidate, self.config.font_size);
+
+            // M12 修复：允许在 epsilon 范围内超出，让行更满
+            if w <= max_width + eps {
+                best_end_char = mid;
+                low = mid + 1;
+            } else {
+                if mid == 0 {
+                    break;
+                }
+                high = mid - 1;
+            }
+        }
+
+        let end_byte = if best_end_char >= total_chars {
+            text.len()
+        } else {
+            char_indices[best_end_char]
+        };
+        let prefix = text[..end_byte].to_string();
+        let rest = text[end_byte..].to_string();
+        (prefix, rest)
+    }
+
+    /// 禁则/词边界回退处理
+    /// 输入：line_text（本行已确定前缀）、after（前缀之后的剩余）、is_word_char、禁则列表
+    /// 返回：(最终本行文本, 拖回待续行首的片段 + after；可能为空)
+    fn apply_linebreak_rules(
+        &self,
+        line_text: &str,
+        after: &str,
+        is_word_char: fn(char) -> bool,
+        line_start_forbidden: &[char],
+        line_end_forbidden: &[char],
+    ) -> (String, String) {
+        // 如果本行已经是整个文本，直接返回
+        if after.is_empty() {
+            return (line_text.to_string(), String::new());
+        }
+
+        // 检视 after 第一个字符
+        let next_ch = after.chars().next().unwrap_or(' ');
+        let last_ch = line_text.chars().last().unwrap_or(' ');
+
+        let mut pulled_back = String::new();
+
+        // 行尾禁则：上一行末字符是开括号类，把这个字符拖到下行首
+        if line_end_forbidden.contains(&last_ch) {
+            pulled_back.push(last_ch);
+        }
+
+        // 行首禁则：after 第一个字符是禁则标点 → 把上一行末字符拖到下行首
+        if pulled_back.is_empty() && line_start_forbidden.contains(&next_ch) {
+            pulled_back.push(last_ch);
+        }
+
+        // 整词回退：after 首字符是词字符 + line_text 末字符也是词字符 → 拖回整词
+        if pulled_back.is_empty() && is_word_char(next_ch) && is_word_char(last_ch) {
+            // 把 line_text 末尾连续词字符拖回
+            let trailing_word: String = line_text
+                .chars()
+                .rev()
+                .take_while(|c| is_word_char(*c))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            if !trailing_word.is_empty() {
+                pulled_back = trailing_word;
+            }
+        }
+
+        if pulled_back.is_empty() {
+            return (line_text.to_string(), String::new());
+        }
+
+        // 实际回退：去掉 line_text 末尾与 pulled_back 字符数相同的字符
+        let pulled_char_count = pulled_back.chars().count();
+        let committed: String = if pulled_back.is_ascii() {
+            // ASCII 子串：字节数 = char 数
+            let new_len = line_text.len() - pulled_char_count;
+            line_text[..new_len].to_string()
+        } else {
+            // 多字节字符：按 char 边界从末尾切
+            line_text
+                .chars()
+                .take(line_text.chars().count() - pulled_char_count)
+                .collect()
+        };
+        let mut new_after = String::with_capacity(pulled_back.len() + after.len());
+        new_after.push_str(&pulled_back);
+        new_after.push_str(after);
+        (committed, new_after)
+    }
+
+    /// 测量一个 UTF-8 字符串的渲染宽度（优先查 MeasureCache，miss 回退 ttf-parser）
+    ///
+    /// **关键**：必须传入**完整 UTF-8 子串**——逐字累加无法捕捉 HarfBuzz 整形
+    /// （连字 `fi`/`fl`、kerning、标点宽度类差异等）
+    ///
+    /// M12：接收 effective_font_size 参数，cache key 用此值。
+    /// 调用方传入 `config.font_size * scale`，让 Rust 端 cache key 与 Dart 端
+    /// `MeasureTextService.configure(fontSize: ...)` 对齐。
+    /// font_scale!=1.0 的章节标题/评论行也能命中。
+    pub fn measure_text_width(&self, text: &str, font_size: f32) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        // 优先查 MeasureCache（命中 = Skia 真实宽度）
+        if let Some(w) = self
+            .measure_cache
+            .get(&self.config.font_name, font_size, text)
+        {
+            return w;
+        }
+        // miss → 用 ttf-parser 累加（带 letter_spacing 同步逻辑）
+        let letter_spacing = self.config.letter_spacing;
+        let mut total = 0.0f32;
+        let mut count = 0usize;
+        for ch in text.chars() {
+            let w = self.get_char_width_inner(ch, font_size);
+            // 与原版一致：letter_spacing 加到每个字符（含最后一个，潜在 bug 但保留以不破坏锚点）
+            total += w + letter_spacing;
+            count += 1;
+        }
+        // 与原 layout_paragraph 一致：最后字符不加 letter_spacing，避免多算一次
+        if count > 0 {
+            total -= letter_spacing;
+        }
+        // M12 必修3：兜底放在 emit_line! 内，不在这里。理由：
+        // 二分搜索路径需 raw 宽度做 `w <= max_width - eps` 判定，
+        // 在这里截断会破坏二分收敛（test_multi_page_layout 在 fallback 字体下失败）。
+        // emit_line! 处仅对 TextLine.width 报告值做 min 截断，让 line.width <= content_width。
+        total
+    }
+
+    /// content_width 内部辅助（M12 必修3 用）
+    fn content_width(&self) -> f32 {
+        self.config.width - self.config.padding.left - self.config.padding.right
+    }
+
+    /// 内部单字符宽度查询（与 get_char_width 一样走 LRU + ttf-parser，但不写入 font 句柄）
+    ///
+    /// M12：font_size 由调用方传入，使 cache key 与 measure_text_width 的 font_size 对齐
+    fn get_char_width_inner(&self, ch: char, font_size: f32) -> f32 {
+        let key = GlyphKey::new(ch, font_size, &self.config.font_name);
+        if let Some(metrics) = self.glyph_cache.get(&key) {
+            return metrics.width;
+        }
+        let metrics = self.font_manager.measure_char(&self.config.font_name, ch, font_size);
+        self.glyph_cache.put(key, metrics);
+        metrics.width
+    }
+
+    /// 判满安全余量（M12-v4 修正）：增大 epsilon 以减少右侧留白
+    /// 改为 1% 最小 5px，允许行排得更满
     fn line_fill_epsilon(max_width: f32) -> f32 {
-        ((max_width * 0.005).max(1.0)).min(max_width * 0.02)
+        (max_width * 0.01).max(5.0)
     }
 
     /// Get character width with caching
@@ -973,8 +1258,8 @@ impl LayoutEngine {
             return metrics.width;
         }
         
-        // Measure and cache
-        let metrics = self.font_manager.measure_char(font, ch, self.config.font_size);
+        // Measure and cache（font 句柄弃用，measure_char 走 ttf-parser 按名寻址）
+        let metrics = self.font_manager.measure_char(&self.config.font_name, ch, self.config.font_size);
         self.glyph_cache.put(key, metrics);
         
         metrics.width
@@ -995,7 +1280,7 @@ impl LayoutEngine {
         if let Some(metrics) = self.glyph_cache.get(&key) {
             return metrics.width;
         }
-        let metrics = self.font_manager.measure_char(font, ch, fs);
+        let metrics = self.font_manager.measure_char(&self.config.font_name, ch, fs);
         self.glyph_cache.put(key, metrics);
         metrics.width
     }
@@ -1086,11 +1371,25 @@ impl LayoutEngine {
         } else {
             max_width
         };
-        // M7 安全余量：吸收 Dart/Skia 相对 ab_glyph 的正向测量偏差
-        let eps = Self::line_fill_epsilon(effective_max_width);
+        
+        // M12-v4 调试：仅输出前 3 次调用避免刷屏
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+        let count = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+        if count < 3 {
+            eprintln!("[M12-v4 #{count}] layout_styled_paragraph: max_width={:.1}, indent_px={:.1}, first_line={}, effective_max_width={:.1}", 
+                max_width, indent_px, first_line, effective_max_width);
+        }
+        
+        // M12-v3：eps 不在此处计算，而是在每次判定时动态计算，
+        // 以适应 effective_max_width 的变化（首行 vs 后续行）
 
         macro_rules! flush_line {
             ($flushed_len:expr) => {{
+                if count < 3 {
+                    eprintln!("[M12-v4 #{count}] flush_line: line_chars={}, current_width={:.1}, effective_max_width={:.1}", 
+                        $flushed_len, current_width, effective_max_width);
+                }
                 lines.push(LaidLine {
                     text: pieces.iter().map(|p| p.0).collect(),
                     width: current_width,
@@ -1103,6 +1402,9 @@ impl LayoutEngine {
                 if first_line {
                     first_line = false;
                     effective_max_width = max_width;
+                    if count < 3 {
+                        eprintln!("[M12-v4 #{count}] flush_line: first_line done, effective_max_width now = {:.1}", effective_max_width);
+                    }
                 }
             }};
         }
@@ -1128,7 +1430,10 @@ impl LayoutEngine {
             let w_eff =
                 self.get_char_width_scaled(ch, font, scale) + self.config.letter_spacing;
 
-            if current_width + w_eff > effective_max_width - eps && !pieces.is_empty() {
+            // M12-v3 修复：动态计算 eps，适应 effective_max_width 的变化
+            let eps = Self::line_fill_epsilon(effective_max_width);
+            if current_width + w_eff > effective_max_width + eps && !pieces.is_empty() {
+                // M12-v4: 移除 break_line 调试日志，避免刷屏
                 let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
                 let word_boundary = is_word_char(ch)
                     && pieces
@@ -2586,11 +2891,10 @@ mod tests {
 
     /// 构造恰好折行为 target_lines 行的填充段（按实际字体度量搜索字数）
     fn text_with_lines(engine: &LayoutEngine, target_lines: usize, filler: char) -> String {
-        let font = engine.font_manager.get_font(&engine.config.font_name).unwrap();
         let cw = engine.config.width - engine.config.padding.left - engine.config.padding.right;
         for n in 1..20000 {
             let text: String = std::iter::repeat(filler).take(n).collect();
-            let lines = engine.layout_paragraph(&text, cw, font).unwrap().len();
+            let lines = engine.layout_paragraph_with_oracle(&text, cw).unwrap().len();
             if lines >= target_lines {
                 assert_eq!(lines, target_lines, "单字增减跳过了目标行数");
                 return text;

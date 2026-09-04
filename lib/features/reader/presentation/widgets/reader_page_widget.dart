@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../../../core/models/simple_models.dart';
+import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 import '../diagnostics/reader_trace.dart';
@@ -84,7 +85,7 @@ class PagePainter extends CustomPainter {
   final double baseFontSize;
   final double baseLineHeight;
 
-  static const Color _paperColor = Color(0xFFF5F1E8);
+  // 纸色底常量已公开到 PageContentRenderer.paperColor（v16.9.3：快照同源使用）
 
   PagePainter(
     this.pageInfo, {
@@ -111,7 +112,7 @@ class PagePainter extends CustomPainter {
       ]),
       'summary': readerPageSummary(pageInfo.entries),
     });
-    canvas.drawRect(Offset.zero & size, Paint()..color = _paperColor);
+    canvas.drawRect(Offset.zero & size, Paint()..color = PageContentRenderer.paperColor);
     PageContentRenderer.paintPage(
       canvas,
       pageInfo,
@@ -123,6 +124,12 @@ class PagePainter extends CustomPainter {
       baseFontSize: baseFontSize,
       baseLineHeight: baseLineHeight,
     );
+    // M12 修复：paint 后同步 flush（阻塞式），确保下一页 layout 时能命中 cache
+    // 原节流逻辑导致 N 页 paint 测量 → 500ms 后才 flush → N+1 页 layout miss cache
+    // M12 修复：paint 后立即 flush（fire-and-forget），
+    // FFI 调用会尽快完成（通常 <10ms），下一页 layout 大概率命中 cache
+    // ignore: unawaited_futures
+    MeasureTextService.instance.flushToRust();
   }
 
   @override
@@ -144,6 +151,9 @@ class PagePainter extends CustomPainter {
 /// 不持有任何 Widget 状态。动画期间目标页未挂载为 Widget，由本渲染器
 /// 按帧绘制到裁切区域内（对齐 legado Android 每帧直绘的做法）。
 class PageContentRenderer {
+  /// 纸色底（正式页面渲染与翻页快照共用，v16.9.3 公开化）
+  static const Color paperColor = Color(0xFFF5F1E8);
+
   /// 绘制背景与 entries（不含纸色底——调用方按需自绘）
   static void paintPage(
     Canvas canvas,
@@ -156,6 +166,17 @@ class PageContentRenderer {
     double baseFontSize = 18.0,
     double baseLineHeight = 1.5,
   }) {
+    // P0- 防回归/根因定位：绘制层首次进入时输出 entry.x + canvas 当前
+    // 变换矩阵 + 调用栈。若 entry.x=20 但视觉贴左边，必有 canvas 平移
+    // 在绘制前介入（curl 镜像残留、SafeArea 二次切边等）。静态节流：
+    // 同一页面身份仅输出一次。
+    _tracePaintGeometry(
+      pageInfo,
+      size,
+      canvas,
+      baseFontSize: baseFontSize,
+      baseLineHeight: baseLineHeight,
+    );
     // 整页背景：严格按 CSS background-size 语义绘制——
     // - cover/缺省：等比铺满窗口、溢出部分按 background-position 锚点裁切
     // - contain：完整显示
@@ -277,6 +298,19 @@ class PageContentRenderer {
         textDirection: TextDirection.ltr,
       );
 
+      // M10-B：注入 Skia 实测宽度到 MeasureTextService。
+      // 配置服务用 baseStyle 的 fontSize/family（与绘制一致），
+      // 测整行 text（含 segments 覆盖样式）→ 与最终 paint 走同一 Paragraph 测量
+      MeasureTextService.instance.configure(
+        fontFamily: baseStyle.fontFamily ?? ReaderFont.family,
+        fontSize: baseStyle.fontSize ?? 18.0,
+      );
+      // M12 必修2：喂入所有 char-boundary 前缀（而非仅完整 line），
+      // 让 Rust 二分搜索 `text[..mid]` 在 cache 命中后用 Skia 实测宽度。
+      MeasureTextService.instance.feedPageTextsWithPrefixes(text);
+      // 仍然测完整 line（保留完整 line 的 cache 条目供后续 layout 用）
+      MeasureTextService.instance.measure(text);
+
       // M7：恒定无约束排版——消灭「Rust 测窄 → TextPainter 二次换行 →
       // 与下一行重叠/页尾截断」（内容跨页丢失重复的直接来源）
       textPainter.layout(minWidth: 0, maxWidth: double.infinity);
@@ -309,6 +343,66 @@ class PageContentRenderer {
     if (h.length != 6) return null;
     final v = int.tryParse('ff$h', radix: 16);
     return v == null ? null : Color(v);
+  }
+
+  /// 几何诊断静态节流（同一 pageId 仅首次输出）
+  static final Set<int> _tracedGeometryPageIds = <int>{};
+
+  static void _tracePaintGeometry(
+    PageInfo pageInfo,
+    Size size,
+    Canvas canvas, {
+    required double baseFontSize,
+    required double baseLineHeight,
+  }) {
+    final id = readerPageId(pageInfo);
+    if (_tracedGeometryPageIds.contains(id)) return;
+    _tracedGeometryPageIds.add(id);
+    // M10-B 偏右根因诊断：实测绘制端每行 Skia 渲染宽度 vs Rust 硬编码
+    // content_width。TextLine.width 是 content_width（非字形实测宽）。
+    //
+    // M10-B 修复后预期：
+    // - skiaW ≈ rustW（差异 ≤ 1px），因为 Rust layout 期间通过 MeasureCache 用了
+    //   Dart TextPainter 实测宽度做二分搜索断行
+    // - 仍存在 ≤ 1px 偏差是 Skia subpixel 像素对齐导致，可接受
+    // - 若 diff > 2px 出现 → MeasureCache 没命中（Dart 没测量过这条字符串，
+    //   Rust 回退到 ttf-parser 估算；常见于翻页第一帧 + 缓存预热窗口期）
+    //
+    // 历史背景（M7 修复前）：Skia 与 Rust ab_glyph advance 不一致，行实际右缘
+    // = x + Skia宽 会吃掉右侧 padding → 视觉「内容偏右」。此 trace 沿用，命名
+    // 仍为 paint.geometry.first 兼容既有 log 解析。
+    final paintLines = <String>[];
+    var sampled = 0;
+    for (final e in pageInfo.entries) {
+      if (e.text == null || e.text!.isEmpty) continue;
+      final tp = TextPainter(
+        text: TextSpan(
+          text: e.text,
+          style: TextStyle(
+            fontSize: baseFontSize * (e.fontScale ?? 1.0),
+            height: baseLineHeight,
+            fontFamily: ReaderFont.family,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: double.infinity);
+      paintLines.add(
+        'x=${e.x.toStringAsFixed(1)} chars=${e.text!.length} '
+        'skiaW=${tp.width.toStringAsFixed(1)} rustW=${e.width.toStringAsFixed(1)} '
+        'rightEdge=${(e.x + tp.width).toStringAsFixed(1)}',
+      );
+      sampled++;
+      if (sampled >= 3) break;
+    }
+    final m = canvas.getTransform();
+    readerTrace('paint.geometry.first', {
+      'pageId': id,
+      'page': '${pageInfo.chapterIndex}/${pageInfo.pageIndex}',
+      'canvasSize': '${size.width}x${size.height}',
+      'font': ReaderFont.family,
+      if (paintLines.isNotEmpty) 'paintLines': paintLines.join(' | '),
+      'matrix': '${m[0]},${m[1]} | ${m[4]},${m[5]} | tx=${m[12]},ty=${m[13]}',
+    });
   }
 
   /// 背景铺放：严格 CSS background-size 语义 + position 锚点

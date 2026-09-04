@@ -1,5 +1,6 @@
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use ab_glyph::FontRef;
 use anyhow::{anyhow, Result};
+use owned_ttf_parser as ttfp;
 use std::collections::HashMap;
 
 /// 内置 Noto Sans CJK SC 字体（7.95 MB，build 时嵌入 binary）
@@ -27,6 +28,16 @@ pub struct GlyphMetrics {
 pub struct FontManager {
     /// 字体缓存：字体名 -> 字体数据
     fonts: HashMap<String, FontRef<'static>>,
+    /// 原始度量 face：ttf-parser 直读 cmap/hmtx（绕过 ab_glyph 缩放层）
+    ///
+    /// 【根因修复】ab_glyph 0.2.32 的 ScaleFont 对 CFF（OTTO）字体把
+    /// advance 按错误口径归一化（实测 NotoSansSC OTF '中'@18px 返回
+    /// 12.43px，真值 18.00 = hmtx 1000 / upem 1000 × 18）。结果：
+    /// 断行每行多塞 ~45% 字数 → Skia 渲染行宽超 content_width → 触发
+    /// 等比缩放兜底 → 文字变小 + 首行右溢出画布被裁（"内容偏右"）。
+    /// measure_char 走 ttf-parser hmtx×font_size/upem 直读，绕开
+    /// 缩放层，保持 Rust 与 Skia 测量同源（M7 约束）。
+    metrics_faces: HashMap<String, ttfp::Face<'static>>,
     /// 默认字体名（启动时由 `new_with_embedded_default` 设置为 EMBEDDED_DEFAULT_FONT_NAME）
     default_font: Option<String>,
 }
@@ -35,6 +46,7 @@ impl FontManager {
     pub fn new() -> Self {
         Self {
             fonts: HashMap::new(),
+            metrics_faces: HashMap::new(),
             default_font: None,
         }
     }
@@ -66,8 +78,11 @@ impl FontManager {
         let font_data = Box::leak(data.into_boxed_slice());
         let font = FontRef::try_from_slice(font_data)
             .map_err(|e| anyhow!("加载字体失败: {}", e))?;
+        let face = ttfp::Face::parse(font_data, 0)
+            .map_err(|e| anyhow!("解析字体度量失败: {}", e))?;
 
         self.fonts.insert(name.clone(), font);
+        self.metrics_faces.insert(name.clone(), face);
 
         // 第一个字体设为默认（load_embedded_default 已设默认，内置字体后到的不再覆盖）
         if self.default_font.is_none() {
@@ -128,20 +143,51 @@ impl FontManager {
         self.default_font.as_deref()
     }
     
-    /// 测量单个字符的宽度
-    pub fn measure_char(&self, font: &FontRef, ch: char, font_size: f32) -> GlyphMetrics {
-        let scale = PxScale::from(font_size);
-        let scaled_font = font.as_scaled(scale);
-        
-        let glyph_id = font.glyph_id(ch);
-        let h_advance = scaled_font.h_advance(glyph_id);
-        let v_metrics = scaled_font.height();
-        
-        GlyphMetrics {
-            width: h_advance,
-            height: v_metrics,
-            baseline_offset: scaled_font.descent(),
+    /// 测量单个字符（按字体名寻址，ttf-parser 原始 hmtx 直读）
+    ///
+    /// advance = hmtx_advance × font_size / units_per_em——与 Skia
+    /// （Dart TextPainter）同源同值，保证双引擎度量一致（M7 约束）。
+    /// fallback 链与 `get_font` 一致：name → default_font → 任意。
+    pub fn measure_char(
+        &self,
+        font_name: &str,
+        ch: char,
+        font_size: f32,
+    ) -> GlyphMetrics {
+        if self.metrics_faces.is_empty() {
+            return GlyphMetrics { width: 0.0, height: 0.0, baseline_offset: 0.0 };
         }
+        let face = self.metrics_face_for(font_name);
+        let gid = face.glyph_index(ch).unwrap_or(ttfp::GlyphId(0));
+        let upem = face.units_per_em().max(1) as f32;
+        let width = face
+            .glyph_hor_advance(gid)
+            .map(|v| v as f32 * font_size / upem)
+            .unwrap_or(0.0);
+        let height = (face.ascender() - face.descender()) as f32 * font_size / upem;
+        let baseline_offset = face.descender() as f32 * font_size / upem;
+
+        GlyphMetrics {
+            width,
+            height,
+            baseline_offset,
+        }
+    }
+
+    /// 度量 face 查找（fallback 链同 `get_font`：name → default → 任意）
+    fn metrics_face_for(&self, name: &str) -> &ttfp::Face<'static> {
+        if let Some(f) = self.metrics_faces.get(name) {
+            return f;
+        }
+        if let Some(default) = &self.default_font {
+            if let Some(f) = self.metrics_faces.get(default) {
+                return f;
+            }
+        }
+        self.metrics_faces
+            .values()
+            .next()
+            .expect("字体管理器为空：未加载任何字体（应在初始化时 load_embedded_default）")
     }
     
     /// 获取已加载的字体数量
@@ -181,10 +227,9 @@ mod tests {
                 
                 if result.is_ok() {
                     assert_eq!(manager.font_count(), 1);
-                    
+
                     // 测试字形测量
-                    let font = manager.get_default_font().unwrap();
-                    let metrics = manager.measure_char(font, '中', 16.0);
+                    let metrics = manager.measure_char("TestFont", '中', 16.0);
                     
                     assert!(metrics.width > 0.0);
                     println!("字符 '中' 宽度: {}", metrics.width);
