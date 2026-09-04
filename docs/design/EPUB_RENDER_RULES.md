@@ -98,7 +98,7 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
 | 属性 | 物化目标 | 单位处理 |
 |---|---|---|
 | width | Image.width_percent；**TableCell.width_em**（列宽提示） | 图片 %保留、px/em 忽略；td 仅 em |
-| text-align | Paragraph/Heading/Image.align | center/right/left；justify≈left；**沿祖先链继承查找** |
+| text-align | Paragraph/Heading/Image.align | center/right/left/**justify → Align::Justify（A20 物化为两端对齐，不再折叠 left）**；**沿祖先链继承查找** |
 | color | Paragraph/Heading/StyledRun.color | `#abc`/`#aabbcc` 规范化为小写 6 位；**rgb()/rgba()（alpha 忽略）/常用命名色 17 项解析（M5）**；**沿祖先链继承** |
 | font-size | Paragraph/Heading/StyledRun.font_scale | em/% → 相对基准倍率；**px/pt → px(或 pt·4/3) ÷ 当前排版字号 换算倍率（M5）；rem 忽略**；**沿祖先链继承** |
 | font-weight | StyledRun.bold | bold/bolder→粗、normal/lighter→常规（显式声明阻断继承）、数值 ≥550 粗其余常规（CSS 级联语义整体覆盖标签默认）（M5） |
@@ -107,12 +107,13 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
 | duokan-bleed | Image.bleed | 关键字含 "left" 即出血（真实书唯一形态 lefttopright） |
 | background(-image)/background | PageBackground.image_href | url() 提取；简写形态扫全文取 url(...) |
 | background-size / background-position | PageBackground.size / .position | cover→Cover；contain→Contain；百分比/两值→Stretch；position 关键字原文透传 |
-| margin | Table.margin_top_percent（仅 top 的 %）；盒模型简写展开为四长键 | `margin:20% 0 0 auto` → margin-top=20% 生效，其余方向忽略 |
+| margin | Table.margin_top_percent（仅 top 的 %）；**Paragraph.spacing_after_em（margin-bottom，A20）**；盒模型简写展开为四长键 | `margin:20% 0 0 auto` → margin-top=20% 生效；**margin-bottom em/%/px/pt → em 倍数（非继承属性，仅自身声明），布局期与用户段距取 max**；其余方向忽略 |
+| line-height | Paragraph.line_height（A20） | **继承属性**（self_or_inherited）；无单位数字 `1.8`/`200%`/em 直接为倍率，px/pt÷基准字号折算；**书内显式声明优先、未声明用用户全局 line_height_multiplier**（与 text-indent 的"用户覆盖"语义相反） |
 | height / padding-* | （解析但未消费） | 预留 |
 
 ### 2.4 继承语义
 
-- **可继承属性**（color/font-size/text-align）：自身声明优先，未命中时
+- **可继承属性**（color/font-size/text-align/**line-height（A20）**）：自身声明优先，未命中时
   沿 anc 祖先链自近及远回溯取首个有效值（《剑来》`table.vol-title{color}`
   → td → 单元格段落 三级继承实测命中）。残缺声明（`margin-left:;` 解析为
   None）视同未声明，不阻断回溯。

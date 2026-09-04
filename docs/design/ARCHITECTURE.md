@@ -711,6 +711,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A17 | 字体架构用户可选（M9 字体重写） | ✅ 2026-08-29 |
 | A18 | MeasureCache 架构与左右边距修复（M10-B/M11/M12） | ✅ 2026-09-02 |
 | A19 | 翻页动画家族：水波纹 v16.10 + 坍塌溶解 + 快照按页 LRU + 手势互斥/排队治理（权威文档 PAGE_TURN_ANIMATION_ARCHITECTURE.md） | ✅ 2026-09-04 |
+| A20 | P2 排版批次：kinsoku 收口扩表 + 两端对齐 justify + EPUB margin-bottom/line-height 物化 | ✅ 2026-09-04 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -734,12 +735,32 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 **问题根源**：ttf-parser hmtx ≠ Skia HarfBuzz 整形后宽度 → 左右边距不对称  
 **最终效果**：rustW ≈ skiaW（偏差 ≤ 1px），左右边距精准对称
 
-**所有 A1–A19 + APK 全线落地**。下一阶段候选：
-- P1：设置持久化（翻页模式/速度/字体——当前全部内存态，重启回默认）
-- P1：坍塌动画参数设置化（阴影色 / 崩解节奏 / 方块大小 / 中心区阈值）
-- P1：暗黑主题（PageContentRenderer.paperColor 硬编码，无主题字段）
-- P2：CJK 避头尾与行首行尾禁则（A14 已部分实现，全量收口）
-- P2：两端对齐（行内 justify pass）
+**A20 详细说明（P2 排版批次，2026-09-04）**：
+
+- **kinsoku.rs 收口扩表**：LINE_START/END_FORBIDDEN + is_word_char 三处复制
+  （layout_paragraph 旧版/with_oracle/styled）统一单源；扩表半角标点/省略号
+  变体/单位符号（°′″‰℃）。直引号 ' " 为历史双表成员（禁止单独引号贴行边），
+  disjoint 测试以白名单显式声明。
+- **两端对齐 justify**：`justify_gap = (可用宽 − 自然宽) / n_chars`（除以
+  n_chars 吸收 Flutter letterSpacing 对行尾字符的加宽）；短行豁免（富余
+  >40% 行宽或单字间隙 >半字）；末行/Center/Right/表格单元格豁免；EPUB
+  `text-align:justify` 解析回正（此前折叠 Left）+ 全局开关
+  `ParagraphFormatSettings.justify`（Left/未指定段落跟随）；**Dart 消费 =
+  TextStyle.letterSpacing（单 TextPainter 模型不变，char_positions 否决）**；
+  拉丁词保护段 `LineSeg.letter_spacing=Some(0)`；**MeasureCache 红线：测量
+  样式恒 letterSpacing=0**。justify 在行 emit 层与预处理层（重新分段）零交集，
+  formatter 全量测试零回归（硬性承诺达成）。
+- **margin-bottom 物化**：真缺口在 bridge——IR `spacing_after_em` 字段早已
+  存在却被硬编码 0.0 丢弃；`resolved_spacing_after_em`（em/%/px/pt；margin
+  非继承 → self-only）；布局期与用户段距取 max（书内样式下限、用户倍率兜底）。
+- **line-height 物化**：IR/TextItem 增 `line_height: Option<f32>`；
+  `resolved_line_height`（继承属性 → self_or_inherited；无单位数字最常见
+  形态经 Keyword parse）；**书内显式声明优先、未声明用用户全局**（与缩进的
+  "用户覆盖"语义相反，样式保真）；表格单元格同享；重新分段切分后每段继承
+  原段行高（段级属性）。
+
+**所有 A1–A20 + APK 全线落地**。下一阶段候选：
+- P2：标点压缩/挤压（需测量层配合，justify 后续）
 - P2：诗歌/对话/引用智能分段（挂接规则扩展点）
 - P2：激活 SmartPaginator / parallel / AdvancedGlyphCache 至 bridge 热路径
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
