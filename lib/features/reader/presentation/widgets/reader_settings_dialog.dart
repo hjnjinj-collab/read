@@ -4,6 +4,7 @@ import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/reader_font.dart';
 import '../../../../core/services/font_provider.dart';
 import '../providers/reader_provider.dart';
+import '../providers/reader_settings.dart';
 
 class ReaderSettingsDialog extends ConsumerStatefulWidget {
   const ReaderSettingsDialog({super.key});
@@ -42,6 +43,20 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   int _smartSplitThreshold = 200;
   int _aggressiveSplitThreshold = 100;
 
+  // 坍塌动画样式（2026-09-04 P1 设置化：变更即时生效+落库，不经「应用设置」）
+  double _collapseBlockSize = 36;
+  double _collapseSlideDistance = 45;
+  int _collapseShadowColorValue = 0xFF333630;
+
+  /// 阴影色预设色板（首位 = 默认色）
+  static const List<int> _collapseShadowPresets = [
+    0xFF333630, // 深灰（默认）
+    0xFF1A1A1A, // 近黑
+    0xFF5D4037, // 棕
+    0xFF37474F, // 蓝灰
+    0xFF3E2723, // 深褐
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +78,9 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _reParagraphMode = n.reParagraphMode;
     _smartSplitThreshold = n.smartSplitThreshold;
     _aggressiveSplitThreshold = n.aggressiveSplitThreshold;
+    _collapseBlockSize = n.collapseStyle.blockSize;
+    _collapseSlideDistance = n.collapseStyle.slideDistance;
+    _collapseShadowColorValue = n.collapseStyle.shadowColorValue;
   }
 
   @override
@@ -124,6 +142,21 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     ));
     _patternController.clear();
     _replacementController.clear();
+  }
+
+  /// 坍塌动画参数变更：即时生效（写 notifier → 防抖落库），不经「应用设置」
+  /// ——动画样式是即时可感知的视觉参数，整体提交模式反而打断调参手感
+  void _updateCollapse({double? blockSize, double? slideDistance, int? shadowColor}) {
+    setState(() {
+      if (blockSize != null) _collapseBlockSize = blockSize;
+      if (slideDistance != null) _collapseSlideDistance = slideDistance;
+      if (shadowColor != null) _collapseShadowColorValue = shadowColor;
+    });
+    ref.read(readerProvider.notifier).setCollapseStyle(CollapseStyle(
+          blockSize: _collapseBlockSize,
+          slideDistance: _collapseSlideDistance,
+          shadowColorValue: _collapseShadowColorValue,
+        ));
   }
 
   Future<void> _applySettings() async {
@@ -363,6 +396,91 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   onChanged: (value) {
                     setState(() => _italicEnabled = value);
                   },
+                ),
+
+                const SizedBox(height: 24),
+
+                // 坍塌动画 section（2026-09-04 P1 设置化：即时生效+持久化，
+                // 仅坍塌模式消费；水波纹/卷曲/滚动不受影响）
+                _buildSectionHeader('坍塌动画'),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '方块大小：${_collapseBlockSize.round()}px',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const Text(
+                        '值越大颗粒感越粗、方块数量越少',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      Slider(
+                        value: _collapseBlockSize,
+                        min: 24,
+                        max: 64,
+                        divisions: 8,
+                        label: '${_collapseBlockSize.round()}px',
+                        onChanged: (v) =>
+                            _updateCollapse(blockSize: v),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '向心滑移：${_collapseSlideDistance.round()}px',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const Text(
+                        '坍塌方块被吸向点击点的距离',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      Slider(
+                        value: _collapseSlideDistance,
+                        min: 0,
+                        max: 80,
+                        divisions: 16,
+                        label: '${_collapseSlideDistance.round()}px',
+                        onChanged: (v) =>
+                            _updateCollapse(slideDistance: v),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '阴影颜色',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          for (final color in _collapseShadowPresets)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: InkWell(
+                                onTap: () => _updateCollapse(shadowColor: color),
+                                borderRadius: BorderRadius.circular(20),
+                                child: Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: Color(color),
+                                    shape: BoxShape.circle,
+                                    border: _collapseShadowColorValue == color
+                                        ? Border.all(
+                                            color: Colors.blue,
+                                            width: 3,
+                                          )
+                                        : Border.all(
+                                            color: Colors.grey[400]!,
+                                            width: 1,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
 
                 const SizedBox(height: 24),

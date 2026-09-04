@@ -46,12 +46,35 @@ class Bookmarks extends Table {
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }
 
-@DriftDatabase(tables: [Books, ReadingProgress, Bookmarks])
+/// 应用设置 KV 存储（2026-09-04 P1 设置持久化）
+///
+/// 值 = JSON blob（Dart 侧模型承担类型安全与默认值兜底）——
+/// 加设置不加列，坍塌参数/暗黑主题等后续直接落新键或扩展 JSON。
+class AppSettings extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+@DriftDatabase(tables: [Books, ReadingProgress, Bookmarks, AppSettings])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          // v2: 新增 AppSettings KV 表（设置持久化，2026-09-04）
+          if (from < 2) {
+            await m.createTable(appSettings);
+          }
+        },
+      );
 
   // ===== 书架 =====
 
@@ -156,6 +179,21 @@ class AppDatabase extends _$AppDatabase {
 
   Future<int> deleteBookmark(int id) {
     return (delete(bookmarks)..where((m) => m.id.equals(id))).go();
+  }
+
+  // ===== 应用设置 =====
+
+  Future<List<AppSetting>> allSettings() => select(appSettings).get();
+
+  /// 定向 upsert（key 为主键，insertOnConflictUpdate 天然生效）
+  Future<void> upsertSetting(String key, String value) async {
+    await into(appSettings).insertOnConflictUpdate(
+      AppSettingsCompanion.insert(
+        key: key,
+        value: value,
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 }
 

@@ -7,6 +7,7 @@ import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
 import '../widgets/reader_menu.dart';
+import '../widgets/reader_page_widget.dart';
 
 class ReaderPage extends ConsumerStatefulWidget {
   final String filePath;
@@ -22,8 +23,15 @@ class ReaderPage extends ConsumerStatefulWidget {
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _showMenu = false;
 
-  /// P4: 翻页模式（默认仿真卷曲；P5 从设置读取）
-  PageTurnMode _pageTurnMode = PageTurnMode.simulation;
+  /// P4: 翻页模式（2026-09-04 P1: 上移 ReaderNotifier 持久化——原 widget
+  /// 本地 state 随 ReaderPage 销毁重置，换书即丢设置；getter 读 notifier，
+  /// setter 写 notifier（写穿落库）+ 本地 setState 驱动重建）
+  PageTurnMode get _pageTurnMode =>
+      ref.read(readerProvider.notifier).pageTurnMode;
+
+  /// 2026-09-03: 翻页动画速度三档（同上移持久化）
+  PageTurnSpeed get _pageTurnSpeed =>
+      ref.read(readerProvider.notifier).pageTurnSpeed;
 
   // ── P2: 滑动手势状态 ──
   bool _isDragging = false;
@@ -174,8 +182,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     // composer 正在拖拽 → 由其执行收尾动画
     if (_composerKey.currentState?.isIdle == false) {
+      // 2026-09-04 修复"连点同位置无法翻页"：动画/提交在途的纯点击
+      // 此前按 shouldTurn=false 被吞（分区判定只覆盖空闲路径）——同一
+      // 位置首击能翻、连点不能。现在在途点击走与空闲点击一致的意图
+      // 判定后转排队（composer 侧 _turnEndInFlight 拦截 + 落地补跑）。
+      if (result.decision == GestureDecision.tap) {
+        final dir = _resolveInFlightTapDirection(event.localPosition, dx);
+        if (dir != null) {
+          _composerKey.currentState?.endDrag(
+            shouldTurn: true,
+            direction: dir,
+          );
+        }
+        // dir == null（菜单意图/无方向）→ 在途时忽略，不弹菜单打断动画
+        return;
+      }
       _composerKey.currentState?.endDrag(
         shouldTurn: result.decision == GestureDecision.turnPage,
+        direction: result.direction,
       );
       return;
     }
@@ -188,7 +212,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         // 2026-09-03 第二阶段优化：点击也基于微小的手势方向判断
         // 如果有微小位移（即使被判定为 tap），根据方向翻页
         // 完全无位移时打开菜单
-        _handleTapGesture(dx, dy);
+        // 2026-09-04: 传入真实点击坐标（坍塌模式用作坍塌中心）
+        _handleTapGesture(dx, dy, event.localPosition);
         break;
       case GestureDecision.turnPage:
         if (result.direction == PageDirection.prev) {
@@ -200,19 +225,64 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
   }
 
+  /// 坍塌模式点击分区（2026-09-04 v2：2D 中心区域，用户反馈修正）
+  ///
+  /// - 中心矩形（x∈[30%,70%] 且 y∈[30%,70%]）→ null = 菜单意图。
+  ///   此前是纯横向竖条（中间 40% 全高都是菜单），点屏幕下方偏中的
+  ///   位置也会弹菜单——「中部」应是屏幕正中的 2D 区域而非竖条。
+  /// - 其余区域全部翻页：左半 → prev，右半 → next
+  PageDirection? _collapseTapZone(Offset pos, double w, double h) {
+    final inCenterX = pos.dx >= w * 0.3 && pos.dx <= w * 0.7;
+    final inCenterY = pos.dy >= h * 0.3 && pos.dy <= h * 0.7;
+    if (inCenterX && inCenterY) return null;
+    return pos.dx < w * 0.5 ? PageDirection.prev : PageDirection.next;
+  }
+
+  /// 在途点击的翻页意图判定（动画/提交窗口期 pointer-up 走这里）
+  /// 与空闲点击（_handleTapGesture）同一套语义：
+  /// - 坍塌模式：2D 分区（返回 null = 菜单意图，在途时忽略）
+  /// - 其他模式：微手势方向
+  PageDirection? _resolveInFlightTapDirection(Offset pos, double dx) {
+    if (_pageTurnMode == PageTurnMode.collapse) {
+      final notifier = ref.read(readerProvider.notifier);
+      return _collapseTapZone(pos, notifier.screenWidth, notifier.screenHeight);
+    }
+    if (dx > 3.0) return PageDirection.prev;
+    if (dx < -3.0) return PageDirection.next;
+    return null;
+  }
+
   /// 2026-09-03 第二阶段优化：基于手势方向判断翻页
   /// - 右滑（dx > 微小阈值）→ 上一页
   /// - 左滑（dx < -微小阈值）→ 下一页
   /// - 几乎无位移 → 打开菜单
-  void _handleTapGesture(double dx, double dy) {
+  ///
+  /// 2026-09-04 坍塌模式专属：2D 中心区域开菜单（v2，见 _collapseTapZone），
+  /// 其余区域点击翻页（坍塌中心=真实点击点）
+  void _handleTapGesture(double dx, double dy, Offset tapPos) {
     const microGestureThreshold = 3.0; // 3px 微手势阈值
-    
+
+    if (_pageTurnMode == PageTurnMode.collapse) {
+      final notifier = ref.read(readerProvider.notifier);
+      final dir = _collapseTapZone(
+        tapPos,
+        notifier.screenWidth,
+        notifier.screenHeight,
+      );
+      if (dir == null) {
+        _toggleMenu();
+      } else {
+        _composerKey.currentState?.tapTurn(dir, tapPosition: tapPos);
+      }
+      return;
+    }
+
     if (dx > microGestureThreshold) {
       // 右滑 → 上一页
-      _composerKey.currentState?.tapTurn(PageDirection.prev);
+      _composerKey.currentState?.tapTurn(PageDirection.prev, tapPosition: tapPos);
     } else if (dx < -microGestureThreshold) {
       // 左滑 → 下一页
-      _composerKey.currentState?.tapTurn(PageDirection.next);
+      _composerKey.currentState?.tapTurn(PageDirection.next, tapPosition: tapPos);
     } else {
       // 几乎无位移 → 菜单
       _toggleMenu();
@@ -246,18 +316,36 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
   }
 
-  /// P5: 切换翻页模式
+  /// P5: 切换翻页模式（写 notifier → 持久化落库）
   void _setPageTurnMode(PageTurnMode mode) {
-    setState(() {
-      _pageTurnMode = mode;
-    });
+    ref.read(readerProvider.notifier).setPageTurnMode(mode);
+    setState(() {});
+  }
+
+  /// 2026-09-03: 切换翻页速度（写 notifier → 持久化落库；下一次翻页生效，
+  /// 动画中切换安全——控制器在每次翻页开始时重建并读取当前档位）
+  void _setPageTurnSpeed(PageTurnSpeed speed) {
+    ref.read(readerProvider.notifier).setPageTurnSpeed(speed);
+    setState(() {});
+  }
+
+  /// 2026-09-04 P1: 切换暗黑主题（notifier 更新静态主题+revision 并落库；
+  /// setState 驱动整树重建——PagePainter 以构造期捕获的 revision 比对
+  /// 触发重绘，翻页快照键含主题分量自动生成新主题纹理）
+  void _toggleThemeDark() {
+    ref.read(readerProvider.notifier).setThemeDark(
+          !ref.read(readerProvider.notifier).themeDark,
+        );
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(readerProvider);
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5DC),
+      // 2026-09-04 P1 暗黑主题：Scaffold 背景跟随阅读主题（内容区由
+      // PagePainter 纸色底全覆盖，此处主要影响加载/无内容态观感）
+      backgroundColor: PageContentRenderer.theme.scaffoldColor,
       // LayoutBuilder = 权威 viewport 测量点：constraints 即 SafeArea
       // 内实际可用区域，与 CustomPaint 画布尺寸严格一致。排版
       // LayoutConfig、翻页几何、手势归一化全部同源于此（禁止
@@ -323,6 +411,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                         key: _composerKey,
                         currentPage: state.currentPage!,
                         mode: _pageTurnMode,
+                        speed: _pageTurnSpeed,
                       )
                     : const Center(child: Text('No content')),
               ),
@@ -376,8 +465,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 right: 0,
                 child: ReaderMenu(
                   onClose: () => setState(() => _showMenu = false),
-                  pageTurnMode: _pageTurnMode,
+                  pageTurnMode: notifier.pageTurnMode,
                   onPageTurnModeChanged: _setPageTurnMode,
+                  pageTurnSpeed: notifier.pageTurnSpeed,
+                  onPageTurnSpeedChanged: _setPageTurnSpeed,
+                  themeDark: notifier.themeDark,
+                  onToggleTheme: _toggleThemeDark,
                 ),
               ),
               ],
@@ -395,11 +488,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 class _PageTurnComposerBridge extends StatefulWidget {
   final PageInfo currentPage;
   final PageTurnMode mode;
+  final PageTurnSpeed speed;
 
   const _PageTurnComposerBridge({
     super.key,
     required this.currentPage,
     required this.mode,
+    this.speed = PageTurnSpeed.medium,
   });
 
   @override
@@ -424,12 +519,13 @@ class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
     _composerKey.currentState?.onDragUpdate(progress, localTouch);
   }
 
-  void endDrag({required bool shouldTurn}) {
-    _composerKey.currentState?.onDragEnd(shouldTurn: shouldTurn);
+  void endDrag({required bool shouldTurn, PageDirection? direction}) {
+    _composerKey.currentState
+        ?.onDragEnd(shouldTurn: shouldTurn, direction: direction);
   }
 
-  void tapTurn(PageDirection direction) {
-    _composerKey.currentState?.onTapTurn(direction);
+  void tapTurn(PageDirection direction, {Offset? tapPosition}) {
+    _composerKey.currentState?.onTapTurn(direction, tapPosition: tapPosition);
   }
 
   @override
@@ -438,6 +534,7 @@ class _PageTurnComposerBridgeState extends State<_PageTurnComposerBridge> {
       key: _composerKey,
       currentPage: widget.currentPage,
       mode: widget.mode,
+      speed: widget.speed,
     );
   }
 }

@@ -85,6 +85,10 @@ class PagePainter extends CustomPainter {
   final double baseFontSize;
   final double baseLineHeight;
 
+  /// 构造期捕获的主题版本号（2026-09-04 P1：切主题后 widget 重建 →
+  /// 新 painter 携带新 revision → shouldRepaint 命中重绘）
+  final int themeRevision = PageContentRenderer.themeRevision;
+
   // 纸色底常量已公开到 PageContentRenderer.paperColor（v16.9.3：快照同源使用）
 
   PagePainter(
@@ -140,9 +144,73 @@ class PagePainter extends CustomPainter {
         oldDelegate.applyItalic != applyItalic ||
         oldDelegate.applyTitleBold != applyTitleBold ||
         oldDelegate.baseFontSize != baseFontSize ||
-        oldDelegate.baseLineHeight != baseLineHeight;
+        oldDelegate.baseLineHeight != baseLineHeight ||
+        // 2026-09-04 P1 暗黑主题：静态主题切换感知（构造期捕获版本号比对）
+        oldDelegate.themeRevision != themeRevision;
     return repaint;
   }
+}
+
+/// 阅读主题色板（2026-09-04 P1 暗黑主题）
+///
+/// 只覆盖**阅读内容区**（纸张/正文/注释/占位/表格线框/Scaffold 背景）；
+/// 菜单与对话框保持系统亮色样式（MVP 范围，后续可扩展）。
+class ReaderTheme {
+  final String name;
+
+  /// 纸色底（页面渲染 / 翻页快照 / 各 Painter 同源）
+  final Color paperColor;
+
+  /// 正文默认文字色（entry.color 未指定时）
+  final Color textColor;
+
+  /// 本章说灰字
+  final Color commentColor;
+
+  /// 图片解码占位块
+  final Color placeholderColor;
+
+  /// 表格单元格线框
+  final Color tableFrameColor;
+
+  /// 阅读页 Scaffold 背景（SafeArea 外区域）
+  final Color scaffoldColor;
+
+  /// 纸背底色（卷曲翻页背面镜像底，正面纸色加深）
+  final Color paperBackColor;
+
+  const ReaderTheme({
+    required this.name,
+    required this.paperColor,
+    required this.textColor,
+    required this.commentColor,
+    required this.placeholderColor,
+    required this.tableFrameColor,
+    required this.scaffoldColor,
+    required this.paperBackColor,
+  });
+
+  static const ReaderTheme light = ReaderTheme(
+    name: 'light',
+    paperColor: Color(0xFFF5F1E8),
+    textColor: Colors.black,
+    commentColor: Color(0xFF888888),
+    placeholderColor: Color(0xFFDDDDDD),
+    tableFrameColor: Color(0xFF999999),
+    scaffoldColor: Color(0xFFF5F5DC),
+    paperBackColor: Color(0xFFE9E3D5),
+  );
+
+  static const ReaderTheme dark = ReaderTheme(
+    name: 'dark',
+    paperColor: Color(0xFF1E1E1E),
+    textColor: Color(0xFFCCCCCC),
+    commentColor: Color(0xFF6E6E6E),
+    placeholderColor: Color(0xFF3C3C3C),
+    tableFrameColor: Color(0xFF555555),
+    scaffoldColor: Color(0xFF121212),
+    paperBackColor: Color(0xFF262626),
+  );
 }
 
 /// 页面内容渲染器：供 PagePainter 与翻页动画 CurlPainter 共用
@@ -151,8 +219,16 @@ class PagePainter extends CustomPainter {
 /// 不持有任何 Widget 状态。动画期间目标页未挂载为 Widget，由本渲染器
 /// 按帧绘制到裁切区域内（对齐 legado Android 每帧直绘的做法）。
 class PageContentRenderer {
+  /// 当前阅读主题（2026-09-04 P1 暗黑主题：静态可变，启动/切换时赋值）
+  static ReaderTheme theme = ReaderTheme.light;
+
+  /// 主题版本号：每次切主题递增——PagePainter.shouldRepaint 以此感知
+  /// 静态主题变化（painter 无法监听静态字段，经构造期捕获值比对）
+  static int themeRevision = 0;
+
   /// 纸色底（正式页面渲染与翻页快照共用，v16.9.3 公开化）
-  static const Color paperColor = Color(0xFFF5F1E8);
+  /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）
+  static Color get paperColor => theme.paperColor;
 
   /// 绘制背景与 entries（不含纸色底——调用方按需自绘）
   static void paintPage(
@@ -214,7 +290,7 @@ class PageContentRenderer {
           );
           canvas.drawRRect(
             RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-            Paint()..color = const Color(0xFFDDDDDD),
+            Paint()..color = theme.placeholderColor,
           );
           BookImageStore.instance.ensureLoaded(href, onImageNeeded);
         }
@@ -228,7 +304,7 @@ class PageContentRenderer {
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.0
-            ..color = const Color(0xFF999999),
+            ..color = theme.tableFrameColor,
         );
         continue;
       }
@@ -236,8 +312,8 @@ class PageContentRenderer {
       final text = entry.text;
       if (text == null || text.isEmpty) continue;
       final baseColor = entry.isComment
-          ? const Color(0xFF888888)
-          : (_parseHexColor(entry.color) ?? Colors.black);
+          ? theme.commentColor
+          : (_parseHexColor(entry.color) ?? theme.textColor);
       final baseScale = entry.fontScale ?? 1.0;
       // TXT 章节标题加粗（与 EPUB 行内粗体同一开关；TextSpan 子段
       // 未显式设置时继承父级，segments 分支无需重复判断）

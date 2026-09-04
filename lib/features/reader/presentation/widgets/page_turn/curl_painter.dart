@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../../../core/models/simple_models.dart';
 import '../../services/book_image_store.dart';
 import '../../diagnostics/reader_trace.dart';
+import '../reader_page_widget.dart';
 import 'page_turn_types.dart';
 
 // ══════════════════════════════════════════════════════════════
@@ -242,11 +243,14 @@ class CurlPainter extends CustomPainter {
   /// 与干净定格页无缝衔接（否则收尾瞬间光影「啪」地消失）
   final double washScale;
 
-  static const Color _paperColor = Color(0xFFF5F1E8);
+  // 2026-09-04 P1 暗黑主题：纸色/纸背色同源化到 PageContentRenderer 主题
+  //（删除私有常量副本——v16.9.3 报告的三处同源原则，这里补上卷曲侧）
+  static Color get _paperColor => PageContentRenderer.paperColor;
 
   /// 纸背底色（正面纸色加深 ~8%，legado backgroundMeanColor 等价物：
   /// 背面先铺不透明底再画镜像，读感为独立实心纸张）
-  static const Color _paperBackColor = Color(0xFFE9E3D5);
+  static Color get _paperBackColor =>
+      PageContentRenderer.theme.paperBackColor;
   // 旧版曲线高光保留作对照，但当前光影完全采用 MD3 渐变条。
   static const bool _legacyCurveHighlightsEnabled = false;
 

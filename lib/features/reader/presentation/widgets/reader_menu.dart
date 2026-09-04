@@ -11,11 +11,23 @@ class ReaderMenu extends ConsumerWidget {
   final PageTurnMode? pageTurnMode;
   final ValueChanged<PageTurnMode>? onPageTurnModeChanged;
 
+  /// 2026-09-03: 翻页速度三档（快/中/慢，当前作用于水波纹动画时长）
+  final PageTurnSpeed? pageTurnSpeed;
+  final ValueChanged<PageTurnSpeed>? onPageTurnSpeedChanged;
+
+  /// 2026-09-04 P1 暗黑主题：当前是否暗色 + 切换回调
+  final bool? themeDark;
+  final VoidCallback? onToggleTheme;
+
   const ReaderMenu({
     Key? key,
     required this.onClose,
     this.pageTurnMode,
     this.onPageTurnModeChanged,
+    this.pageTurnSpeed,
+    this.onPageTurnSpeedChanged,
+    this.themeDark,
+    this.onToggleTheme,
   }) : super(key: key);
 
   @override
@@ -54,6 +66,18 @@ class ReaderMenu extends ConsumerWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  IconButton(
+                    // 2026-09-04 P1 暗黑主题：阅读内容区明暗切换
+                    //（菜单/对话框保持系统亮色样式，见动画架构文档）
+                    tooltip: themeDark == true ? '切回亮色' : '切换暗色',
+                    icon: Icon(
+                      themeDark == true
+                          ? Icons.light_mode
+                          : Icons.dark_mode,
+                      size: 22,
+                    ),
+                    onPressed: onToggleTheme,
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -142,11 +166,43 @@ class ReaderMenu extends ConsumerWidget {
                     ),
                     const SizedBox(width: 8),
                     _PageTurnModeChip(
+                      label: '坍塌',
+                      mode: PageTurnMode.collapse,
+                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                      onSelected: onPageTurnModeChanged!,
+                    ),
+                    const SizedBox(width: 8),
+                    _PageTurnModeChip(
                       label: '滚动',
                       mode: PageTurnMode.verticalScroll,
                       currentMode: pageTurnMode ?? PageTurnMode.simulation,
                       onSelected: onPageTurnModeChanged!,
                     ),
+                  ],
+                ),
+              ),
+
+            const Divider(height: 1),
+
+            // 2026-09-03: 翻页速度选择（快/中/慢三档）
+            if (onPageTurnSpeedChanged != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.speed, size: 20),
+                    const SizedBox(width: 12),
+                    const Text('翻页速度:', style: TextStyle(fontSize: 14)),
+                    const SizedBox(width: 12),
+                    for (final speed in PageTurnSpeed.values) ...[
+                      if (speed != PageTurnSpeed.values.first)
+                        const SizedBox(width: 8),
+                      _PageTurnSpeedChip(
+                        speed: speed,
+                        currentSpeed: pageTurnSpeed ?? PageTurnSpeed.medium,
+                        onSelected: onPageTurnSpeedChanged!,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -353,6 +409,29 @@ class _PageTurnModeChip extends StatelessWidget {
       label: Text(label),
       selected: isSelected,
       onSelected: (_) => onSelected(mode),
+    );
+  }
+}
+
+/// 2026-09-03: 翻页速度选择 chip（快/中/慢）
+class _PageTurnSpeedChip extends StatelessWidget {
+  final PageTurnSpeed speed;
+  final PageTurnSpeed currentSpeed;
+  final ValueChanged<PageTurnSpeed> onSelected;
+
+  const _PageTurnSpeedChip({
+    required this.speed,
+    required this.currentSpeed,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = speed == currentSpeed;
+    return ChoiceChip(
+      label: Text(speed.label),
+      selected: isSelected,
+      onSelected: (_) => onSelected(speed),
     );
   }
 }

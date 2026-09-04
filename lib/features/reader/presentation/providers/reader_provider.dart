@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/database/app_settings_service.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 import '../widgets/page_turn/page_turn_types.dart';
+import '../widgets/reader_page_widget.dart';
 import 'page_frame.dart';
 import 'reader_render_state.dart';
+import 'reader_settings.dart';
 import '../diagnostics/reader_trace.dart';
 
 /// 全局数据库实例（drift，进程内单例）
@@ -25,9 +29,38 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _bookService = ref.read(bookServiceProvider);
     _db = ref.read(appDatabaseProvider);
     _renderStore = ref.read(readerRenderStoreProvider);
-    // M9.2：构造期即按默认值计算段落格式哈希，与 Rust 全局默认
-    // （Smart+缩进开）对齐——消除"Rust 已按默认排版、Dart 却挂
-    // hash=0 缓存键"的启动错位（设置无持久化，重启两侧同回默认）
+    // P1 设置持久化（2026-09-04）：内存快照初始化（main() 已在 runApp 前
+    // 预加载 + 同步 Rust 段落格式全局）——字段默认值兜底在 ReaderSettings 内，
+    // 无持久化数据/损坏 JSON 时行为与旧版完全一致。
+    final persisted =
+        ReaderSettings.tryParse(AppSettingsService.instance.raw('reader'));
+    _fontSize = persisted.fontSize;
+    _lineHeight = persisted.lineHeight;
+    _paddingHorizontal = persisted.paddingHorizontal;
+    _paddingVertical = persisted.paddingVertical;
+    _pageFillThreshold = persisted.pageFillThreshold;
+    _removeDuplicateTitle = persisted.removeDuplicateTitle;
+    _chineseConvert = persisted.chineseConvert;
+    _replaceRules = persisted.replaceRules;
+    _removeHtmlTags = persisted.removeHtmlTags;
+    _removeAds = persisted.removeAds;
+    _boldEnabled = persisted.boldEnabled;
+    _italicEnabled = persisted.italicEnabled;
+    _showComments = persisted.showComments;
+    _enableIndent = persisted.enableIndent;
+    _indentSizeChars = persisted.indentSizeChars;
+    _paragraphSpacingMultiplier = persisted.paragraphSpacingMultiplier;
+    _reParagraphMode = persisted.reParagraphMode;
+    _smartSplitThreshold = persisted.smartSplitThreshold;
+    _aggressiveSplitThreshold = persisted.aggressiveSplitThreshold;
+    _pageTurnMode = persisted.pageTurnMode;
+    _pageTurnSpeed = persisted.pageTurnSpeed;
+    _collapseStyle = persisted.collapse;
+    _themeDark = persisted.theme == 'dark';
+    PageContentRenderer.theme =
+        _themeDark ? ReaderTheme.dark : ReaderTheme.light;
+    // M9.2：构造期按（持久化）设置计算段落格式哈希——与 Rust 全局（main()
+    // 已按同源值同步）对齐，缓存键两侧一致
     _paraFormatHash = _computeParaFormatHash();
     return const ReadingState();
   }
@@ -64,6 +97,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   // 本章说/注释显示开关（切换影响分页缓存键）
   bool _showComments = true;
+
+  // 2026-09-04 P1: 翻页动画模式与速度（原 reader_page 本地 state 上移——
+  // widget state 随 ReaderPage 销毁重置，换书即丢设置；上移后跨书持久）
+  PageTurnMode _pageTurnMode = PageTurnMode.simulation;
+  PageTurnSpeed _pageTurnSpeed = PageTurnSpeed.medium;
+
+  // 2026-09-04 P1: 坍塌动画样式（方块大小/向心滑移/阴影色）
+  CollapseStyle _collapseStyle = CollapseStyle.defaults();
+
+  // 2026-09-04 P1: 暗黑主题（false=light）
+  bool _themeDark = false;
 
   // M9-P4：段落格式设置（首行缩进/段间距/重新分段）
   bool _enableIndent = true;
@@ -151,8 +195,88 @@ class ReaderNotifier extends Notifier<ReadingState> {
     await _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
   }
 
+  // ── P1 设置持久化（2026-09-04）──────────────────────────────────
+
+  /// 翻页动画模式（getter 供 reader_page 读；经 setter 修改即落库）
+  PageTurnMode get pageTurnMode => _pageTurnMode;
+  PageTurnSpeed get pageTurnSpeed => _pageTurnSpeed;
+
+  void setPageTurnMode(PageTurnMode mode) {
+    if (_pageTurnMode == mode) return;
+    _pageTurnMode = mode;
+    _persistSettings();
+  }
+
+  void setPageTurnSpeed(PageTurnSpeed speed) {
+    if (_pageTurnSpeed == speed) return;
+    _pageTurnSpeed = speed;
+    _persistSettings();
+  }
+
+  CollapseStyle get collapseStyle => _collapseStyle;
+
+  void setCollapseStyle(CollapseStyle style) {
+    _collapseStyle = style;
+    _persistSettings();
+  }
+
+  bool get themeDark => _themeDark;
+
+  /// 切换暗黑主题：更新 PageContentRenderer 静态主题并递增 revision
+  /// （PagePainter.shouldRepaint 以构造期捕获的 revision 比对触发重绘；
+  /// 快照缓存键含主题分量，翻页门控自动生成新主题快照，旧条目由 LRU 淘汰）
+  void setThemeDark(bool dark) {
+    if (_themeDark == dark) return;
+    _themeDark = dark;
+    PageContentRenderer.theme = dark ? ReaderTheme.dark : ReaderTheme.light;
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+  }
+
+  /// 组装设置 JSON（单一来源 = 内存字段；解析侧在 ReaderSettings.tryParse）
+  Map<String, dynamic> _settingsJson() => {
+        'v': 1,
+        'fontSize': _fontSize,
+        'lineHeight': _lineHeight,
+        'paddingHorizontal': _paddingHorizontal,
+        'paddingVertical': _paddingVertical,
+        'pageFillThreshold': _pageFillThreshold,
+        'removeDuplicateTitle': _removeDuplicateTitle,
+        'chineseConvert': _chineseConvert.name,
+        'replaceRules': [
+          for (final r in _replaceRules)
+            {
+              'pattern': r.pattern,
+              'replacement': r.replacement,
+              'isRegex': r.isRegex,
+              'enabled': r.enabled,
+            }
+        ],
+        'removeHtmlTags': _removeHtmlTags,
+        'removeAds': _removeAds,
+        'boldEnabled': _boldEnabled,
+        'italicEnabled': _italicEnabled,
+        'showComments': _showComments,
+        'enableIndent': _enableIndent,
+        'indentSizeChars': _indentSizeChars,
+        'paragraphSpacingMultiplier': _paragraphSpacingMultiplier,
+        'reParagraphMode': _reParagraphMode,
+        'smartSplitThreshold': _smartSplitThreshold,
+        'aggressiveSplitThreshold': _aggressiveSplitThreshold,
+        'pageTurnMode': _pageTurnMode.name,
+        'pageTurnSpeed': _pageTurnSpeed.name,
+        'collapse': _collapseStyle.toJson(),
+        'theme': _themeDark ? 'dark' : 'light',
+      };
+
+  /// 写穿落库（内存快照即时更新 + 100ms 防抖 upsert，fire-and-forget）
+  void _persistSettings() {
+    AppSettingsService.instance.save('reader', jsonEncode(_settingsJson()));
+  }
+
   void setFontSize(double fontSize) {
     _fontSize = fontSize;
+    _persistSettings(); // P1: 写穿落库
     // M10-B：字号变更 → 清 Dart 端测量缓存（key 包含 fontSize）
     MeasureTextService.instance.configure(
       fontFamily: ReaderFont.family,
@@ -235,6 +359,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       sessionEpoch: _sessionEpoch,  // 复用已递增的 epoch
       configFingerprint: layoutFingerprint(),  // 使用更新后的 fingerprint
     );
+
+    _persistSettings(); // P1: 全部设置字段更新后写穿落库
 
     _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
 

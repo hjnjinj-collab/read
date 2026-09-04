@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/reader/presentation/pages/reader_page.dart';
 import 'package:file_picker/file_picker.dart';
 import 'core/database/app_database.dart';
+import 'core/database/app_settings_service.dart';
 import 'features/reader/presentation/providers/reader_provider.dart';
+import 'features/reader/presentation/providers/reader_settings.dart';
 import 'core/ffi/book_service.dart';
 import 'core/services/reader_font.dart';
 
@@ -19,7 +21,32 @@ void main() async {
   // assets/fonts/ 读），双引擎用同源字体 → 满足 M7 测量 / 绘制同源约束
   await ReaderFont.initialize();
 
-  runApp(const ProviderScope(child: MyApp()));
+  // P1 设置持久化（2026-09-04）：启动预加载设置快照——
+  // 单行 KV 查询 <10ms；ReaderNotifier 同步构造即用内存快照。
+  // db 实例经 ProviderScope override 注入，全局单例（避免多连接）。
+  final db = AppDatabase();
+  await AppSettingsService.instance.load(db);
+  final settings = ReaderSettings.tryParse(
+      AppSettingsService.instance.raw('reader'));
+
+  // 段落格式同步 Rust 全局——必须先于任何 openBook 排版（openBook 在
+  // 首帧 postFrame 之后，此处天然安全），杜绝 M9.2 类「Rust 已按默认
+  // 排版、Dart 却持旧值」的启动错位。失败不阻塞启动（后续 apply 再同步）。
+  try {
+    await BookService().setParagraphFormatSettings(
+      enableIndent: settings.enableIndent,
+      indentSizeChars: settings.indentSizeChars,
+      paragraphSpacingMultiplier: settings.paragraphSpacingMultiplier,
+      reParagraphMode: settings.reParagraphMode,
+      smartSplitThreshold: settings.smartSplitThreshold,
+      aggressiveSplitThreshold: settings.aggressiveSplitThreshold,
+    );
+  } catch (_) {}
+
+  runApp(ProviderScope(
+    overrides: [appDatabaseProvider.overrideWithValue(db)],
+    child: const MyApp(),
+  ));
 }
 
 /// 旧版 _loadSystemFont + ReaderFont.candidatePaths 已删除。
