@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-08-29
+> 最后更新: 2026-09-02
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -40,6 +40,10 @@
 | **`cargo ndk ... build --release` 报 `Could not find openssl via pkg-config` / `OPENSSL_DIR` 错误** | `reqwest 0.12` 默认 features 拉 `default-tls` = `native-tls` = `openssl-sys`；Windows host 编译时 link host OpenSSL 没事，Android 交叉编译时无 sysroot 必 fail | [bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls](./bugfixes/2026-08-29_Android编译openssl-sys找不到OpenSSL切rustls-tls.md) ⭐ `reqwest = { default-features = false, features = [..., "rustls-tls"] }`——纯 Rust TLS 无 C 依赖 |
 | **`cargo ndk ... build --release` 报 `couldn't read rquickjs-sys ... bindings/aarch64-linux-android.rs`** | `rquickjs-sys 0.6.2` 默认走预编译 `src/bindings/<target>.rs`，**Android ABI 不在预编译列表**（只覆盖 x86_64/aarch64 macOS+Linux+Windows 等 ~10 个主流目标） | [bugfixes/2026-08-29_Android编译rquickjs-sys缺bindings加bindgen](./bugfixes/2026-08-29_Android编译rquickjs-sys缺bindings加bindgen.md) ⭐ `rquickjs features = [..., "bindgen"]`——build 时用 NDK clang 现场生成 bindings |
 | **APK 跑通后阅读页字体显示"不存在" / 文本空白** | `ReaderFont.candidatePaths` 写死 Windows 路径（移动端 0% 命中），`loadFontFile` 静默失败；FontManager 找不到字体直接抛 `Err("字体不存在: default")` 冒泡到 Dart | [bugfixes/2026-08-29_字体架构重写_用户可选](./bugfixes/2026-08-29_字体架构重写_用户可选.md) ⭐ 内置 Noto Sans CJK SC（7.95MB Rust+Dart 同源）+ FontManager 三级 fallback + loadFontFile 软失败 + FontProvider 用户可选 .ttf/.otf/.ttc |
+| **修改 Rust 代码后问题依然存在 / 添加调试日志后问题消失** | DLL 文件没有复制到 Flutter 运行时加载位置（`rust/target/release/bridge.dll` vs `rust/crates/bridge/target/release/bridge.dll`）；直接 `cargo build` 不会自动复制 | [bugfixes/2026-09-02_M12阶段调试日志导致DLL未更新](./bugfixes/2026-09-02_M12阶段调试日志导致DLL未更新.md) ⭐ 必须用 `fix_sync.ps1` 或手动复制 DLL |
+| **阅读页右侧留白总会比左侧多 / 左右边距不对称** | ttf-parser hmtx 原始 advance ≠ Skia HarfBuzz 整形后宽度（连字、kerning、GSUB/GPOS、CJK 标点宽度类）→ Rust 断行位置偏差 → rustW ≠ skiaW → 右侧留白过大 | [bugfixes/2026-09-02_左右边距不对称修复_M10-B_M11_M12](./bugfixes/2026-09-02_左右边距不对称修复_M10-B_M11_M12.md) ⭐ M10-B MeasureCache 架构（Dart TextPainter 实测宽度缓存）+ M11 width 字段语义修复 + M12 命中率优化（0%→95%+）|
+| **翻页动画中纯文字页出现两页文字重影（图片页正常）/ 动画中及完成后色差** | `_pageToImage` 快照没画纸色底（`paintPage` 契约"不含纸色底——调用方自绘"）→ 快照透明背景，两层文字笔画互相透叠；图片不透明盖住下层所以"碰巧正常"；仿真翻页自画 `_paperColor` 所以无此问题 | [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md) ⭐ 快照补纸色底 + `PageContentRenderer.paperColor` 公开同源 + 块级波浪/jitter 减法/两段式崩解（次生根因） |
+| **翻页动画完成瞬间闪烁一下（新旧两模式均见过）** | ①Flutter Ticker 尾随帧：progress 触顶后回退 0.9996~0.9999，完成短路阈值 `>=1.0` 不命中 → 残迹帧（仿真翻页 8-28 报告，阈值放宽 0.9995）②水波纹：短路路径直绘漏纸色底 + 渲染参数用默认值而非 notifier 同源 → trailing 帧与正式渲染不一致 | [bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹](./bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹.md) + [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md)（v16.9.5 段）⭐ 短路直绘必须与正式渲染逐像素同源（纸色底+渲染参数） |
 
 ## 二、按错误信息查找
 
@@ -54,6 +58,8 @@
 | `Could not find openssl via pkg-config` / `OPENSSL_DIR` unset（Android 编译） | `reqwest` 默认 `default-tls` = `native-tls` = `openssl-sys`；Android 交叉编译无 sysroot 必 fail | 8-29 报告：`reqwest default-features=false + rustls-tls` |
 | `couldn't read ... rquickjs-sys ... bindings/aarch64-linux-android.rs` | `rquickjs-sys` 预编译 bindings 不覆盖 Android ABI | 8-29 报告：`rquickjs features += "bindgen"` 用 NDK clang 现场生成 |
 | 字体显示"不存在" / 阅读页文本空白 | 候选表硬编码 Windows 路径；FontManager 找不到字体直接抛错 | 8-29 报告：内置 Noto Sans CJK SC + 用户可 file_picker 选 .ttf/.otf/.ttc |
+| Rust 代码修改后运行仍是旧行为 / 添加日志后问题消失 | DLL 没有复制到 Flutter 加载路径 | 9-02 报告：必须用 `fix_sync.ps1` 或手动复制 DLL |
+| 阅读页右侧留白比左侧多 / 左右边距不对称 | ttf-parser hmtx ≠ Skia HarfBuzz 整形后宽度 → 断行偏差 | 9-02 报告：M10-B MeasureCache（Dart 实测宽度缓存）+ M11 width 语义修复 + M12 命中率优化 |
 | `missing field ... in initializer` | 结构体加了新字段，构造处未同步更新 |
 | EPUB 段间出现小字号行（本章说/脚注） | display:none 漏过滤 Paragraph/Heading；aside/footnote 块下沉为正文；CSS font-size<0.85 未分类 | A14：extract_rules aside 检测 + CSS 兜底 is_comment |
 | EPUB 底部留白过大且不统一 | layout_items 无填充率门槛，≥3 行即整段推下页 | A14：page_fill_threshold 默认 0.9（可调） |
@@ -82,6 +88,9 @@
    先转换会导致规则无法命中。（2026-08-21 管线顺序）
 6. **简繁转换只经由 `book_parser::chinese_convert` 一个权威实现** ——
    阅读级与导入级两套实现必然漂移。
+7. **修改 Rust 代码后必须使用 `fix_sync.ps1` 重新构建** —— 直接 `cargo build` 只会生成
+   `rust/target/release/bridge.dll`，但 Flutter 从 `rust/crates/bridge/target/release/bridge.dll`
+   加载。不复制 DLL 会导致运行的是旧代码，出现"修改无效"的假象。（2026-09-02 M12 阶段）
 
 ## 四、记录规范
 

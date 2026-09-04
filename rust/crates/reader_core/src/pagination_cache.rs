@@ -14,7 +14,8 @@ pub const LAYOUT_REVISION: u32 = 1;
 ///
 /// 决策记录：LRU 容量为主淘汰，TTL 仅兜底极端陈旧条目
 /// （如小书章节长期驻留后的陈旧结果）。
-pub const ENTRY_TTL: Duration = Duration::from_secs(300);
+/// 2026-09-02 优化：300s → 900s，避免长时间静读后翻页 cache miss。
+pub const ENTRY_TTL: Duration = Duration::from_secs(900);
 use layout_engine::{Page, LayoutConfig};
 
 /// 分页缓存键（唯一标识一次排版）

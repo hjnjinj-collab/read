@@ -1,0 +1,74 @@
+﻿=================================================================
+M12 修复总结 - 左右边距不对称问题
+=================================================================
+
+## 已完成的修复
+
+### 问题诊断
+1. **根本原因**：Dart 端用 text.characters (grapheme clusters) 生成前缀子串
+   - Rust 查询：text[..mid] → UTF-8 字节边界切分
+   - Dart 喂入：text.characters 迭代 → grapheme clusters 边界切分
+   - **两者边界不一致 → cache key 不匹配 → miss**
+
+2. **症状**：
+   - 纯中文行：rustW = skiaW ✓（因为中文字符在两种切分下一致）
+   - 含英文/标点行：rustW > skiaW（miss cache，用 ttf-parser 估算）
+   - 偏差常为 11.2px 或其倍数
+
+### 代码修改
+
+**文件 1**: lib/core/services/measure_text_service.dart
+- 修改 feedPageTextsWithPrefixes 方法
+- 原方案：text.characters 迭代 → StringBuffer 累积
+- 新方案：text.substring(0, i) 遍历（跳过 surrogate pair 后半部分）
+- 对齐 Rust 的 UTF-8 char boundary 切分
+
+**文件 2**: lib/features/reader/presentation/widgets/reader_page_widget.dart
+- 移除 500ms 节流逻辑
+- paint 后立即调用 flushToRust()（异步但立即触发）
+- 减少 cache 延迟生效的概率
+
+## 测试步骤
+
+### 1. 启动应用
+flutter run -d windows
+
+### 2. 打开书籍，观察首页
+- 左右边距是否对称
+- 文字是否靠右偏移
+
+### 3. 翻页 5-10 页，查看控制台日志
+搜索 "paint.geometry.first"，检查每行的 rustW vs skiaW：
+
+期望结果：
+[READER] paint.geometry.first pageId=XXX paintLines=x=20.0 chars=15 skiaW=258.8 rustW=260.0 rightEdge=...
+                                                                      ^^^^      ^^^^
+                                                            偏差应 ≤ 2px（之前是 11.2px）
+
+### 4. 关键验证点
+- ✓ 纯中文行：rustW = skiaW（应该保持之前的完美匹配）
+- ✓ 含英文/标点行：rustW ≈ skiaW（偏差从 11.2px 降到 <2px）
+- ✓ 右侧留白 ≈ 左侧留白（视觉上对称）
+
+## 如果问题仍存在
+
+### 诊断步骤
+1. 检查 cache 统计：
+   在 Dart 端调用 rust_api.getMeasureCacheStats()
+   查看 len/capacity（应该 >0，说明有数据写入）
+
+2. 添加调试日志：
+   在 measure_text_service.dart 的 measure() 方法中加：
+   print('MEASURE key=\|\|\ len=\ width=\');
+
+3. 验证 Rust 端查询：
+   在 layout_engine/src/lib.rs 的 measure_text_width 中加：
+   eprintln!(\"RUST query font={} size={} text={:?} len={}\", font_name, font_size, text, text.len());
+
+### 如果偏差依然是 11.2px 倍数
+说明 cache 仍然 miss，可能是：
+- FFI 异步延迟（flush 未完成就开始 layout）
+- font_size key 不匹配（检查 Dart/Rust 两端的 fontSize 参数）
+- text 内容本身不一致（检查是否有 trim/normalize 差异）
+
+=================================================================

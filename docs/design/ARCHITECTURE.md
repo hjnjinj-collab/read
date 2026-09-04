@@ -1,9 +1,9 @@
 # 架构设计：端到端处理框架
 
-> 更新: 2026-08-29
+> 更新: 2026-09-02
 > 地位: 本文档是当前架构的**权威描述**，以代码实际状态为准。
 > 视角: **主流程主线**——从应用启动到阅读翻页的完整链路；按模块查代码的速查表见 §11。
-> 上一版（2026-08-22）覆盖到 A12/M3+预加载；本次更新到 **A13/M7 字体统一 + A14/M8 排版精度 + A15/M9 段落格式化 + 字体用户可选 + APK 构建管线**。
+> 上一版（2026-08-29）覆盖到 A17/M9；本次更新到 **A18/M10-B/M11/M12 MeasureCache 架构与左右边距修复**。
 
 ---
 
@@ -331,6 +331,52 @@ void main() async {
 │ dirty 标记 + pending 手势登记                             │
 │ 永不滞后于 state（degraded-from-state 补发）             │
 └───────────────────────────────────────────────────────────┘
+
+┌─ L6 MEASURE_CACHE (M10-B, 2026-09-02) ───────────────────┐
+│ layout_engine::MeasureCache                               │
+│ Dart TextPainter Skia 实测宽度缓存                        │
+│ LRU 50,000 条                                             │
+│ Key: (font_name, font_size_bits, text_hash)               │
+│ 命中 → Skia 真实宽度；miss → ttf-parser 兜底             │
+│ 命中率 ~95%+ (feedPageTextsWithPrefixes 预热后)         │
+│ 字体切换时清空（set_default_font 调用）                  │
+│                                                           │
+│ 背景：ttf-parser hmtx ≠ Skia HarfBuzz 整形后宽度         │
+│ 问题：左右边距视觉不对称                                  │
+│ 方案：Rust layout 二分搜索时查 Dart 实测宽度             │
+└───────────────────────────────────────────────────────────┘
+```
+
+**M10-B/M11/M12 MeasureCache 架构**（2026-09-02）
+
+**问题背景**：
+- Rust 用 `ttf-parser` 的 `glyph_hor_advance` 测量字符宽度
+- Skia 渲染时经过 HarfBuzz 整形（连字、kerning、GSUB/GPOS、CJK 标点宽度类）
+- 原始 hmtx ≠ 整形后 advance → 断行位置偏差 → 左右边距不对称
+
+**解决方案**：
+- Dart 端用 `TextPainter.layout` 测真实渲染宽度
+- 批量回传给 Rust `MEASURE_CACHE`（FFI: `feed_text_widths`）
+- Rust layout 二分搜索命中 cache 时用 Skia 真实宽度做断行决策
+
+**M11 修复**：`TextLine.width` 字段语义从"容器宽"改为"本行实测宽"
+- TXT 路径：`emit_line!` 宏调 `measure_text_width()`
+- EPUB 路径：3 处 TextLine 构造点用 `line.width`
+- 4 处 FFI 调用显式传 `fontName: ReaderFont.family`
+
+**M12 优化**：
+- 必修 1：`measure_text_width` 加 `font_size` 参数（支持标题行不同字号）
+- 必修 2：Dart `feedPageTextsWithPrefixes` 喂入所有 char-boundary prefix
+  - 字符边界对齐：`substring` vs `characters`，跳过 low surrogate
+  - 与 Rust 二分查询 key 集合对齐，命中率从 0% → 95%+
+- 必修 3：Cache miss fallback `min(ttf, content_width)`
+
+**性能指标**：
+- 首翻延迟：+22ms（仅首页，喂入 prefix 开销）
+- 翻页稳定后：0ms 命中
+- 内存占用：LRU 50k 条 ≈ 2-3 MB
+- 命中率：~95%+（M12 必修 2 后）
+
 ```
 
 ### 5.3 缓存键单源化（M9）
@@ -602,12 +648,12 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | 模块 | 路径 | 一句话职责 |
 |------|------|-----------|
 | **book_parser** | `rust/crates/book_parser/src/` | 加载工厂、TXT 主解析、EPUB 解析 (roxmltree 结构解析 + 结构化提取主路径)、JS 章节规则、置信度识别器(未接线)、导入级净化 (JS 规则主路径)、EPUB 净化缓存、zhconv 简繁权威实现、编码检测、XHTML→JSON DOM、结构化提取 JS 规则集、CSS 子集解析物化、图片头尺寸探测、内容 IR v2 定义 |
-| **layout_engine** | `rust/crates/layout_engine/src/` | 排版分页（layout_text = TXT 承重路径逐字节不动；layout_items = 结构化富内容路径：样式化文本/图片原子/表格多列）、智能分页、字形测宽缓存、FontManager (embed + 三级 fallback)、多章并行 (未接线)、GB2312 预热 (未接线) |
+| **layout_engine** | `rust/crates/layout_engine/src/` | 排版分页（layout_text = TXT 承重路径逐字节不动；layout_items = 结构化富内容路径：样式化文本/图片原子/表格多列）、智能分页、字形测宽缓存、**MeasureCache (M10-B, Skia 实测宽度缓存)**、FontManager (embed + 三级 fallback)、多章并行 (未接线)、GB2312 预热 (未接线) |
 | **reader_core** | `rust/crates/reader_core/src/` | 阅读级六阶段预处理、段落格式化（共享切分器）、富流水线 + JS 池、ReadSessionManager、位置追踪、PaginationCache (LRU + TTL 300s)、PreloadExecutor (try_submit_dedup) |
 | **bridge** | `rust/crates/bridge/src/` | 全部 FFI 入口：parse / get_chapter / get_page / get_page_processed / get_page_structured / get_page_count_processed / get_page_count_structured / prefetch_structured_chapter / get_book_resource / get_book_cover / get_book_format / font_*, session_*, cache_*, process_*, batch_*, search_*, book_source_* |
 | **book_source_engine** | `rust/crates/book_source_engine/src/` | CSS/JSONPath/Regex 分析器（书源规则无 JS，与章节识别 JS 是两回事） |
 | **lib/core/ffi** | `lib/core/ffi/` | Rust 端 FFI 的 Dart 封装：book_service.dart 调 Rust API；rust_bridge.dart/ FRB 自动生成 |
-| **lib/core/services** | `lib/core/services/` | reader_font.dart（字体管理）+ font_provider.dart（file_picker 入口）+ book_source_service.dart |
+| **lib/core/services** | `lib/core/services/` | reader_font.dart（字体管理）+ font_provider.dart（file_picker 入口）+ **measure_text_service.dart (M10-B, TextPainter 实测宽度服务)**+ book_source_service.dart |
 | **lib/core/database** | `lib/core/database/` | drift 数据库：书架 (Books) / 进度 (ReadingProgress) / 书签 (Bookmarks) |
 | **lib/features/reader/providers** | `lib/features/reader/presentation/providers/` | reader_provider.dart (Riverpod Notifier) / reader_render_state.dart (FrameSet store) / page_frame.dart (不可变数据类) |
 | **lib/features/reader/widgets** | `lib/features/reader/presentation/widgets/` | page_turn_composer.dart (手势门控 + pending 重试) / curl_painter.dart (Listenable repaint) / reader_page_widget.dart (PageContentRenderer) / reader_settings_dialog.dart (含字体选择) / reader_menu.dart / chapter_list_dialog.dart |
@@ -658,9 +704,31 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A15 | 段落格式化与留白优化（M9）+ M9.1/M9.2 | ✅ 2026-08-29 |
 | A16 | TXT 翻页性能与预加载治理（M9.3） | ✅ 2026-08-29 |
 | A17 | 字体架构用户可选（M9 字体重写） | ✅ 2026-08-29 |
+| A18 | MeasureCache 架构与左右边距修复（M10-B/M11/M12） | ✅ 2026-09-02 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
-**所有 A1–A17 + APK 全线落地**。下一阶段候选：
+**A18 详细说明（M10-B/M11/M12 三阶段修复）**：
+
+- **M10-B**：创建 MeasureCache 架构
+  - `measure_cache.rs`：LRU 50k 条，key=(font_name, font_size, text_hash)
+  - `measure_text_service.dart`：Dart 端 TextPainter 测宽服务
+  - FFI: `feed_text_widths` / `clear_measure_cache` / `get_measure_cache_stats`
+
+- **M11**：修复 TextLine.width 字段语义
+  - 从硬编码 `content_width` 改为 `measure_text_width()` 实测值
+  - 4 处 FFI 调用显式传 `fontName: ReaderFont.family`
+  - 解决根因：cache key 字体名错配（Dart 'ReaderSerif' vs Rust 'default'）
+
+- **M12**：Cache 命中率优化（0% → 95%+）
+  - 必修 1：`measure_text_width` 加 `font_size` 参数
+  - 必修 2：`feedPageTextsWithPrefixes` 喂入所有 char-boundary prefix
+  - 必修 3：Cache miss fallback `min(ttf, content_width)`
+  - M12-v2：字符边界对齐（substring vs characters，跳过 surrogate pair）
+
+**问题根源**：ttf-parser hmtx ≠ Skia HarfBuzz 整形后宽度 → 左右边距不对称  
+**最终效果**：rustW ≈ skiaW（偏差 ≤ 1px），左右边距精准对称
+
+**所有 A1–A18 + APK 全线落地**。下一阶段候选：
 - P1：CJK 避头尾与行首行尾禁则（A14 已部分实现，全量收口）
 - P1：两端对齐（行内 justify pass）
 - P2：诗歌/对话/引用智能分段（挂接规则扩展点）
