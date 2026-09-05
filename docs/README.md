@@ -10,6 +10,7 @@
 | 文档 | 说明 |
 |------|------|
 | [../AGENTS.md](../AGENTS.md) | **开发者指南（必读）**：构建步骤、开发命令、架构、关键注意事项 |
+| [../CHANGELOG.md](../CHANGELOG.md) | **变更日志**：版本历史与功能变更记录（遵循 Keep a Changelog 格式） |
 | [BUGFIX_INDEX.md](./BUGFIX_INDEX.md) | **Bug 快速查找索引（遇到问题先看这里）**：按症状/错误信息定位根因 |
 | [BUG_FIXES.md](./BUG_FIXES.md) | Bug 修复总记录：UTF-8 边界 panic、构建问题、已知问题 |
 | [bugfixes/](./bugfixes/) | 单次问题的完整分析报告（按日期命名），含章节边界系列修复的最终结论 |
