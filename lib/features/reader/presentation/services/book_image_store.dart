@@ -51,6 +51,18 @@ class BookImageStore {
   final Map<String, ui.Image> _cache = {};
   final Set<String> _loading = {};
 
+  /// A28 修复：按 key 挂起的重绘回调多播。
+  /// ensureLoaded 命中 _loading 幂等短路时不再丢弃 onReady——预热路径
+  /// （prewarmManifest 空回调）必然先于 paint 端发起加载，旧实现下 paint
+  /// 端的真实重绘回调必输竞争被丢弃 → 图片就绪后静态页永不重绘。
+  /// 解码终态（成功/失败）时全部触发并清理。
+  final Map<String, Set<VoidCallback>> _pendingCallbacks = {};
+
+  /// A28 新增：全局图片就绪信号——任何 href 从非 ready → ready 转换时自增。
+  /// composer 快照层监听此信号做「含占位框快照」的失效重建。
+  /// 失败不自增（失败 ≠ 就绪）；单调递增，bind/clear 不重置。
+  final ValueNotifier<int> imageReadyTick = ValueNotifier<int>(0);
+
   /// 失败计数与退避窗口：failed 不再是永久终态，按次数有限重试
   /// （一次瞬时 FFI/解码失败 = 永久灰块的根因修复）。
   /// 超过 [_maxFailureAttempts] 后回到稳定 failed：恒画占位，直到 bind/clear。
@@ -127,12 +139,23 @@ class BookImageStore {
   /// 状态查询别名，避免调用方需要依赖内部缓存结构。
   BookImageState? status(String resourceHref) => state(resourceHref);
 
-  /// 异步加载并解码；完成后经 [onReady] 通知重绘（幂等：进行中不重复发起）
+  /// 异步加载并解码；完成后经 [onReady] 通知重绘（幂等：进行中不重复发起）。
+  ///
+  /// A28 修复：命中进行中（_loading）时 onReady 不再被丢弃，而是挂入
+  /// [_pendingCallbacks] 多播——解码终态时全部触发。缓存已命中（ready）
+  /// 时无需回调：调用方 paint 端 get() 命中就不会走到 ensureLoaded。
   Future<void> ensureLoaded(String resourceHref, VoidCallback onReady) async {
     final key = _key(resourceHref);
-    if (_cache.containsKey(key) || _loading.contains(key)) {
-      // 缓存/进行中命中：无需新请求（miss 由 image.request 表达）
+    if (_cache.containsKey(key)) {
+      // 缓存命中：无需新请求（miss 由 image.request 表达）
       readerTrace('image.hit', {'href': resourceHref, 'epoch': _epoch});
+      return;
+    }
+    if (_loading.contains(key)) {
+      // A28：进行中命中——挂多播回调而非丢弃（预热先行的场景下，
+      // paint 端真实重绘回调靠这里得以保留）
+      readerTrace('image.hit', {'href': resourceHref, 'epoch': _epoch});
+      _pendingCallbacks.putIfAbsent(key, () => <VoidCallback>{}).add(onReady);
       return;
     }
     // 稳定失败终态：占位恒定，不再发起请求
@@ -183,7 +206,11 @@ class BookImageStore {
           'image.ready',
           {'href': resourceHref, 'epoch': requestEpoch},
         );
+        // A28：先升全局就绪信号（composer 快照失效重建依赖此信号），
+        // 再通知发起方与多播等待方（paint 端下一帧重绘显示图片）
+        imageReadyTick.value++;
         onReady();
+        _notifyPending(key);
       });
     } catch (_) {
       if (requestEpoch == _epoch && bookId == _bookId) {
@@ -201,6 +228,9 @@ class BookImageStore {
           'epoch': requestEpoch,
           'attempts': attempts,
         });
+        // A28：失败也通知多播等待方（不自增 imageReadyTick——失败 ≠ 就绪），
+        // 让挂着重绘回调的页面立即重绘出 failed 占位（×），而非停在灰块
+        _notifyPending(key);
       }
     } finally {
       // 不要移除新 epoch 对同名资源发起的请求。
@@ -311,8 +341,19 @@ class BookImageStore {
     _failureCounts.clear();
     _retryNotBefore.clear();
     _pinned.clear();
+    // A28：旧书的多播回调全部作废（回调闭包持有旧页引用，新书不得触发）
+    _pendingCallbacks.clear();
     _bookId = null;
     _service = null;
+  }
+
+  /// A28：触发并清理某 key 的全部挂起回调（多播，成功/失败共用）。
+  void _notifyPending(String key) {
+    final callbacks = _pendingCallbacks.remove(key);
+    if (callbacks == null) return;
+    for (final cb in callbacks) {
+      cb();
+    }
   }
 
   String _key(String resourceHref) => '$_bookId|$resourceHref';

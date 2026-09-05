@@ -957,7 +957,39 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   <20ms；10 图页加载 5 轮批次 ~500ms → 2-3 轮 ~200ms。调优入口与真机验证
   清单见 `docs/design/IMAGE_LOADING_PERFORMANCE.md`。
 
-**所有 A1–A27 + APK 全线落地**。下一阶段候选：
+**A28 详细说明（图片就绪重绘修复 + 快照完整性失效机制，2026-09-06）**：
+
+- **背景（A27 真机验证反馈）**：①图片就绪后页面不重绘，需翻页才显示；
+  ②含占位框的陈旧快照被翻页动画复用。用户定案方向：**不用"等待"延迟
+  动画，用"失效重建"提高快照命中率**——空间代价（LRU 8 张快照）必须
+  兑换为完整快照命中。
+- **根因一（重绘断裂）**：`BookImageStore.ensureLoaded` 幂等短路丢弃
+  onReady——key 已在 `_loading` 时立即 return。预热路径（prewarmManifest
+  空回调）必然先于 paint 端发起加载 → paint 端真实重绘回调必输竞争被
+  丢弃 → 解码完成只触发空回调 → 静态页无下一帧。Widget 侧 repaint 链
+  （`_repaintTick` ValueNotifier → PagePainter repaint 参数）本身闭合。
+- **修复一（多播回调）**：`_pendingCallbacks: Map<String, Set<VoidCallback>>`
+  ——命中 `_loading` 时挂入集合而非丢弃；解码终态（成功/失败）全部触发
+  并清理；成功同时自增全局 `imageReadyTick`。效果：图片就绪 → 下一帧
+  自动重绘（用户无操作也推送）；curl/scroll 直绘路径同步受益。
+- **根因二（陈旧快照）**：快照键 `_snapshotKey` 不含图片状态分量、无
+  主动失效 API、`_pageToImage` 的 onImageNeeded 传空回调 → 占位快照
+  入库后永久复用；`_startResourceMonitoring` 就绪重发布后重预热仍命中
+  缓存里的陈旧快照（闭环断裂）。
+- **修复二（依赖旁表 + 失效重建）**：①`_snapshotPendingDeps` 旁表登记
+  快照生成时未就绪的 href 集合（`_ensureSnapshotFor` 入库时计算）；②
+  composer 监听 `imageReadyTick` → `_onImagesReady`：动画活跃时挂起
+  （folding 纹理使用中禁 dispose——崩溃红线），复位点 `_resetState`
+  drain；空闲时清除依赖已就绪的快照（先 remove 后 dispose）并重预热
+  当前页；③`_snapshotFor` 防御式自愈：命中但旁表依赖已就绪 → 视为
+  陈旧丢弃重生成（通知丢失也能自愈）。
+- **教训**：①**"幂等短路丢弃回调"是多播缺失的通病**——单播归属"发起
+  竞争的赢家"，任何先行的空回调路径都会吞掉后续真实回调；②**缓存键
+  遗漏内容状态分量时，必须配主动失效通道**——仅靠键变化自然失效，
+  状态转换（图片就绪）永远不会触发重建；③快照失效必须尊重纹理使用
+  中禁 dispose 红线（挂起到复位点，对齐快照串行链/排队机制先例）。
+
+**所有 A1–A28 + APK 全线落地**。下一阶段候选：
 - P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
 - P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）

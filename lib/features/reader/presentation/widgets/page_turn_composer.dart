@@ -193,6 +193,17 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   final Map<String, ui.Image> _snapshotCache = <String, ui.Image>{};
   static const int _snapshotCacheCapacity = 8;
 
+  /// A28：快照生成时未就绪的图片依赖旁表（snapshotKey → pending hrefs）。
+  /// 快照键不含图片状态分量——含占位框的快照若不主动失效会永久复用。
+  /// 本表登记「生成时画了占位框」的快照；图片就绪信号到达时清除重建，
+  /// 保证 _snapshotFor 命中的快照内容完整（空间代价兑换完整快照命中）。
+  final Map<String, Set<String>> _snapshotPendingDeps =
+      <String, Set<String>>{};
+
+  /// A28：动画活跃期间挂起的快照失效——folding 层快照正在被 painter
+  /// 使用，禁中途 dispose（崩溃红线）；延后到 _resetState 复位点处理。
+  bool _snapshotInvalidationPending = false;
+
   /// 2026-09-04 快照生成串行链：所有 _pageToImage 调用经 [_serializeSnapshot]
   /// 排队执行——publish 触发的 _prewarmAllPageImages 与翻页启动的即时生成
   /// 可能并发，串行化消除「并发写同一缓存字段 / 先 dispose 后赋值」窗口
@@ -218,6 +229,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     
     // FrameSet 发布监听：首次真实订阅者。帧未就绪时挂起的手势在此重试。
     store.addModelListener(_onModelPublished);
+
+    // A28：监听全局图片就绪信号——含占位框快照的失效重建入口
+    BookImageStore.instance.imageReadyTick.addListener(_onImagesReady);
   }
   
   /// 加载水波纹 shaders（v16 新增 ripple_shredder）+ 坍塌 shader（M3）
@@ -338,12 +352,35 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         '|${PageContentRenderer.theme.name}';
   }
 
+  /// 计算页面快照生成时仍未就绪（未解码完成）的图片依赖集合（A28）
+  Set<String> _pendingImageHrefs(PageInfo page) {
+    return ResourceManifest.of(page)
+        .hrefs
+        .where((h) => BookImageStore.instance.state(h) != BookImageState.ready)
+        .toSet();
+  }
+
   /// 取页面快照（LRU touch：命中即刷新访问序，动画在用的纹理不会被淘汰）
   ui.Image? _snapshotFor(PageInfo? page) {
     if (page == null) return null;
     final key = _snapshotKey(page);
     final img = _snapshotCache.remove(key);
     if (img != null) {
+      // A28 防御式自愈：命中快照生成时含占位依赖，且其中有图片现已就绪
+      // → 陈旧快照，丢弃返回 null（调用方走降级/重新生成；失效通知
+      // 若丢失，这里兜底保证永不复用可自愈的陈旧快照）。
+      // 动画活跃时不动（folding 纹理使用中），延后到复位点处理。
+      final pending = _snapshotPendingDeps[key];
+      if (pending != null && !_isActive) {
+        final stale = pending.any(
+          (h) => BookImageStore.instance.state(h) == BookImageState.ready,
+        );
+        if (stale) {
+          img.dispose();
+          _snapshotPendingDeps.remove(key);
+          return null;
+        }
+      }
       _snapshotCache[key] = img;
     }
     return img;
@@ -365,11 +402,19 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       return;
     }
     _snapshotCache[key] = img;
+    // A28：登记占位依赖——快照生成时未就绪的图片，就绪后触发失效重建
+    final pending = _pendingImageHrefs(page);
+    if (pending.isEmpty) {
+      _snapshotPendingDeps.remove(key);
+    } else {
+      _snapshotPendingDeps[key] = pending;
+    }
     // LRU 淘汰：容量上限，最旧访问序先出（动画在用的纹理每次 build
     // 都被 _snapshotFor touch，恒为最新，不会被淘汰）
     while (_snapshotCache.length > _snapshotCacheCapacity) {
       final oldestKey = _snapshotCache.keys.first;
       _snapshotCache.remove(oldestKey)?.dispose();
+      _snapshotPendingDeps.remove(oldestKey);
     }
   }
 
@@ -417,9 +462,54 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     if (mounted && !existed) setState(() {});
   }
 
+  /// A28：图片就绪信号回调——清除含占位框的陈旧快照并重建。
+  ///
+  /// 快照键不含图片状态，占位快照若不主动清除会永久复用（真机实测
+  /// 「翻页动画折叠层灰框」根因）。本方法使依赖已部分就绪的快照失效，
+  /// 重建后 _snapshotFor 命中的即完整快照——空间代价兑换完整命中。
+  void _onImagesReady() {
+    if (!mounted) return;
+    // 动画活跃（含控制器未停的收尾窗口）：folding 层快照使用中，
+    // 禁 dispose（崩溃红线）——挂起到 _resetState 复位点处理
+    if (_isActive || _turnController?.isAnimating == true) {
+      _snapshotInvalidationPending = true;
+      return;
+    }
+    _snapshotInvalidationPending = true;
+    _drainSnapshotInvalidation();
+  }
+
+  /// A28：执行挂起的快照失效——清除依赖已就绪的占位快照 + 重预热当前页
+  void _drainSnapshotInvalidation() {
+    if (!mounted || !_snapshotInvalidationPending) return;
+    _snapshotInvalidationPending = false;
+    if (_snapshotPendingDeps.isEmpty) return;
+    var invalidated = 0;
+    for (final key in _snapshotPendingDeps.keys.toList(growable: false)) {
+      final pending = _snapshotPendingDeps[key];
+      if (pending == null) continue;
+      final stale = pending.any(
+        (h) => BookImageStore.instance.state(h) == BookImageState.ready,
+      );
+      if (!stale) continue;
+      // 先 remove 后 dispose（纹理生命周期纪律）
+      _snapshotCache.remove(key)?.dispose();
+      _snapshotPendingDeps.remove(key);
+      invalidated++;
+    }
+    if (invalidated > 0) {
+      readerTrace('snapshot.invalidate', {'count': invalidated});
+      // 当前页快照被清除 → 重预热重建完整快照（经串行链）
+      _prewarmAllPageImages();
+    }
+  }
+
   @override
   void dispose() {
     _store?.removeModelListener(_onModelPublished);
+    // A28：注销图片就绪监听 + 清空依赖旁表
+    BookImageStore.instance.imageReadyTick.removeListener(_onImagesReady);
+    _snapshotPendingDeps.clear();
     _pendingTimer?.cancel();
     _settledSafetyTimer?.cancel();
     _imageTick.dispose();
@@ -1188,6 +1278,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 2026-09-04: 复位即本轮翻页生命周期结束，丢弃挂起的 drag end
     //（快照门控窗口内抬起、但随后走入收场/复位路径的情形）
     _pendingDragEndShouldTurn = null;
+    // A28：动画结束复位点——处理动画期间挂起的快照失效
+    _drainSnapshotInvalidation();
     if (scheduleRebuild && mounted) setState(() {});
   }
 

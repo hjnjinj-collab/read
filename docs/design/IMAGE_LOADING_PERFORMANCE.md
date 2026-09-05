@@ -92,8 +92,21 @@ PageContentRenderer.paintPage（canvas.drawImageRect GPU 绘制
 
 **测量方式**：`readerTrace` 标签——`image.bind`（换书绑定）、`image.hit`（缓存命中）、`image.ready`（解码完成）；首屏延迟对照 `_prewarmCurrentPageImages` 启动/完成时间戳。
 
-## 6. 暂缓与后续候选
+## 6. A28 增补：图片就绪重绘 + 快照失效重建（2026-09-06，真机验证反馈）
 
-- **快照等待图片（原任务 1.4）**：暂缓。若真机实测翻页快照仍含占位框，在 `_pageToImage` 生成前对当前页图片加带超时（~200ms）的就绪等待，代价是动画启动延迟。
+**真机实测暴露两个 A27 遗留问题**：①图片就绪后页面不重绘（翻页才显示）；②含占位框的陈旧快照被翻页动画复用。
+
+**修复一（重绘管线，`book_image_store.dart`）**：`ensureLoaded` 幂等短路曾丢弃 onReady——预热路径（空回调）先行发起加载 → paint 端真实重绘回调必输竞争。修复 = `_pendingCallbacks` 按 key 多播：命中 `_loading` 时挂入集合，解码终态（成功/失败）全部触发；成功自增全局 `imageReadyTick`。图片就绪 → 下一帧自动重绘。
+
+**修复二（快照完整性，`page_turn_composer.dart`）**：快照键不含图片状态 → 占位快照永久复用。修复 = 依赖旁表 `_snapshotPendingDeps`（snapshotKey → 生成时未就绪 hrefs）+ 监听 `imageReadyTick`：
+- 动画活跃 → 挂起（folding 纹理使用中禁 dispose），`_resetState` 复位点 drain
+- 空闲 → 清除依赖已就绪的占位快照（先 remove 后 dispose）+ 重预热当前页
+- `_snapshotFor` 命中时防御式自愈：旁表依赖已就绪 → 视为陈旧丢弃重生成
+
+**设计定案（用户拍板）**：不用"等待"延迟动画启动，用"失效重建"——快照生成照旧（含占位框的临时快照服务当次动画），就绪后失效重建，保证此后 `_snapshotFor` 命中的全部是完整快照。LRU 8 张的空间代价兑换为完整快照零延迟命中。
+
+## 7. 后续候选
+
+- **动画中图片冻结（观察项）**：CurlPainter 动画期间 onImageNeeded 走 repaintNotifier 分支，`_imageTick` 自增不生效——动画几百 ms 内解码完成的图片等动画结束才出现。影响极小，观察后定。
 - **并发/容量微调**：依据真机内存与速度表现，按 §4 参数表调整。
 - **网络书籍图片**：当前链路仅覆盖本地 EPUB 资源，网络书源图片加载是独立课题。
