@@ -31,6 +31,7 @@
 | [DEEP_PREPROCESSING_OPTIMIZATION_TECHNICAL_DOC.md](./design/DEEP_PREPROCESSING_OPTIMIZATION_TECHNICAL_DOC.md) | reader_core/processing | 内容预处理流水线深度优化 |
 | [FLOW_1_5_SCHEDULER_INTEGRATION_DESIGN.md](./design/FLOW_1_5_SCHEDULER_INTEGRATION_DESIGN.md) | reader_core/scheduler | 调度器集成方案 |
 | [FLOW_2_CHAPTER_EXTRACTION_PLAN.md](./design/FLOW_2_CHAPTER_EXTRACTION_PLAN.md) | book_parser | 章节提取方案（JS 引擎识别 + 自定义规则） |
+| [IMAGE_LOADING_PERFORMANCE.md](./design/IMAGE_LOADING_PERFORMANCE.md) | reader 图片链路 | 图片加载性能优化报告（A27 三阶段：链路图、根因、调优参数表） |
 
 ## 归档（docs/archive/）
 

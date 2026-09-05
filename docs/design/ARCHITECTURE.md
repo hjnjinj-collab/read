@@ -926,7 +926,38 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 - **测试验证**：所有现有测试保持全绿（前瞻返回 None 时行为不变），锚点口径
   与 A25 一致（Image 不消耗 char_index，Table 消耗 chars）。
 
-**所有 A1–A26 + APK 全线落地**。下一阶段候选：
+**A27 详细说明（图片加载三阶段性能优化，2026-09-05）**：
+
+- **背景**：用户实测"进入书籍后图文混合页面图片出现比较晚"。explore-22/23
+  双代理并行调查锁定三大根因：①**无首屏预加载**——打开书籍只加载 PageInfo，
+  首次绘制触发懒加载（FFI 取字节 ~10-30ms + 解码 ~50-150ms）；②**并发限流
+  过严**——`BookImageStore._decodeGate = Semaphore(2)`，图片密集页 10 张图需
+  5 轮串行批次累积 500ms+；③**预热时机滞后**——仅在 FrameSet 发布/翻页提交
+  后触发，首屏无预热。Rust 侧 `ResourceCache` 字节缓存 + `get_book_resource`
+  快慢路径本已完备，瓶颈在 Dart 解码层与预热时机。
+- **阶段 1 快速见效（f2fb58f）**：①首屏预热——reader_provider 新增
+  `_prewarmCurrentPageImages()`，`_loadCurrentPage` 成功后 fire-and-forget
+  预热当前页图片（不阻塞 UI、不等待邻居页）；②解码并发 2→4（常量
+  `_maxConcurrentDecodes`）；③Rust `ResourceCache` 容量 50→150。
+- **阶段 2 智能预测（ce4a4c8）**：①翻页方向统计（`_lastTurnDirection` +
+  `_consecutiveTurns`，5s 窗口）+ 连续 ≥2 次同向翻页预热"下下页"；②
+  `STRUCTURED_PAGINATION_CACHE` 添加 TTL 900s（`StructuredCacheEntry` 时间戳包装，
+  与 TXT PAGINATION_CACHE 对齐），长时间静读后陈旧缓存自动失效。
+- **阶段 3 进度反馈（62712e0）**：占位框状态化 `_drawImagePlaceholder()`——
+  loading 画圆弧加载指示器 / failed 画 × 错误标记 / 未请求纯灰块，替代
+  无差别灰块，用户可区分"加载中"与"加载失败"。
+- **关键决策**：①预热恒 fire-and-forget，`ReaderNotifier` 是 Riverpod
+  Notifier 无 `notifyListeners()`，重绘由 `PageContentRenderer.ensureLoaded`
+  回调链自动驱动——预热层不主动触发重绘；②快照等待图片（原任务 1.4）**暂
+  缓**——首屏预热后翻页时图片大概率已在缓存，若真机实测快照仍含占位框再
+  评估（等待会延迟动画启动）；③**ZIP 池化评估后否决**——`EpubParser.archive`
+  （`Option<ZipArchive<File>>`）本就常驻整个书会话，不存在"频繁重开"，原计
+  划的池化前提不成立，阶段 3 改为进度反馈（用户收益更直接）。
+- **预期指标**：首屏图片延迟 200-500ms → <50ms；翻页图片延迟 100-300ms →
+  <20ms；10 图页加载 5 轮批次 ~500ms → 2-3 轮 ~200ms。调优入口与真机验证
+  清单见 `docs/design/IMAGE_LOADING_PERFORMANCE.md`。
+
+**所有 A1–A27 + APK 全线落地**。下一阶段候选：
 - P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
 - P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
