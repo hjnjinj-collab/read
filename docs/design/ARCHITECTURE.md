@@ -715,6 +715,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A21 | P3 行尾标点压缩悬挂：断行预算压缩 + 悬挂渲染 + 设置开关 | ✅ 2026-09-04 |
 | A22 | P4 性能激活（缓存共享/预热键对齐/孤寡行保护/SmartPaginator 退役）+ 智能分段扩展 | ✅ 2026-09-04 |
 | A23 | P3 动画域清理：v15 fallback 删除 + buildSimulation 家族/PageFlipSession/viewport 只写链清退 | ✅ 2026-09-05 |
+| A24 | 字体设置批次（字号/行距滑杆 + 字体选择持久化）+ EPUB 分页碎片化回归修复 | ✅ 2026-09-05 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -824,10 +825,32 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   不可改名/删值）。
 - **顺带修复**：page_turn_controller_test 红测试（断言模式数 2 → 4）。
 
-**所有 A1–A23 + APK 全线落地**。下一阶段候选：
+**A24 详细说明（字体设置批次 + 分页碎片化修复，2026-09-05，用户实测验收）**：
+
+- **字号/行距滑杆**：设置面板字体区两条滑杆（字号 12-32 / 行距 1.0-2.0），
+  `onChangedEnd` 才落地重排（防拖动逐帧全量排版）；`setLineHeight` 镜像
+  setFontSize 失效链（行距不改字形宽 → 测量缓存不动）。fontSize/lineHeight
+  的持久化 P1 已备，本批只补 UI 与 setter。
+- **字体选择持久化（补齐 M9 遗留"重启全丢"）**：选字体时文件复制到
+  `<appSupport>/fonts/`（file_picker 原路径不可依赖）+ 持久化 family/path；
+  启动按副本注入两侧引擎（P4 预热重建自动跟上）；副本丢失静默回退内置；
+  新增"恢复内置字体"入口。
+- **锚点红线（滑杆路径回归教训）**：任何排版参数变更的重载**必须带
+  `anchorCharOffset`**——裸页码在新排版下越界会打回 "Page not found"
+  错误页（滑杆路径曾回归，用户被迫重启）。定位链：anchor 优先
+  locate_page_for_offset（saturating 二分，恒返回合法下标），无锚点才用
+  请求页码。
+- **EPUB 分页碎片化回归（P5 孤寡行保护两连修）**：① cap 断页后必须重置
+  （旧 cap 按段落起点页剩余空间算，跨页后余行每 3~4 行被再断）；②
+  **浮点 ULP 漂移**——cap 用乘法、current_y 用逐行累加，整段恰好 fit 时
+  末行被 ULP 判越界甩到下页 → 修复 = cap 比较 +0.5px 容差。复现测试
+  （用户实测参数）留在套件防再犯。**教训：累加量与乘法量比较必须加容差，
+  "数学上相等"在 f32 累加链下不可靠**。
+
+**所有 A1–A24 + APK 全线落地**。下一阶段候选：
 - P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
 - P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
 - P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
 - P3：Android 真机验证动画体系（手势坐标/dpr/toImage 性能）
 - P4：首字下沉、竖排（远期）
-- 字体：可调字号/行距/字重的预览滑杆、字体持久化（重启自动恢复）
+- 字体：字重滑杆评估（A24 已落地字号/行距滑杆 + 字体持久化；内置 Noto Regular 非变量字体，多档字重意义有限）
