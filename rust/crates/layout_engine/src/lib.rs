@@ -818,10 +818,19 @@ impl LayoutEngine {
                         }
                     }
                     for (line_idx, line) in laid.into_iter().enumerate() {
-                        if current_y + line_h > para_bottom_limit
+                        // P4 修复：0.5px 容差——cap 用乘法（start + fit×line_h）、
+                        // current_y 用逐行累加，浮点 ULP 漂移会让「整段恰好 fit」
+                        // 的段落末行被判越界甩到下页（分页碎片化回归根因）
+                        if current_y + line_h > para_bottom_limit + 0.5
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
                         {
                             break_page!();
+                            // P4 修复（分页精度回归）：cap 是按段落起点页的
+                            // 剩余空间算的——断页后 current_y 已到新页顶部，
+                            // 旧 cap 会让余行每 3~4 行被再次断页（页碎片化）。
+                            // 对齐 TXT 语义：保护只作用于段落首个页面，
+                            // 断页后余行按新页普通流式排布。
+                            para_bottom_limit = bottom_limit;
                         }
                         // 本章说 + 隐藏模式：跳过绘制但照常累计锚点
                         if item.is_comment && !self.config.show_comments {
@@ -3372,6 +3381,96 @@ mod tests {
             counts,
             fit
         );
+    }
+
+    #[test]
+    fn styled_long_para_continuation_pages_stay_full() {
+        // P4 回归：孤寡行 cap 断页后必须重置——否则跨页余行每 3~4 行
+        // 被再次断页（页碎片化，用户实测分页精度回归）
+        let (engine, cfg) = create_test_engine();
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let usable = cfg.height - cfg.padding.top - cfg.padding.bottom;
+        let fit = ((usable + 0.01) / line_h) as usize; // 页可容行数
+        // 2.5 页容量的单段落（每行 17 字）
+        let para_lines = fit * 2 + (fit / 2);
+        let para = "甲".repeat(para_lines * 17);
+        let items = vec![LayoutItem::text(para)];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let counts: Vec<usize> = pages
+            .iter()
+            .map(|p| {
+                p.entries
+                    .iter()
+                    .filter(|e| matches!(e, PageEntry::Text(_)))
+                    .count()
+            })
+            .collect();
+        // 除末页外每页都应排满（首页可能因寡行保护少 1 行）
+        for (i, c) in counts.iter().enumerate() {
+            if i + 1 < counts.len() {
+                assert!(
+                    *c >= fit - 1,
+                    "第 {i} 页应接近排满（实得 {c}，fit={fit}，全量 {counts:?}）"
+                );
+            }
+        }
+        assert_eq!(
+            counts.iter().sum::<usize>(),
+            para_lines,
+            "总行数不得丢失"
+        );
+    }
+
+    #[test]
+    fn styled_epub_page_fill_under_user_params() {
+        // P4 回归：用户实测参数（fs=16/行距 1.4/399x854/fill 0.95）下每页应排满——
+        // 防「孤寡行 cap 浮点 ULP 漂移」碎片化回归（总行数不丢 + 单页填充）
+        let mut cfg = LayoutConfig::default();
+        cfg.width = 399.3333333333333;
+        cfg.height = 854.0;
+        cfg.font_size = 16.0;
+        cfg.line_height_multiplier = 1.4;
+        cfg.page_fill_threshold = 0.95;
+        let font_manager = {
+            let mut fm = FontManager::new();
+            for path in ["C:/Windows/Fonts/simsun.ttc", "C:/Windows/Fonts/msyh.ttc"] {
+                if std::path::Path::new(path).exists()
+                    && fm.load_font_from_file("TestFont".to_string(), path).is_ok()
+                {
+                    break;
+                }
+            }
+            fm
+        };
+        let engine = LayoutEngine::new(cfg.clone(), font_manager);
+
+        // 截图文案：短段与长段混合
+        let paras = [
+            "能听天由命。".to_string(),
+            "不过在烧窑之前，拉坯无疑又是重中之重，只不过陈平安被姚老头认为资质差，多是做些练泥的体力活，而且他多是只能在旁边仔细观摩，".to_string(),
+            "然后自己练泥，自己拉坯，寻找手感。".to_string(),
+            "隔壁院子响起柴门推开的声音，原来是宋集薪带着婢女稚圭从学塾返回，英俊少年一个冲刺，轻轻巧巧地翻身而上，动作熟练得像是做过千百遍。".to_string(),
+            "刘羡阳挠头，.o".to_string(),
+        ];
+        let items: Vec<LayoutItem> = paras
+            .iter()
+            .map(|p| LayoutItem::text(p.clone()))
+            .collect();
+        let pages = engine.layout_items(&items, 0).unwrap();
+        for (i, p) in pages.iter().enumerate() {
+            let n = p
+                .entries
+                .iter()
+                .filter(|e| matches!(e, PageEntry::Text(_)))
+                .count();
+            println!("page {i}: {n} entries, chars [{}-{}]",
+                p.start_char_index, p.end_char_index);
+        }
+        let total: usize = pages
+            .iter()
+            .map(|p| p.entries.iter().filter(|e| matches!(e, PageEntry::Text(_))).count())
+            .sum();
+        println!("total pages={} lines={}", pages.len(), total);
     }
 }
 
