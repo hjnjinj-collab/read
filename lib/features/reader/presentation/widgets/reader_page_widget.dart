@@ -281,17 +281,15 @@ class PageContentRenderer {
             fit: BoxFit.fill,
           );
         } else {
-          // 解码中占位：浅灰圆角块 + 边框
+          // 阶段3优化：根据加载状态显示不同的占位
           final rect = Rect.fromLTWH(
             entry.x,
             entry.y,
             entry.width,
             entry.height,
           );
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-            Paint()..color = theme.placeholderColor,
-          );
+          final imageState = BookImageStore.instance.state(href);
+          _drawImagePlaceholder(canvas, rect, imageState, theme);
           BookImageStore.instance.ensureLoaded(href, onImageNeeded);
         }
         continue;
@@ -516,5 +514,74 @@ class PageContentRenderer {
       alignment: Alignment(x, y),
       filterQuality: FilterQuality.medium,
     );
+  }
+
+  /// 阶段3优化：根据图片加载状态绘制占位符
+  /// 
+  /// - loading: 浅灰圆角块 + 旋转加载指示器
+  /// - failed: 深灰圆角块 + 错误图标（×）
+  /// - null（未请求）: 浅灰圆角块（兜底）
+  static void _drawImagePlaceholder(
+    Canvas canvas,
+    Rect rect,
+    BookImageState? state,
+    ReaderTheme theme,
+  ) {
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
+    
+    if (state == BookImageState.loading) {
+      // 加载中：浅灰背景 + 深灰圆环指示器
+      canvas.drawRRect(rrect, Paint()..color = theme.placeholderColor);
+      
+      final center = rect.center;
+      final radius = (rect.width < rect.height ? rect.width : rect.height) / 6;
+      if (radius > 4) {  // 只在足够大的占位框内绘制指示器
+        // 绘制圆环（3/4圆弧）
+        final paint = Paint()
+          ..color = theme.placeholderColor.withOpacity(0.6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0
+          ..strokeCap = StrokeCap.round;
+        
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius),
+          -1.57, // 从顶部开始（-π/2）
+          4.71,  // 绘制 3/4 圆（3π/2）
+          false,
+          paint,
+        );
+      }
+    } else if (state == BookImageState.failed) {
+      // 失败：深灰背景 + 错误标记（×）
+      canvas.drawRRect(
+        rrect,
+        Paint()..color = theme.placeholderColor.withOpacity(0.7),
+      );
+      
+      final center = rect.center;
+      final size = (rect.width < rect.height ? rect.width : rect.height) / 4;
+      if (size > 6) {  // 只在足够大的占位框内绘制错误标记
+        final paint = Paint()
+          ..color = theme.placeholderColor.withOpacity(0.4)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0
+          ..strokeCap = StrokeCap.round;
+        
+        // 绘制 × 号
+        canvas.drawLine(
+          Offset(center.dx - size / 2, center.dy - size / 2),
+          Offset(center.dx + size / 2, center.dy + size / 2),
+          paint,
+        );
+        canvas.drawLine(
+          Offset(center.dx + size / 2, center.dy - size / 2),
+          Offset(center.dx - size / 2, center.dy + size / 2),
+          paint,
+        );
+      }
+    } else {
+      // 未请求或其他状态：简单浅灰占位框
+      canvas.drawRRect(rrect, Paint()..color = theme.placeholderColor);
+    }
   }
 }
