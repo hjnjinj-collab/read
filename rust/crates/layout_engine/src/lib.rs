@@ -630,7 +630,7 @@ impl LayoutEngine {
             }};
         }
 
-        for item in items {
+        for (item_idx, item) in items.iter().enumerate() {
             match item {
                 LayoutItem::Text(item) => {
                     let laid = self.layout_styled_paragraph(item, content_width, font)?;
@@ -692,12 +692,24 @@ impl LayoutEngine {
                     // 整段推下页（孤行）。页行数不足 MIN_LINES 时交由既有
                     // 逐行强制放置分支（与 TXT 一致）。
                     let mut para_bottom_limit = bottom_limit;
+                    // A26：图文混排分页统一——Text 段落为后续 Image/Table 预留空间
+                    let next_item_height = self.peek_next_atomic_height(
+                        items, item_idx + 1, content_width, content_height, font
+                    );
                     // A25b：填充率 100% = 纯行级填满，孤寡行保护自动挂起
                     // （对齐 TXT 决策块门控；<100% 时保护生效）
                     let protect_enabled = self.config.page_fill_threshold < 1.0;
                     if para_line_count > 1 && protect_enabled {
-                        let fit_avail =
-                            (((bottom_limit - current_y).max(0.0) + 0.01) / line_h) as usize;
+                        let mut avail_height = (bottom_limit - current_y).max(0.0);
+                        // A26：如果下一个是图表，预留其高度
+                        if let Some(next_h) = next_item_height {
+                            let para_h_estimate = para_line_count as f32 * line_h;
+                            if current_y + para_h_estimate + next_h <= bottom_limit {
+                                // 段落+图表能同页放下 → 降低段落 cap，为图表预留空间
+                                avail_height = avail_height - next_h;
+                            }
+                        }
+                        let fit_avail = ((avail_height + 0.01) / line_h) as usize;
                         let mut fit = fit_avail.min(para_line_count);
                         if para_line_count - fit == 1 {
                             fit -= 1; // 寡行：下页收两行
@@ -819,6 +831,7 @@ impl LayoutEngine {
                     // 超页高大图：缩至整页内容高内（宽等比收缩）
                     let max_height = if *bleed { bottom_limit } else { content_height };
                     if img_height > max_height {
+                        let original_height = img_height;
                         img_height = max_height;
                         // 宽随高收缩并保持对齐基准
                         let scaled_w = img_height * ratio;
@@ -828,6 +841,14 @@ impl LayoutEngine {
                             img_x = (self.config.width - scaled_w) / 2.0;
                         } else {
                             img_width = scaled_w;
+                        }
+                        // A26：极端缩放警告（缩放比 <0.5）
+                        let scale = img_height / original_height;
+                        if scale < 0.5 {
+                            eprintln!(
+                                "[WARN] Image '{}' scaled down to {:.1}% (aspect ratio {:.2}), consider reducing image height in source",
+                                resource_href, scale * 100.0, ratio
+                            );
                         }
                     }
 
@@ -866,6 +887,14 @@ impl LayoutEngine {
                     else {
                         continue;
                     };
+
+                    // A26：极端高度警告（表格 >0.85×content_height）
+                    if total_h > content_height * 0.85 {
+                        eprintln!(
+                            "[WARN] Table spans {:.1}% of page height, may cause pagination gaps",
+                            total_h / content_height * 100.0
+                        );
+                    }
 
                     // 原子块：当前页放不下且页非空 → 整表翻页
                     if current_y + total_h > bottom_limit && !entries.is_empty() {
@@ -913,6 +942,42 @@ impl LayoutEngine {
         }
 
         Ok(pages)
+    }
+
+    /// A26：前瞻下一个原子块（Image/Table）的高度，用于 Text 段落 fit_avail 计算
+    ///
+    /// 返回 Some(h) 如果下一个是 Image/Table 且高度可预测；None 如果是 Text 或无后续。
+    /// 仅前瞻直接后继（items[idx+1]），不递归扫描。
+    fn peek_next_atomic_height(
+        &self,
+        items: &[LayoutItem],
+        start_idx: usize,
+        content_width: f32,
+        content_height: f32,
+        font: &ab_glyph::FontRef<'static>,
+    ) -> Option<f32> {
+        for item in items.iter().skip(start_idx) {
+            match item {
+                LayoutItem::Image { aspect, bleed, .. } => {
+                    let ratio = if *aspect > 0.01 { *aspect } else { 0.75 };
+                    let img_width = if *bleed { self.config.width } else { content_width };
+                    let mut h = img_width / ratio;
+                    let max_h = if *bleed { content_height } else { content_height };
+                    if h > max_h { 
+                        h = max_h; 
+                    }
+                    return Some(h + self.config.paragraph_spacing);
+                }
+                LayoutItem::Table(table) => {
+                    if let Ok(Some((_, _, total_h, _))) = self.layout_table(table, content_width, font) {
+                        return Some(total_h + self.config.paragraph_spacing);
+                    }
+                    return None; // 表格布局失败，保守不预留
+                }
+                LayoutItem::Text { .. } => return None, // 下一个是文本，不预留
+            }
+        }
+        None // 无后续元素
     }
 
     /// Layout a single paragraph into lines with real glyph measurement
