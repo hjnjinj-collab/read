@@ -21,6 +21,8 @@ class _Semaphore {
 
   Future<T> run<T>(Future<T> Function() task) async {
     while (_running >= _max) {
+      // A28 排障：槽位排队即报告（解码门控饥饿是提交悬挂嫌疑点）
+      readerTrace('image.gate.wait', {'queue': _waiters.length, 'running': _running});
       final waiter = Completer<void>();
       _waiters.add(waiter);
       await waiter.future;
@@ -178,12 +180,19 @@ class BookImageStore {
       'session': _sessionEpoch,
     });
     final requestEpoch = _epoch;
+    // A28 排障：FFI/解码分段计时——区分「FFI 取字节悬挂」与「解码悬挂」
+    final reqSw = Stopwatch()..start();
     try {
       await _decodeGate.run(() async {
         final Uint8List bytes = await service.getBookResource(
           bookId,
           resourceHref,
         );
+        readerTrace('image.bytes', {
+          'href': resourceHref,
+          'len': bytes.length,
+          'ms': reqSw.elapsedMilliseconds,
+        });
         if (bytes.isEmpty) throw StateError('empty book resource');
         final ui.Codec codec = await ui.instantiateImageCodec(bytes);
         final ui.FrameInfo frame;

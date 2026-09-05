@@ -473,6 +473,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 禁 dispose（崩溃红线）——挂起到 _resetState 复位点处理
     if (_isActive || _turnController?.isAnimating == true) {
       _snapshotInvalidationPending = true;
+      readerTrace('snapshot.defer', {});
       return;
     }
     _snapshotInvalidationPending = true;
@@ -1164,6 +1165,15 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   Future<void> _commitPageTurn() async {
     final d = _turnDirection;
     final frame = _targetFrame;
+    final sw = Stopwatch()..start();
+    // A28 排障：悬挂定位检查点——stage 标记当前阻塞在哪一步
+    var stage = 'enter';
+    readerTrace('commit.enter', {
+      'direction': d,
+      'target': frame == null
+          ? 'null'
+          : '${frame.page.chapterIndex}/${frame.page.pageIndex}',
+    });
     _settledFrame = frame; // 定格：动画末帧内容 == 目标帧
     // 动画完成后锁定目标普通页面，等待 provider 提交完成。
     // 不再额外绘制一次“最终 CurlPainter 几何帧”，避免视觉上像动画回放。
@@ -1171,32 +1181,64 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _commitInFlight = true;
     final target = frame?.page;
     String? errorMsg;
+    // A28 排障：3s 悬挂看门狗——commit 未返回时报告当前阻塞阶段
+    Timer? stallTimer;
+    void armStallWatchdog() {
+      stallTimer?.cancel();
+      stallTimer = Timer(const Duration(seconds: 3), () {
+        readerTrace(
+          'commit.stall',
+          {'stage': stage, 'ms': sw.elapsedMilliseconds},
+        );
+      });
+    }
+
+    armStallWatchdog();
     try {
       if (frame != null) {
         final notifier = ref.read(readerProvider.notifier);
+        stage = 'nextPage';
         if (d == PageDirection.next) {
           await notifier.nextPage(preloaded: target!);
         } else if (d == PageDirection.prev) {
           await notifier.previousPage(preloaded: target!);
         }
+        final statePage = ref.read(readerProvider).currentPage;
+        readerTrace('commit.pageDone', {
+          'ms': sw.elapsedMilliseconds,
+          'stateAdvanced': statePage != null && identical(statePage, target),
+          'state': statePage == null
+              ? 'null'
+              : '${statePage.chapterIndex}/${statePage.pageIndex}',
+        });
         // 等待 revealPage 全部图片资源解码就绪（ready 或稳定 failed）：
         // 短路帧用 PageContentRenderer.paintPage 画新页——图片未就绪时画
         // 占位、异步解码完成后下一帧重画真图，肉眼看到"闪一下"。
         // 同步等 manifest 全部终态后才允许 release，切换两侧像素一致。
+        stage = 'prewarm';
         final hrefs = ResourceManifest.of(target!).hrefs;
         if (hrefs.isNotEmpty) {
+          readerTrace('commit.prewarmStart', {
+            'count': hrefs.length,
+            'ms': sw.elapsedMilliseconds,
+          });
           await BookImageStore.instance.prewarmManifest(hrefs);
+          readerTrace('commit.prewarmDone', {'ms': sw.elapsedMilliseconds});
         }
+        stage = 'armTimer';
         _armSettledSafetyTimer();
       } else {
+        stage = 'directFlip';
         await _directFlip(d);
         _armSettledSafetyTimer();
       }
     } catch (e) {
       errorMsg = e.toString();
+      readerTrace('commit.exception', {'stage': stage, 'error': errorMsg});
       // 提交失败：撤定格回到旧页（可读回退），错误已进 state.error
       _releaseSettled('commit-failed');
     } finally {
+      stallTimer?.cancel();
       _commitInFlight = false;
       // 合并 start/outcome/settled.release 为单条 turn.commit：
       // 翻页链路的"提交落地"事件，关键字段是 state 是否同步到目标。
