@@ -141,7 +141,7 @@ class ReaderSettings {
         lineHeight: 1.5,
         paddingHorizontal: 20.0,
         paddingVertical: 20.0,
-        pageFillThreshold: 0.9,
+        pageFillThreshold: 1.0, // A25：1.0 = 行级填满（旧视觉基线）
         removeDuplicateTitle: true,
         chineseConvert: ChineseConvertType.none,
         replaceRules: [],
@@ -177,7 +177,7 @@ class ReaderSettings {
         lineHeight: _d(j, 'lineHeight', 1.5),
         paddingHorizontal: _d(j, 'paddingHorizontal', 20.0),
         paddingVertical: _d(j, 'paddingVertical', 20.0),
-        pageFillThreshold: _d(j, 'pageFillThreshold', 0.9),
+        pageFillThreshold: _d(j, 'pageFillThreshold', 1.0),
         removeDuplicateTitle: _b(j, 'removeDuplicateTitle', true),
         chineseConvert: _e(
             ChineseConvertType.values, j['chineseConvert'], ChineseConvertType.none),

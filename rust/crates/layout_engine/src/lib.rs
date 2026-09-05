@@ -32,8 +32,10 @@ pub struct LayoutConfig {
     pub font_name: String,           // 字体名称
     pub letter_spacing: f32,
     pub paragraph_spacing: f32,
-    /// 页面填充率门槛（0.0-1.0）：填充达到该比例后段落放不下才整段推下页，
-    /// 低于则允许段落跨页拆分。TXT/EPUB 双路径共用
+    /// 页面填充率（0.0-1.0）：A25 语义重定义为**内容区利用率**——
+    /// 底界 = content_top + content_height × threshold，行级断行提前发生，
+    /// 页底按比例统一留白（1.0 填满、0.9 底部收 10%）。
+    /// TXT/EPUB 双路径统一消费（对齐行级分页精度批次）
     pub page_fill_threshold: f32,
     /// 是否显示本章说（注释/旁注段落）；true=渲染、false=跳过绘制但保留锚点
     pub show_comments: bool,
@@ -70,7 +72,7 @@ impl Default for LayoutConfig {
             font_name: "default".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 12.0,
-            page_fill_threshold: 0.9,
+            page_fill_threshold: 1.0, // A25：1.0 = 行级填满（旧行为基线）
             show_comments: true,
             justify: false,
             punctuation_compress: false,
@@ -446,16 +448,26 @@ impl LayoutEngine {
             //
             // 用户钦定策略：段落容纳不下时，计算剩余空间可容纳的整行数，
             // 放得下的行留在本页、剩余推下一页。仅保留轻量孤行/寡行保护
-            // （最多浪费 ~2 行空间），page_fill_threshold 在 TXT 路径不再参与
-            // 决策（EPUB 路径仍消费该配置）。
-            let bottom_limit = self.config.height - self.config.padding.bottom;
+            // （最多浪费 ~2 行空间）。
+            // A25：page_fill_threshold 恢复消费——语义重定义为内容区利用率
+            // （对齐 EPUB layout_items），底界按比例收紧，行级断行自然留白
+            let bottom_limit = self.config.padding.top
+                + (self.config.height - self.config.padding.top - self.config.padding.bottom)
+                    * self.config.page_fill_threshold;
             let paragraph_height =
                 pending_paragraph_lines.len() as f32 * line_height + self.config.paragraph_spacing;
             let would_overflow = current_y + paragraph_height > bottom_limit;
 
             let mut pre_place = 0usize;   // 预置到本页的行数
             let mut manual_break = false; // 预置后手动翻页
-            if would_overflow && !pending_paragraph_lines.is_empty() {
+            // A25b：填充率 100% = 纯行级填满，孤寡行保护自动挂起——
+            // 保护的牺牲/推页会让"填满"出现 1~2 行槽缺口（对话密集段
+            // 高频触发，用户实测"有的填满有的留白"）；<100% 时保护生效
+            let protect_enabled = self.config.page_fill_threshold < 1.0;
+            if would_overflow
+                && !pending_paragraph_lines.is_empty()
+                && protect_enabled
+            {
                 // 本页剩余空间可容纳的整行数（+0.01 浮点容差防舍入抖动）
                 let mut lines_fit =
                     (((bottom_limit - current_y).max(0.0) + 0.01) / line_height) as usize;
@@ -513,8 +525,8 @@ impl LayoutEngine {
 
             // 逐行添加段落剩余内容（跨多页的超长段由循环内断页自然处理）
             for (line_text, line_char_count, letter_gap) in pending_paragraph_lines.iter().skip(pre_place) {
-                // 检查是否需要分页（强制分页，空间不足）
-                if current_y + line_height > self.config.height - self.config.padding.bottom {
+                // 检查是否需要分页（强制分页，空间不足；A25 用收紧后的底界）
+                if current_y + line_height > bottom_limit {
                     // 只有当前页已有足够行数时才分页，否则强制添加
                     if current_lines.len() >= MIN_LINES_PER_PAGE {
                         pages.push(Page {
@@ -538,8 +550,11 @@ impl LayoutEngine {
                 emit_line!(line_text, line_char_count, *letter_gap);
             }
             
-            // 段落间距
-            current_y += self.config.paragraph_spacing;
+            // 段落间距（A25：页底折叠——底界处虚增 current_y 会侵蚀下段
+            // 可用空间，行级精度下表现为提前断页；下段起点越过底界则不计入）
+            if current_y + self.config.paragraph_spacing <= bottom_limit {
+                current_y += self.config.paragraph_spacing;
+            }
             char_index += 1; // newline
         }
         
@@ -585,7 +600,9 @@ impl LayoutEngine {
         let content_height = self.config.height
             - self.config.padding.top
             - self.config.padding.bottom;
-        let bottom_limit = self.config.height - self.config.padding.bottom;
+        // A25：page_fill_threshold 语义重定义——内容区利用率（对齐 TXT layout_text），
+        // 底界按比例收紧，行级断行自然实现统一可预期的页底留白
+        let bottom_limit = self.config.padding.top + content_height * self.config.page_fill_threshold;
         let line_height = self.config.font_size * self.config.line_height_multiplier;
         let font = self.font_manager.get_font(&self.config.font_name)?;
 
@@ -663,135 +680,11 @@ impl LayoutEngine {
                         _ => false,
                     };
 
-                    // 段落完整性优先：整段放不下、页已有足够行数、且填充率
-                    // 达到门槛时才提前翻页；未达门槛允许段落跨页拆分，
-                    // 避免大面积底部留白（门槛可在 LayoutConfig 调整）
-                    let para_height =
-                        laid.len() as f32 * line_h + self.config.paragraph_spacing;
-                    let page_fill_ratio =
-                        (current_y - self.config.padding.top) / content_height.max(1.0);
+                    // A25 统一行级分页：场景 A（整段推页）与场景 B（低填充
+                    // 强制首行）退役——行级拆分由下方 P4 孤寡行 cap 流式路径
+                    // 承担（TXT M9.2 同构），页底留白由 bottom_limit（填充率）
+                    // 统一控制，消除策略两档导致的留白不统一
                     
-                    // M8 场景 A：段落可部分容纳 + 填充率达标 → 整段推下页
-                    if current_y + para_height > bottom_limit
-                        && text_lines_on_page >= MIN_LINES_PER_PAGE
-                        && page_fill_ratio >= self.config.page_fill_threshold
-                    {
-                        break_page!();
-                    }
-
-                    // M9 P2 场景 B：长段落完全无法容纳 + 前一页填充率 < 50% → 强制首行
-                    // 解决用户反馈："长段落推下页导致前一页底部留白过大"
-                    // 当页面已经有一些内容，但填充率很低时，强制将段落首行留在当前页
-                    let first_line_height = if !laid.is_empty() { line_h } else { 0.0 };
-                    if current_y + para_height > bottom_limit
-                        && !entries.is_empty()  // 当前页已有内容
-                        && page_fill_ratio < 0.5  // 但填充率低于 50%
-                        && laid.len() > 1  // 段落有多行
-                        && current_y + first_line_height <= bottom_limit  // 首行能放下
-                    {
-                        // 强制布局首行到当前页
-                        let first_line = &laid[0];
-                        if !item.is_comment || self.config.show_comments {
-                            let x = self.align_line_x(first_line.width, content_width, item.align)
-                                + indent_px; // M9 P5：首行缩进偏移
-                            let segments = Self::segments_for_line(first_line, item);
-                            // P2 justify：强制首行不是段末行，参与拉伸（可用宽扣除缩进）
-                            let gap = if justify_on {
-                                kinsoku::justify_gap(
-                                    first_line.width,
-                                    content_width - indent_px,
-                                    first_line.text.chars().count(),
-                                    self.config.font_size,
-                                )
-                            } else {
-                                0.0
-                            };
-                            char_index += first_line.char_end - first_line.char_start + first_line.newlines_before;
-                            entries.push(PageEntry::Text(TextLine {
-                                text: first_line.text.clone(),
-                                x,
-                                y: current_y,
-                                width: self.report_line_width(first_line.width, &first_line.text, content_width), // M11+12 实测宽；P3 悬挂行跳过钳制
-                                height: line_h,
-                                color: if item.is_comment {
-                                    Some("#888888".to_string())
-                                } else {
-                                    item.color.clone()
-                                },
-                                font_scale: if item.is_comment {
-                                    Some(0.7)
-                                } else {
-                                    (para_max_scale != 1.0).then_some(para_max_scale)
-                                },
-                                segments,
-                                letter_gap: gap,
-                                is_chapter_start: char_index == 0 && page_start_char == 0,
-                                is_comment: item.is_comment,
-                            }));
-                            text_lines_on_page += 1;
-                        } else {
-                            // 隐藏模式：只累计锚点
-                            char_index += first_line.char_end - first_line.char_start + first_line.newlines_before;
-                        }
-                        
-                        // 翻页，剩余行在下一页继续
-                        break_page!();
-                        
-                        // 布局剩余行
-                        for (line_idx, line) in laid.iter().skip(1).enumerate() {
-                            if current_y + line_h > bottom_limit
-                                && text_lines_on_page >= MIN_LINES_PER_PAGE
-                            {
-                                break_page!();
-                            }
-                            if item.is_comment && !self.config.show_comments {
-                                char_index += line.char_end - line.char_start + line.newlines_before;
-                                continue;
-                            }
-                            let x = self.align_line_x(line.width, content_width, item.align);
-                            let segments = Self::segments_for_line(line, item);
-                            // P2 justify：段末行豁免
-                            let gap = if justify_on && line_idx + 2 < laid.len() {
-                                kinsoku::justify_gap(
-                                    line.width,
-                                    content_width,
-                                    line.text.chars().count(),
-                                    self.config.font_size,
-                                )
-                            } else {
-                                0.0
-                            };
-                            char_index += line.char_end - line.char_start + line.newlines_before;
-                            entries.push(PageEntry::Text(TextLine {
-                                text: line.text.clone(),
-                                x,
-                                y: current_y,
-                                width: self.report_line_width(line.width, &line.text, content_width), // M11+12 实测宽；P3 悬挂行跳过钳制
-                                height: line_h,
-                                color: if item.is_comment {
-                                    Some("#888888".to_string())
-                                } else {
-                                    item.color.clone()
-                                },
-                                font_scale: if item.is_comment {
-                                    Some(0.7)
-                                } else {
-                                    (para_max_scale != 1.0).then_some(para_max_scale)
-                                },
-                                segments,
-                                letter_gap: gap,
-                                is_chapter_start: false,
-                                is_comment: item.is_comment,
-                            }));
-                            text_lines_on_page += 1;
-                            current_y += line_h;
-                        }
-                        let space_after = item.spacing_after_em * self.config.font_size;
-                        current_y += space_after.max(self.config.paragraph_spacing);
-                        char_index += 1; // newline
-                        continue;  // 跳过下面的正常布局逻辑
-                    }
-
                     let para_line_count = laid.len(); // P2 justify：段末行判定
                     // P4 孤行/寡行保护（对齐 TXT M9.2 行级分页口径）：
                     // 段首一次性决策本页可容纳行数——拆分给下页残留单行 →
@@ -799,7 +692,10 @@ impl LayoutEngine {
                     // 整段推下页（孤行）。页行数不足 MIN_LINES 时交由既有
                     // 逐行强制放置分支（与 TXT 一致）。
                     let mut para_bottom_limit = bottom_limit;
-                    if para_line_count > 1 {
+                    // A25b：填充率 100% = 纯行级填满，孤寡行保护自动挂起
+                    // （对齐 TXT 决策块门控；<100% 时保护生效）
+                    let protect_enabled = self.config.page_fill_threshold < 1.0;
+                    if para_line_count > 1 && protect_enabled {
                         let fit_avail =
                             (((bottom_limit - current_y).max(0.0) + 0.01) / line_h) as usize;
                         let mut fit = fit_avail.min(para_line_count);
@@ -884,9 +780,14 @@ impl LayoutEngine {
                         text_lines_on_page += 1;
                         current_y += line_h;
                     }
-                    // 段后间距（em → px）：页首自动折叠已由段前处理
+                    // 段后间距（em → px）：页首自动折叠已由段前处理。
+                    // A25：页底折叠——底界处虚增 current_y 会侵蚀下段可用
+                    // 空间（提前断页偏差），下段起点越过底界则不计入
                     let space_after = item.spacing_after_em * self.config.font_size;
-                    current_y += space_after.max(self.config.paragraph_spacing);
+                    let advance = space_after.max(self.config.paragraph_spacing);
+                    if current_y + advance <= bottom_limit {
+                        current_y += advance;
+                    }
                     char_index += 1; // newline
                 }
                 LayoutItem::Image {
@@ -1956,12 +1857,12 @@ mod tests {
             font_name: "TestFont".to_string(),
             letter_spacing: 0.0,
             paragraph_spacing: 8.0,
-            page_fill_threshold: 0.9,
+            page_fill_threshold: 1.0, // A25：1.0 = 行级填满（测试基线，阈值行为单测）
             show_comments: true,
             justify: false,
             punctuation_compress: false,
         };
-        
+
         let engine = LayoutEngine::new(config.clone(), font_manager);
         (engine, config)
     }
@@ -2756,75 +2657,44 @@ mod tests {
             .count()
     }
 
-    /// P2 场景 B：低填充率（<50%）时长段落首行强制留在当前页，
-    /// 避免前一页大面积底部留白
+    /// A25 统一行级分页：场景 A（整段推页）与场景 B（仅强制首行）退役后，
+    /// 长段落跨页只走行级拆分一路——首页容纳前置短段 + 剩余空间可容的
+    /// 整行数（孤寡行保护最多 -1 行），不再出现"仅首行 / 整段推页"两档
     #[test]
-    fn items_scene_b_long_para_first_line_forced_at_low_fill() {
-        let (engine, _config) = create_test_engine();
+    fn items_long_para_splits_line_level_regardless_of_fill_ratio() {
+        for t in [0.5f32, 0.95f32] {
+            let (mut engine, mut cfg) = create_test_engine();
+            cfg.page_fill_threshold = t;
+            engine.config.page_fill_threshold = t;
 
-        // 3 个短段落（每段 1 行 ≈ 14 字 < 280px 内容宽）
-        // 填充率：(3 * (24+8) - 8) / 380 = 88/380 ≈ 23%  < 50%
-        let short = LayoutItem::text("短段落测试一二三四五六七八");
-        let items = vec![
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            // 长段落：300+ 字 → 18+ 行，无法整段容纳
-            LayoutItem::Text(long_text_item(300)),
-        ];
+            let short = LayoutItem::text("短段落测试一二三四五六七八");
+            let items = vec![
+                short.clone(),
+                short.clone(),
+                short.clone(),
+                // 长段落：300+ 字 → 18+ 行，无法整段容纳
+                LayoutItem::Text(long_text_item(300)),
+            ];
+            let pages = engine.layout_items(&items, 0).unwrap();
+            assert!(pages.len() >= 2, "长段落应跨页（threshold={t}）");
 
-        let pages = engine.layout_items(&items, 0).unwrap();
-        assert!(pages.len() >= 2, "长段落应跨页");
-
-        // 场景 B 触发：page 0 末尾应有长段落首行
-        let page0_lines = count_text_lines(&pages[0]);
-        // 3 短段落行 + 1 长段落首行 = 4 行
-        assert_eq!(
-            page0_lines, 4,
-            "场景 B 应将长段落首行留在 page 0（3 短 + 1 长 = 4），实际 {}",
-            page0_lines
-        );
-
-        // page 1 应有长段落的剩余行
-        let page1_lines = count_text_lines(&pages[1]);
-        assert!(
-            page1_lines > 1,
-            "page 1 应有长段落剩余行，实际 {}",
-            page1_lines
-        );
-    }
-
-    /// P2 场景 B 反向：高填充率（>=50%）时长段落正常拆分跨页，
-    /// 不触发首行强制
-    #[test]
-    fn items_scene_b_long_para_normal_split_at_high_fill() {
-        let (engine, _config) = create_test_engine();
-
-        // 7 个短段落：填充率 ≈ 59%
-        // (7 * (24+8) - 8) / 380 = 216/380 ≈ 57%  > 50%
-        let short = LayoutItem::text("短段落测试一二三四五六七八");
-        let items = vec![
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            short.clone(),
-            // 长段落
-            LayoutItem::Text(long_text_item(300)),
-        ];
-
-        let pages = engine.layout_items(&items, 0).unwrap();
-        assert!(pages.len() >= 2, "长段落应跨页");
-
-        // 场景 B 不触发：page 0 应有 7 短段落 + 多行长段落（正常拆分）
-        let page0_lines = count_text_lines(&pages[0]);
-        assert!(
-            page0_lines > 8,
-            "高填充率时正常拆分：page 0 应有 >8 行（7 短 + 多长），实际 {}",
-            page0_lines
-        );
+            let page0_lines = count_text_lines(&pages[0]);
+            let page1_lines = count_text_lines(&pages[1]);
+            // 3 短段（各 1 行 + 段距 8）之后剩余空间可容的整行数
+            let line_h = cfg.font_size * cfg.line_height_multiplier;
+            let bottom_limit = cfg.padding.top
+                + (cfg.height - cfg.padding.top - cfg.padding.bottom) * t;
+            let y_after_shorts = cfg.padding.top + 3.0 * (line_h + cfg.paragraph_spacing);
+            let fit = (((bottom_limit - y_after_shorts).max(0.0) + 0.01) / line_h) as usize;
+            assert!(
+                fit >= 2 && page0_lines == 3 + fit,
+                "threshold={t} 首页应行级拆分：3 短段 + {fit} 长行（实得 {page0_lines}）"
+            );
+            assert!(
+                page1_lines > 1,
+                "threshold={t} page 1 应有长段剩余行（实得 {page1_lines}）"
+            );
+        }
     }
 
     /// P2 场景 C：标题孤立避免——剩余空间不足标题+2 行时推到下一页
@@ -2894,13 +2764,15 @@ mod tests {
         assert!(has_heading, "标题应在 page 0");
     }
 
-    /// P2 综合：多种段落长度混合布局，非末页底部留白 <15%
+    /// P2 综合（A25 收紧）：多种段落长度混合布局，非末页底部留白
+    /// < 1 行高 + 段距（行级分页下留白只来自孤寡行保护/段距折叠）
     #[test]
     fn items_mixed_layout_whitespace_under_15_percent() {
         let (engine, config) = create_test_engine();
         let bottom_limit = config.height - config.padding.bottom;
-        let content_height = config.height - config.padding.top - config.padding.bottom;
-        let max_whitespace = content_height * 0.15; // 15% 阈值
+        // A25：15% → 2 行高（行级分页下留白只来自孤行/寡行保护——
+        // 孤行推页最多让出一个行槽 + 页内节距余数，实测 ≤ 1.5 行高）
+        let max_whitespace = 2.0 * config.font_size * config.line_height_multiplier;
 
         // 混合段落：短（1 行）、中（3 行）、长（5 行），模拟真实章节
         let p1 = LayoutItem::text("短段一二三四五六七");
@@ -3183,29 +3055,35 @@ mod tests {
     #[test]
     fn txt_widow_pull_back_leaves_two_lines() {
         // 寡行保护：拆分将给下页留 1 行 → 本页少放一行，下页收两行
-        let (engine, _) = create_test_engine();
-        let para = text_with_lines(&engine, 16, '甲'); // 整页容 15 行，16 行差 1
+        // （A25b：保护仅在 threshold<1.0 生效，显式设 0.9 激活）
+        let (mut engine, mut cfg) = create_test_engine();
+        cfg.page_fill_threshold = 0.9;
+        engine.config.page_fill_threshold = 0.9;
+        let para = text_with_lines(&engine, 15, '甲'); // 0.9 页容 14 行，15 行差 1
         let pages = engine.layout_text(&para, 0).unwrap();
 
         assert_eq!(pages.len(), 2);
         let p0 = page_text_lines(&pages[0]).len();
         let p1 = page_text_lines(&pages[1]).len();
-        assert_eq!(p0, 14, "寡行控制应本页少放一行");
+        assert_eq!(p0, 13, "寡行控制应本页少放一行");
         assert_eq!(p1, 2, "下页应至少两行");
     }
 
     #[test]
     fn txt_orphan_avoided_when_lt2_fit() {
         // 孤行保护：页尾仅剩 1 行空间且页已 ≥3 行 → 下一段整段推页
-        let (engine, _) = create_test_engine();
-        let a = text_with_lines(&engine, 14, '甲'); // 占满 14 行后剩 1 行空间
+        // （A25b：保护仅在 threshold<1.0 生效，显式设 0.9 激活）
+        let (mut engine, mut cfg) = create_test_engine();
+        cfg.page_fill_threshold = 0.9;
+        engine.config.page_fill_threshold = 0.9;
+        let a = text_with_lines(&engine, 12, '甲'); // 占 12 行后剩 1 行空间
         let b = text_with_lines(&engine, 5, '乙');
         let input = format!("{}\n{}", a, b);
         let pages = engine.layout_text(&input, 0).unwrap();
 
         assert!(pages.len() >= 2);
         let p0 = page_text_lines(&pages[0]);
-        assert_eq!(p0.len(), 14, "第一页应只有 A 的 14 行");
+        assert_eq!(p0.len(), 12, "第一页应只有 A 的 12 行");
         assert!(p0.iter().all(|l| l.text.starts_with('甲')), "B 不得出现在第一页");
         let p1_first = &page_text_lines(&pages[1])[0];
         assert!(p1_first.text.starts_with('乙'), "B 应从新页开始");
@@ -3272,26 +3150,29 @@ mod tests {
     }
 
     #[test]
-    fn txt_line_level_ignores_fill_threshold_slider() {
-        // M9.2 核心：门槛调低（旧实现会在 fill≥0.5 时整段推页留 188px 空白）
-        // 新策略无视门槛行级拆分——长段在剩余空间放置尽可能多的行
-        let (mut engine, mut cfg) = create_test_engine();
-        cfg.page_fill_threshold = 0.5;
-        engine.config.page_fill_threshold = 0.5;
-
-        let short = "第一段落。";
-        let long = text_with_lines(&engine, 20, '甲');
-        let input = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}", short, short, short, short, short, short, long);
-        let pages = engine.layout_text(&input, 0).unwrap();
-
-        assert!(pages.len() >= 2);
-        let p0 = page_text_lines(&pages[0]);
-        // 6 短行 + 剩余 188px 可容 floor(188/24)=7 行长段行
-        assert_eq!(p0.len(), 13, "6 短行 + 7 行长段应同页（实得 {}）", p0.len());
-        assert_eq!(p0.iter().filter(|l| l.text.starts_with('甲')).count(), 7);
-        // 余下 13 行到第二页
-        let p1 = page_text_lines(&pages[1]);
-        assert_eq!(p1.iter().filter(|l| l.text.starts_with('甲')).count(), 13);
+    fn txt_fill_threshold_scales_bottom_limit() {
+        // A25：填充率语义重定义 = 内容区利用率（TXT 恢复消费）——
+        // 底界 = top + content_height × threshold，行级断行按比例提前，
+        // 页底留白统一可预期（0.8 → 底部收 20% ≈ 3 行）
+        let run = |t: f32| -> Vec<usize> {
+            let (mut engine, mut cfg) = create_test_engine();
+            cfg.page_fill_threshold = t;
+            engine.config.page_fill_threshold = t;
+            let short = "第一段落。";
+            let long = text_with_lines(&engine, 20, '甲');
+            let short_line = format!("{short}\n").repeat(6);
+            let input = short_line + &long;
+            let pages = engine.layout_text(&input, 0).unwrap();
+            pages.iter().map(|p| page_text_lines(p).len()).collect()
+        };
+        let full = run(1.0);
+        let tight = run(0.8);
+        assert_eq!(full[0], 13, "填满基线：6 短行 + 7 长行（实得 {full:?}）");
+        assert_eq!(
+            tight[0], 10,
+            "0.8 底界收紧：6 短行 + 4 长行（实得 {tight:?}）"
+        );
+        assert!(full[0] > tight[0], "更高填充率应容纳更多行");
     }
 
     #[test]
@@ -3357,9 +3238,11 @@ mod tests {
     fn styled_orphan_avoided_on_page_break() {
         // P4：EPUB styled 路径孤行保护——段落行数 = 页容+1 时，
         // 无保护下页残留 1 行；有保护本页少放一行、下页收两行
-        let (engine, cfg) = create_test_engine();
+        let (mut engine, cfg) = create_test_engine();
+        let usable_full = cfg.height - cfg.padding.top - cfg.padding.bottom;
+        engine.config.page_fill_threshold = 0.9; // A25b：显式激活孤寡行保护
         let line_h = cfg.font_size * cfg.line_height_multiplier;
-        let usable = cfg.height - cfg.padding.top - cfg.padding.bottom;
+        let usable = usable_full * 0.9;
         let fit = ((usable + 0.01) / line_h) as usize; // 页可容行数
         let para_lines = fit + 1;
         let para = "甲".repeat(para_lines * 17);
@@ -3422,9 +3305,82 @@ mod tests {
     }
 
     #[test]
+    fn styled_short_para_dialogue_pages_fill_at_full_threshold() {
+        // A25b 回归：填充率 100% = 纯行级填满（孤寡行保护自动挂起）——
+        // 对话密集 1~2 行短段下，保护曾在页底吃掉 1~2 个行槽
+        // （用户实测"有的填满有的留白"）。非末页残差必须 < 1 行槽 + 段距
+        let mut cfg = LayoutConfig::default();
+        cfg.width = 399.3333333333333;
+        cfg.height = 854.0;
+        cfg.font_size = 16.0;
+        cfg.line_height_multiplier = 1.4;
+        cfg.page_fill_threshold = 1.0;
+        let font_manager = {
+            let mut fm = FontManager::new();
+            for path in ["C:/Windows/Fonts/simsun.ttc", "C:/Windows/Fonts/msyh.ttc"] {
+                if std::path::Path::new(path).exists()
+                    && fm.load_font_from_file("TestFont".to_string(), path).is_ok()
+                {
+                    break;
+                }
+            }
+            fm
+        };
+        let engine = LayoutEngine::new(cfg.clone(), font_manager);
+        let paras = [
+            "尤其是你和他踏上修行大道之后，不管是名结为道侣，都应当收敛锐气，不可跋扈怂唯。".to_string(),
+            "这并非什么威胁，而是离别之际，我的一些肺腑之言，也算是善意的提醒。".to_string(),
+            "照理说，两人身份天壤之别，婢女稚圭却极为不卑不亢，甚至当下气势还要隐约压过齐静春半头。".to_string(),
+            "她讥笑道：\"善意?".to_string(),
+            "数千年来，你们这些了不起的修行中人，高高在上，画地为牢，拿此地作为一块庄稼地，今年割一茬明年拔一捆，年复一年，".to_string(),
+            "千年不变，怎么到了现在，才开始想要同我这孽障'与人为善'了。".to_string(),
+            "哈哈，我听少爷说过一句话，被你们很多人奉为圭臬，叫作'非我族类，其心必异'，对吧?".to_string(),
+            "所以也怪不得齐先生，毕竟……".to_string(),
+            "齐静春继续前行，轻轻踏出一步，似笑非笑：\"哦?".to_string(),
+            "一步之后。婢女稚圭脸色微变。".to_string(),
+            "两人不知何时站在了一处地方，四处漆黑，伸手不见五指，唯有遥遥的头顶上方，有无数孕育着神圣气息的光线洒落而下。".to_string(),
+            "他们如同置身于一口深不见底的水井井底，那些金黄色的阳光从井口缓缓落下。".to_string(),
+        ];
+        let items: Vec<LayoutItem> = paras
+            .iter()
+            .cycle()
+            .take(paras.len() * 4)
+            .map(|p| LayoutItem::text(p.clone()))
+            .collect();
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 3, "应跨 ≥3 页（实得 {}）", pages.len());
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let bottom_limit = cfg.padding.top
+            + (cfg.height - cfg.padding.top - cfg.padding.bottom) * cfg.page_fill_threshold;
+        for (i, p) in pages.iter().enumerate() {
+            if i + 1 == pages.len() {
+                continue; // 末页合法不满
+            }
+            let last_bottom = p
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    PageEntry::Text(l) => Some(l.y + l.height),
+                    _ => None,
+                })
+                .fold(0.0f32, f32::max);
+            let residue = bottom_limit - last_bottom;
+            assert!(
+                residue < line_h + cfg.paragraph_spacing + 0.5,
+                "第 {i} 页残差 {residue:.1}px ≥ 1 行槽+段距（保护应挂起）"
+            );
+        }
+        // 锚点无缝衔接
+        for w in pages.windows(2) {
+            assert_eq!(w[0].end_char_index, w[1].start_char_index, "锚点必须衔接");
+        }
+    }
+
+    #[test]
     fn styled_epub_page_fill_under_user_params() {
-        // P4 回归：用户实测参数（fs=16/行距 1.4/399x854/fill 0.95）下每页应排满——
-        // 防「孤寡行 cap 浮点 ULP 漂移」碎片化回归（总行数不丢 + 单页填充）
+        // P4 回归（A25 强化断言）：用户实测参数（fs=16/行距 1.4/399x854/
+        // fill 0.95）下长内容应产满页——防「孤寡行 cap 浮点 ULP 漂移」
+        // 碎片化回归（非末页 ≥ 3/4 页容 + 锚点无缝衔接）
         let mut cfg = LayoutConfig::default();
         cfg.width = 399.3333333333333;
         cfg.height = 854.0;
@@ -3444,7 +3400,7 @@ mod tests {
         };
         let engine = LayoutEngine::new(cfg.clone(), font_manager);
 
-        // 截图文案：短段与长段混合
+        // 截图文案：短段与长段混合，重复 8 次构造跨页长文
         let paras = [
             "能听天由命。".to_string(),
             "不过在烧窑之前，拉坯无疑又是重中之重，只不过陈平安被姚老头认为资质差，多是做些练泥的体力活，而且他多是只能在旁边仔细观摩，".to_string(),
@@ -3454,23 +3410,40 @@ mod tests {
         ];
         let items: Vec<LayoutItem> = paras
             .iter()
+            .cycle()
+            .take(paras.len() * 8)
             .map(|p| LayoutItem::text(p.clone()))
             .collect();
         let pages = engine.layout_items(&items, 0).unwrap();
-        for (i, p) in pages.iter().enumerate() {
-            let n = p
-                .entries
-                .iter()
-                .filter(|e| matches!(e, PageEntry::Text(_)))
-                .count();
-            println!("page {i}: {n} entries, chars [{}-{}]",
-                p.start_char_index, p.end_char_index);
-        }
-        let total: usize = pages
+        assert!(pages.len() >= 3, "重复 8 次应跨 ≥3 页（实得 {}）", pages.len());
+
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let bottom_limit = cfg.padding.top
+            + (cfg.height - cfg.padding.top - cfg.padding.bottom) * cfg.page_fill_threshold;
+        let fit = (((bottom_limit - cfg.padding.top) + 0.01) / line_h) as usize;
+        let counts: Vec<usize> = pages
             .iter()
-            .map(|p| p.entries.iter().filter(|e| matches!(e, PageEntry::Text(_))).count())
-            .sum();
-        println!("total pages={} lines={}", pages.len(), total);
+            .map(|p| {
+                p.entries
+                    .iter()
+                    .filter(|e| matches!(e, PageEntry::Text(_)))
+                    .count()
+            })
+            .collect();
+        for (i, c) in counts.iter().enumerate() {
+            if i + 1 < counts.len() {
+                assert!(
+                    *c >= fit * 3 / 4,
+                    "第 {i} 页应接近排满（实得 {c}，fit={fit}，全量 {counts:?}）"
+                );
+            }
+        }
+        // 锚点无缝衔接（总行数守恒的间接不变式）
+        for w in pages.windows(2) {
+            assert_eq!(
+                w[0].end_char_index, w[1].start_char_index,
+                "页间锚点必须无缝衔接"
+            );
+        }
     }
 }
-

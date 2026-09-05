@@ -251,6 +251,7 @@ fn main() -> anyhow::Result<()> {
             page_fill_threshold: 0.9,
             show_comments: true,
             justify: false,
+            punctuation_compress: false,
         };
         let engine = LayoutEngine::new(config, font_manager);
         let mut layout_times = Vec::new();

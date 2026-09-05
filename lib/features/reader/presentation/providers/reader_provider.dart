@@ -78,7 +78,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _lineHeight = 1.5;
   double _paddingHorizontal = 20.0;
   double _paddingVertical = 20.0;
-  double _pageFillThreshold = 0.9;
+  double _pageFillThreshold = 1.0; // A25：1.0 = 行级填满（旧视觉基线）
 
   // Content processing settings
   bool _removeDuplicateTitle = true;

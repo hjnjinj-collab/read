@@ -152,7 +152,7 @@ class BookService {
     required double paddingRight,
     required double paddingBottom,
     String fontName = 'default',
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
   }) async {
     final rustPage = await rust_api.getPage(
       bookId: bookId,
@@ -186,7 +186,7 @@ class BookService {
     required double paddingRight,
     required double paddingBottom,
     String fontName = 'default',
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
   }) async {
     final count = await rust_api.getPageCount(
       bookId: bookId,
@@ -229,7 +229,7 @@ class BookService {
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
     int? anchorCharOffset,
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
     BigInt? paraFormatHash,
   }) async {
     final rustPage = await rust_api.getPageProcessed(
@@ -285,7 +285,7 @@ class BookService {
     required bool reSegment,
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
     BigInt? paraFormatHash,
   }) async {
     final count = await rust_api.getPageCountProcessed(
@@ -397,7 +397,7 @@ class BookService {
     String fontName = 'default',
     int? anchorCharOffset,
     int chineseConvert = 0,
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
   }) async {
@@ -439,7 +439,7 @@ class BookService {
     required double paddingBottom,
     String fontName = 'default',
     int chineseConvert = 0,
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
   }) async {
@@ -481,7 +481,7 @@ class BookService {
     required double paddingBottom,
     String fontName = 'default',
     int chineseConvert = 0,
-    double pageFillThreshold = 0.9,
+    double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
   }) async {

@@ -32,8 +32,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   double _fontSize = 18.0;
   double _lineHeight = 1.5;
 
-  // 分页填充率门槛
-  double _pageFillThreshold = 0.9;
+  // 分页填充率（内容区利用率，TXT/EPUB 统一消费）
+  double _pageFillThreshold = 1.0;
 
   // 本章说显示开关
   bool _showComments = true;
@@ -421,18 +421,18 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '页面填充门槛：${(_pageFillThreshold * 100).round()}%',
+                        '分页填充率：${(_pageFillThreshold * 100).round()}%',
                         style: const TextStyle(fontSize: 14),
                       ),
                       const Text(
-                        '仅 EPUB 分页使用；TXT 分页已是行级精度无需此门槛',
+                        '控制每页内容的填充程度（TXT/EPUB 统一生效）；100% 填满整页（孤行寡行保护自动挂起），越低页底预留越多',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                       Slider(
                         value: _pageFillThreshold,
                         min: 0.50,
                         max: 1.00,
-                        divisions: 10,
+                        divisions: 50, // A25c：1% 步进（可选 98%/99% 等细粒度）
                         label: '${(_pageFillThreshold * 100).round()}%',
                         onChanged: (value) {
                           setState(() => _pageFillThreshold = value);
