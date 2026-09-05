@@ -538,11 +538,11 @@ class PageContentRenderer {
       if (radius > 4) {  // 只在足够大的占位框内绘制指示器
         // 绘制圆环（3/4圆弧）
         final paint = Paint()
-          ..color = theme.placeholderColor.withOpacity(0.6)
+          ..color = theme.placeholderColor.withValues(alpha: 0.6)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.0
           ..strokeCap = StrokeCap.round;
-        
+
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: radius),
           -1.57, // 从顶部开始（-π/2）
@@ -555,18 +555,18 @@ class PageContentRenderer {
       // 失败：深灰背景 + 错误标记（×）
       canvas.drawRRect(
         rrect,
-        Paint()..color = theme.placeholderColor.withOpacity(0.7),
+        Paint()..color = theme.placeholderColor.withValues(alpha: 0.7),
       );
       
       final center = rect.center;
       final size = (rect.width < rect.height ? rect.width : rect.height) / 4;
       if (size > 6) {  // 只在足够大的占位框内绘制错误标记
         final paint = Paint()
-          ..color = theme.placeholderColor.withOpacity(0.4)
+          ..color = theme.placeholderColor.withValues(alpha: 0.4)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.0
           ..strokeCap = StrokeCap.round;
-        
+
         // 绘制 × 号
         canvas.drawLine(
           Offset(center.dx - size / 2, center.dy - size / 2),

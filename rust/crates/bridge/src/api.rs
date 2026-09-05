@@ -12,7 +12,7 @@ use reader_core::{
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use once_cell::sync::Lazy;
-use std::time::{Instant, SystemTime, Duration};
+use std::time::{Instant, SystemTime};
 use crate::{
     FfiBookSource, FfiSearchBookItem, FfiBookInfo,
     FfiChapterInfo, FfiChapterContent, BOOK_SOURCE_ENGINE
