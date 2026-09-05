@@ -687,6 +687,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'range': '${page.startCharIndex}-${page.endCharIndex}',
       });
 
+      // 阶段1优化：立即预热当前页图片（fire-and-forget）
+      // 在邻居页加载前启动，用户首屏图片零延迟
+      _prewarmCurrentPageImages(page);
+
       // P1 接线层：发布三页结构态到 render store（fire-and-forget，
       // 当前页已就绪可渲染，邻居页加载不阻塞 UI）
       _prepareAndPublishFrameSet(page);
@@ -1688,6 +1692,32 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 清空渲染状态：会话作废 + 无 frame 占位
     _invalidateFrames(reason: 'close-book');
     _renderStore.publishEmpty(isLoading: false);
+  }
+
+  /// 立即预热当前页图片（阶段1优化）
+  /// 
+  /// 在邻居页加载前启动，用户首屏图片零延迟。
+  /// fire-and-forget：不阻塞 UI，预热完成后触发重绘。
+  void _prewarmCurrentPageImages(PageInfo page) {
+    if (!_isEpub) return;  // 仅 EPUB 有图片资源
+    
+    final imageHrefs = ResourceManifest.of(page).hrefs;
+    if (imageHrefs.isEmpty) return;
+    
+    readerTrace('image.prewarm.start', {
+      'page': '${page.chapterIndex}/${page.pageIndex}',
+      'count': imageHrefs.length,
+    });
+    
+    // 后台预热，不阻塞 UI
+    BookImageStore.instance.prewarmManifest(imageHrefs).then((states) {
+      readerTrace('image.prewarm.ready', {
+        'page': '${page.chapterIndex}/${page.pageIndex}',
+        'ready': states.values.where((s) => s == BookImageState.ready).length,
+        'failed': states.values.where((s) => s == BookImageState.failed).length,
+      });
+      // 预热完成后，PageContentRenderer 会在下次绘制时自动使用缓存的图片
+    });
   }
 }
 

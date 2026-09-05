@@ -187,7 +187,7 @@ impl EpubParser {
             opf_base_path: String::new(),
             spine_hrefs: Vec::new(),
             href_to_index: HashMap::new(),
-            resource_cache: Arc::new(Mutex::new(ResourceCache::new(50))),
+            resource_cache: Arc::new(Mutex::new(ResourceCache::new(150))),  // 阶段1优化：50→150
             nav_href: None,
             ncx_href: None,
             css_cache: HashMap::new(),

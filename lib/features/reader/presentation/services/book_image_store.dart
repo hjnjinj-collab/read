@@ -69,11 +69,12 @@ class BookImageStore {
   String? _bookId;
   int _epoch = 0;
 
-  /// 解码并发闸门：同时最多 2 个「取字节 + 解码」在飞。
+  /// 解码并发闸门：同时最多 4 个「取字节 + 解码」在飞（阶段1优化）。
   /// 图片密集章节一次性预热几十张时，无限制并发会挤爆内存带宽与
   /// FFI IO（对齐 BUGFIX_INDEX M9.3 洪峰教训）；限流后总吞吐几乎
-  /// 不减、峰值内存平稳。
-  static final _decodeGate = _Semaphore(2);
+  /// 不减、峰值内存平稳。2→4 提升：首屏图片加载速度翻倍。
+  static const int _maxConcurrentDecodes = 4;  // 可配置
+  static final _decodeGate = _Semaphore(_maxConcurrentDecodes);
 
   /// LRU 内存上限（张数）：超限按访问新旧淘汰，防止图片密集书常驻爆内存
   static const int _maxCacheEntries = 64;
