@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/reader/presentation/pages/reader_page.dart';
@@ -9,9 +12,19 @@ import 'features/reader/presentation/providers/reader_settings.dart';
 import 'core/ffi/book_service.dart';
 import 'core/services/reader_font.dart';
 
+/// P6：清掉自定义字体持久化（副本丢失/恢复失败时回退内置），其余设置原样保留
+void _clearCustomFontPersisted() {
+  final raw = AppSettingsService.instance.raw('reader') ?? '';
+  final map = jsonDecode(raw.isEmpty ? '{}' : raw);
+  if (map is Map<String, dynamic>) {
+    map['customFontFamily'] = '';
+    map['customFontPath'] = '';
+    AppSettingsService.instance.save('reader', jsonEncode(map));
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   // Initialize Rust FFI（FontManager 内部自动 load_embedded_default，
   // 即从 rust/assets/NotoSansSC-Regular.otf 读字节注册为
   // 'embedded_default' 默认字体；内置 Noto Sans CJK SC，跨平台一致）
@@ -28,6 +41,30 @@ void main() async {
   await AppSettingsService.instance.load(db);
   final settings = ReaderSettings.tryParse(
       AppSettingsService.instance.raw('reader'));
+
+  // P6 自定义字体启动恢复：持久化副本存在 → 注入两侧引擎（Rust 注册
+  // 名与 Dart FontLoader 同名 = 热路径字体名），必须先于任何排版；
+  // 副本丢失（被清理/迁移）→ 静默回退内置并清掉持久化，避免每次启动
+  // 都走无效加载。
+  if (settings.customFontFamily.isNotEmpty &&
+      settings.customFontPath.isNotEmpty) {
+    final f = File(settings.customFontPath);
+    if (f.existsSync()) {
+      try {
+        final bytes = await f.readAsBytes();
+        await ReaderFont.loadCustomFont(
+          name: settings.customFontFamily,
+          bytes: bytes,
+          displayLabel: settings.customFontFamily,
+        );
+      } catch (e) {
+        debugPrint('✗ 自定义字体恢复失败，回退内置: $e');
+        _clearCustomFontPersisted();
+      }
+    } else {
+      _clearCustomFontPersisted();
+    }
+  }
 
   // 段落格式同步 Rust 全局——必须先于任何 openBook 排版（openBook 在
   // 首帧 postFrame 之后，此处天然安全），杜绝 M9.2 类「Rust 已按默认

@@ -91,6 +91,12 @@ class ReaderSettings {
   /// P3 行尾标点压缩悬挂（判满失败且行尾可压缩标点折半宽能放下时收进行尾）
   final bool punctuationCompress;
 
+  /// P6 自定义字体持久化（family 注册名；空 = 内置 ReaderSerif）
+  final String customFontFamily;
+
+  /// P6 字体持久化副本路径（应用目录内；空 = 无自定义字体）
+  final String customFontPath;
+
   final PageTurnMode pageTurnMode;
   final PageTurnSpeed pageTurnSpeed;
 
@@ -121,6 +127,8 @@ class ReaderSettings {
     required this.aggressiveSplitThreshold,
     required this.justify,
     required this.punctuationCompress,
+    required this.customFontFamily,
+    required this.customFontPath,
     required this.pageTurnMode,
     required this.pageTurnSpeed,
     required this.collapse,
@@ -150,6 +158,8 @@ class ReaderSettings {
         aggressiveSplitThreshold: 100,
         justify: false,
         punctuationCompress: false,
+        customFontFamily: '',
+        customFontPath: '',
         pageTurnMode: PageTurnMode.simulation,
         pageTurnSpeed: PageTurnSpeed.medium,
         collapse: CollapseStyle.defaults(),
@@ -185,6 +195,8 @@ class ReaderSettings {
         aggressiveSplitThreshold: _i(j, 'aggressiveSplitThreshold', 100),
         justify: _b(j, 'justify', false),
         punctuationCompress: _b(j, 'punctuationCompress', false),
+        customFontFamily: _s(j, 'customFontFamily', ''),
+        customFontPath: _s(j, 'customFontPath', ''),
         pageTurnMode:
             _e(PageTurnMode.values, j['pageTurnMode'], PageTurnMode.simulation),
         pageTurnSpeed:
@@ -205,6 +217,10 @@ class ReaderSettings {
       j[k] is int ? j[k] as int : def;
   static bool _b(Map<String, dynamic> j, String k, bool def) =>
       j[k] is bool ? j[k] as bool : def;
+
+  /// P6：字符串安全提取（非 String 或空串视为缺省——空串用于"无自定义字体"）
+  static String _s(Map<String, dynamic> j, String k, String def) =>
+      j[k] is String ? j[k] as String : def;
 
   static T _e<T extends Enum>(List<T> values, Object? raw, T def) {
     if (raw is String) {

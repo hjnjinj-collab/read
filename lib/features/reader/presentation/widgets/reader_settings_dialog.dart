@@ -28,6 +28,10 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _boldEnabled = true;
   bool _italicEnabled = true;
 
+  // P6 字号/行距滑杆（即时生效：onChangedEnd 落地重排）
+  double _fontSize = 18.0;
+  double _lineHeight = 1.5;
+
   // 分页填充率门槛
   double _pageFillThreshold = 0.9;
 
@@ -76,6 +80,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _removeAds = n.removeAds;
     _boldEnabled = n.boldEnabled;
     _italicEnabled = n.italicEnabled;
+    _fontSize = n.fontSize;
+    _lineHeight = n.lineHeight;
     _pageFillThreshold = n.pageFillThreshold;
     _showComments = n.showComments;
     _enableIndent = n.enableIndent;
@@ -295,25 +301,84 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                         leading: const Icon(Icons.folder_open),
                         title: const Text('选择本地字体文件'),
                         subtitle: const Text(
-                          '支持 .ttf / .otf / .ttc（从设备存储）',
+                          '支持 .ttf / .otf / .ttc（从设备存储），立即生效并持久化',
                           style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () async {
-                          final ok = await FontProvider.pickAndLoadCustomFont(context);
-                          if (ok && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('字体已切换（下次打开书籍生效）'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
+                          // P6：字体文件复制到应用目录 + 持久化，重启自动恢复
+                          final picked =
+                              await FontProvider.pickAndLoadCustomFont(context);
+                          if (picked != null) {
+                            ref.read(readerProvider.notifier).setCustomFont(
+                                  fontFamily: picked.fontName,
+                                  fontFilePath: picked.persistedPath,
+                                );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      '${picked.displayLabel} 已切换并持久化'),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
                             setState(() {}); // 刷新显示名
                           }
                         },
                       ),
+                      const Divider(height: 1),
+                      // P6：恢复内置字体（仅在当前使用自定义字体时可用）
+                      ListTile(
+                        leading: const Icon(Icons.restore),
+                        title: const Text('恢复内置字体'),
+                        enabled: ref
+                            .read(readerProvider.notifier)
+                            .customFontFamily
+                            .isNotEmpty,
+                        onTap: () async {
+                          await ref
+                              .read(readerProvider.notifier)
+                              .resetToBuiltinFont();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('已恢复内置 Noto Sans CJK SC'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                          setState(() {}); // 刷新显示名
+                        },
+                      ),
                     ],
                   ),
+                ),
+                const SizedBox(height: 16),
+                // P6 字号/行距滑杆（拖动改显示、松手落地重排——避免逐帧全量排版）
+                _buildSliderTile(
+                  label: '字号：${_fontSize.round()}',
+                  hint: '正文字号（像素）',
+                  value: _fontSize,
+                  min: 12,
+                  max: 32,
+                  divisions: 20,
+                  onChanged: (value) => setState(() => _fontSize = value),
+                  onChangedEnd: (value) {
+                    ref.read(readerProvider.notifier).setFontSize(value);
+                  },
+                ),
+                _buildSliderTile(
+                  label: '行距：${_lineHeight.toStringAsFixed(2)}',
+                  hint: '行高倍率（相对字号）',
+                  value: _lineHeight,
+                  min: 1.0,
+                  max: 2.0,
+                  divisions: 20,
+                  onChanged: (value) => setState(() => _lineHeight = value),
+                  onChangedEnd: (value) {
+                    ref.read(readerProvider.notifier).setLineHeight(value);
+                  },
                 ),
                 const SizedBox(height: 16),
                 // Content cleaning section
@@ -840,6 +905,47 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         ),
         value: value,
         onChanged: onChanged,
+      ),
+    );
+  }
+
+  /// P6：滑杆 tile（label 显示当前值；onChanged 拖动中仅更新显示，
+  /// onChangedEnd 松手才落地——避免拖动期逐帧触发全量重排）
+  Widget _buildSliderTile({
+    required String label,
+    required String hint,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required ValueChanged<double> onChanged,
+    required ValueChanged<double> onChangedEnd,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label),
+          const SizedBox(height: 4),
+          Text(
+            hint,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+          Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+            onChangeEnd: onChangedEnd,
+          ),
+        ],
       ),
     );
   }

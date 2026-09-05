@@ -55,6 +55,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _aggressiveSplitThreshold = persisted.aggressiveSplitThreshold;
     _justify = persisted.justify;
     _punctuationCompress = persisted.punctuationCompress;
+    _customFontFamily = persisted.customFontFamily;
+    _customFontPath = persisted.customFontPath;
     _pageTurnMode = persisted.pageTurnMode;
     _pageTurnSpeed = persisted.pageTurnSpeed;
     _collapseStyle = persisted.collapse;
@@ -125,6 +127,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   // P3 行尾标点压缩悬挂
   bool _punctuationCompress = false;
+
+  // P6 自定义字体持久化（family 注册名 + 持久化副本路径；空 = 内置字体）
+  String _customFontFamily = '';
+  String _customFontPath = '';
   BigInt _paraFormatHash = BigInt.zero; // 段落格式设置哈希（FFI 缓存键）
 
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
@@ -165,6 +171,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int get aggressiveSplitThreshold => _aggressiveSplitThreshold;
   bool get justify => _justify;
   bool get punctuationCompress => _punctuationCompress;
+  String get customFontFamily => _customFontFamily;
+  String get customFontPath => _customFontPath;
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
@@ -275,6 +283,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'aggressiveSplitThreshold': _aggressiveSplitThreshold,
         'justify': _justify,
         'punctuationCompress': _punctuationCompress,
+        'customFontFamily': _customFontFamily,
+        'customFontPath': _customFontPath,
         'pageTurnMode': _pageTurnMode.name,
         'pageTurnSpeed': _pageTurnSpeed.name,
         'collapse': _collapseStyle.toJson(),
@@ -298,7 +308,55 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _invalidateFrames(reason: 'font-size'); // 旧指纹 FrameSet 作废
     // Reload current page with new settings
     if (state.bookId != null) {
-      _loadCurrentPage();
+      // P6 修复：必须带锚点重定位——新排版页码与旧页码不对应，
+      // 裸页码越界会打回 "Page not found" 错误页（滑杆路径回归）
+      _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+    }
+  }
+
+  /// P6：行距变更（设置面板滑杆，即时生效）。
+  ///
+  /// 行距不影响字形宽度——MeasureTextService 测量的是文本宽度，
+  /// 无需重建测量缓存；行距乘数在 LayoutConfig 与结构化缓存键
+  /// （bits 口径）中自然换键重排。
+  void setLineHeight(double lineHeight) {
+    _lineHeight = lineHeight;
+    _persistSettings(); // P1: 写穿落库
+    _invalidatePageCountCache(); // M8-P4：排版参数变更清页数缓存
+    _invalidateFrames(reason: 'line-height'); // 旧指纹 FrameSet 作废
+    if (state.bookId != null) {
+      // P6 修复：带锚点重定位（同 setFontSize）
+      _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+    }
+  }
+
+  /// P6：自定义字体持久化（FontProvider 选择成功后调用）。
+  ///
+  /// [fontFamily] 注册名（两侧引擎同名）、[fontFilePath] 应用目录内
+  /// 持久化副本路径。字体本身已由 FontProvider 注入两侧引擎，此处只
+  /// 落库 + 带锚点重排当前书。
+  void setCustomFont({
+    required String fontFamily,
+    required String fontFilePath,
+  }) {
+    _customFontFamily = fontFamily;
+    _customFontPath = fontFilePath;
+    _persistSettings(); // P1: 写穿落库
+    if (state.bookId != null) {
+      // P6 修复：带锚点重定位（字体变更 = 全书重排，页码全变）
+      _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+    }
+  }
+
+  /// P6：恢复内置字体（清持久化；Rust embedded fallback 自动兜底）
+  Future<void> resetToBuiltinFont() async {
+    _customFontFamily = '';
+    _customFontPath = '';
+    _persistSettings();
+    await ReaderFont.initialize(); // 重新注册内置字体（family 回 ReaderSerif）
+    if (state.bookId != null) {
+      // P6 修复：带锚点重定位（同 setCustomFont）
+      _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
     }
   }
 
