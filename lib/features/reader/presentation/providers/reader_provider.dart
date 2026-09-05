@@ -148,6 +148,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 会话世代：换书/设置/窗口变化递增，旧 FrameSet 全部作废（不变量 6）。
   int _sessionEpoch = 0;
 
+  /// 阶段2优化：翻页方向统计（连续同方向预测）
+  PageDirection? _lastTurnDirection;
+  int _consecutiveTurns = 0;
+  DateTime? _lastTurnTime;
+
   /// 在途 FrameSet 准备批次计数（degraded 补发判定用）。
   int _prepareInFlight = 0;
 
@@ -1493,6 +1498,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> nextPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
 
+    // 阶段2优化：更新翻页方向统计
+    _updateTurnStatistics(PageDirection.next);
+
     try {
       final pageCount = await _pageCountOf(state.currentChapterIndex);
 
@@ -1534,6 +1542,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// [preloaded] 语义同 [nextPage]。
   Future<void> previousPage({PageInfo? preloaded}) async {
     if (state.bookId == null) return;
+
+    // 阶段2优化：更新翻页方向统计
+    _updateTurnStatistics(PageDirection.prev);
 
     if (state.currentPageIndex > 0) {
       // Previous page in current chapter
@@ -1718,6 +1729,116 @@ class ReaderNotifier extends Notifier<ReadingState> {
       });
       // 预热完成后，PageContentRenderer 会在下次绘制时自动使用缓存的图片
     });
+  }
+
+  /// 更新翻页方向统计（阶段2优化）
+  void _updateTurnStatistics(PageDirection direction) {
+    final now = DateTime.now();
+    
+    // 5秒内连续同方向翻页 → 递增计数
+    if (_lastTurnDirection == direction &&
+        _lastTurnTime != null &&
+        now.difference(_lastTurnTime!) < const Duration(seconds: 5)) {
+      _consecutiveTurns++;
+    } else {
+      // 方向改变或超时 → 重置统计
+      _lastTurnDirection = direction;
+      _consecutiveTurns = 1;
+    }
+    _lastTurnTime = now;
+    
+    // 连续翻页≥2次 → 预测性预热下下页
+    if (_consecutiveTurns >= 2) {
+      _prewarmPredictedPage(direction);
+    }
+  }
+
+  /// 预测性预热下下页（阶段2优化）
+  Future<void> _prewarmPredictedPage(PageDirection direction) async {
+    if (!_isEpub) return;
+    
+    try {
+      final currentChapter = state.currentChapterIndex;
+      final currentPage = state.currentPageIndex;
+      final pageCount = await _pageCountOf(currentChapter);
+      
+      int targetChapter = currentChapter;
+      int targetPage = currentPage;
+      
+      if (direction == PageDirection.next) {
+        // 预测下下页
+        if (currentPage + 2 < pageCount) {
+          targetPage = currentPage + 2;
+        } else if (currentPage + 1 < pageCount && 
+                   currentChapter + 1 < state.chapters.length) {
+          // 当前章最后一页 + 下章首页
+          targetChapter = currentChapter + 1;
+          targetPage = 0;
+        } else {
+          return;  // 已经接近结尾，无需预热
+        }
+      } else {
+        // 预测前前页
+        if (currentPage >= 2) {
+          targetPage = currentPage - 2;
+        } else if (currentPage == 1 && currentChapter > 0) {
+          // 当前章第二页 → 预热前章末页
+          targetChapter = currentChapter - 1;
+          final prevPageCount = await _pageCountOf(targetChapter);
+          targetPage = prevPageCount - 1;
+        } else {
+          return;  // 已经接近开头，无需预热
+        }
+      }
+      
+      readerTrace('image.predict.start', {
+        'direction': direction.name,
+        'target': '$targetChapter/$targetPage',
+        'consecutive': _consecutiveTurns,
+      });
+      
+      // 异步获取页面并预热图片
+      final PageInfo page;
+      if (_isEpub) {
+        int convertCode = _chineseConvert == ChineseConvertType.s2t
+            ? 1
+            : _chineseConvert == ChineseConvertType.t2s
+            ? 2
+            : 0;
+        page = await _bookService.getPageStructured(
+          state.bookId!,
+          targetChapter,
+          targetPage,
+          width: _screenWidth,
+          height: _screenHeight,
+          fontSize: _fontSize,
+          lineHeightMultiplier: _lineHeight,
+          paddingLeft: _paddingHorizontal,
+          paddingTop: _paddingVertical,
+          paddingRight: _paddingHorizontal,
+          paddingBottom: _paddingVertical,
+          fontName: _customFontFamily.isNotEmpty ? _customFontFamily : 'default',
+          chineseConvert: convertCode,
+          pageFillThreshold: _pageFillThreshold,
+          showComments: _showComments,
+          paraFormatHash: _paraFormatHash,
+        );
+      } else {
+        return;  // TXT 暂不支持预测预热
+      }
+      
+      final imageHrefs = ResourceManifest.of(page).hrefs;
+      if (imageHrefs.isNotEmpty) {
+        await BookImageStore.instance.prewarmManifest(imageHrefs);
+        readerTrace('image.predict.ready', {
+          'target': '$targetChapter/$targetPage',
+          'count': imageHrefs.length,
+        });
+      }
+    } catch (e) {
+      // 预测性预热失败不影响阅读，静默处理
+      readerTrace('image.predict.error', {'error': e.toString()});
+    }
   }
 }
 

@@ -12,7 +12,7 @@ use reader_core::{
 };
 use std::sync::{Arc, Mutex, OnceLock};
 use once_cell::sync::Lazy;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, Duration};
 use crate::{
     FfiBookSource, FfiSearchBookItem, FfiBookInfo,
     FfiChapterInfo, FfiChapterContent, BOOK_SOURCE_ENGINE
@@ -187,18 +187,49 @@ fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool>
 
 /// 结构化路径分页结果缓存（EPUB；键含排版配置，容量 10 章）
 ///
+/// 阶段2优化：EPUB 分页缓存 TTL 包装（带时间戳）
+#[derive(Clone)]
+struct StructuredCacheEntry {
+    pages: Arc<Vec<crate::PageInfo>>,
+    created_at: SystemTime,
+}
+
+impl StructuredCacheEntry {
+    fn new(pages: Arc<Vec<crate::PageInfo>>) -> Self {
+        Self {
+            pages,
+            created_at: SystemTime::now(),
+        }
+    }
+    
+    fn is_expired(&self, ttl_secs: u64) -> bool {
+        if let Ok(elapsed) = self.created_at.elapsed() {
+            elapsed.as_secs() > ttl_secs
+        } else {
+            // 时钟回退异常 → 视为过期
+            true
+        }
+    }
+}
+
 /// 与 PAGINATION_CACHE 分离的原因：后者存 layout_engine::Page（无背景
 /// 字段且属 reader_core 类型）；结构化路径交付 PageInfo（含 background）
 /// 且不经过文本预处理，生命周期独立。
 ///
 /// M8-P4：值类型从 `Vec<PageInfo>` 改为 `Arc<Vec<PageInfo>>`，
 /// 命中时 Arc::clone 后锁外取单页，免整章克隆。
-static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, Arc<Vec<crate::PageInfo>>>>> =
+///
+/// 阶段2优化：值类型改为 `StructuredCacheEntry`（带 TTL 时间戳），
+/// TTL = 900秒（与 TXT 缓存对齐）。
+static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, StructuredCacheEntry>>> =
     Lazy::new(|| {
         Mutex::new(lru::LruCache::new(
             std::num::NonZeroUsize::new(10).unwrap(),
         ))
     });
+
+/// EPUB 分页缓存 TTL（秒），与 TXT PAGINATION_CACHE 对齐
+const STRUCTURED_CACHE_TTL_SECS: u64 = 900;
 
 /// 结构化分页缓存键
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1960,13 +1991,18 @@ fn process_structured_chapter(
     let cache_key = structured_cache_key(book_id, chapter_index, params);
 
     // M8-P4 缓存命中：Arc::clone 免整章克隆
-    if let Some(arc_pages) = STRUCTURED_PAGINATION_CACHE
+    // 阶段2优化：检查 TTL 过期
+    if let Some(entry) = STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
         .get(&cache_key)
         .cloned()
     {
-        return Ok(Some(arc_pages));
+        if !entry.is_expired(STRUCTURED_CACHE_TTL_SECS) {
+            return Ok(Some(entry.pages));
+        }
+        // TTL 过期 → 移除旧缓存并重新计算
+        STRUCTURED_PAGINATION_CACHE.lock().unwrap().pop(&cache_key);
     }
 
     // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
@@ -2042,11 +2078,13 @@ fn process_structured_chapter(
         .collect();
 
     // M8-P4：Arc 包裹后入缓存，后续命中 Arc::clone 免克隆
+    // 阶段2优化：使用 TTL 包装结构
     let arc_infos = Arc::new(infos);
+    let entry = StructuredCacheEntry::new(Arc::clone(&arc_infos));
     STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
-        .put(cache_key, Arc::clone(&arc_infos));
+        .put(cache_key, entry);
 
     Ok(Some(arc_infos))
 }
@@ -2327,8 +2365,11 @@ pub fn prefetch_structured_chapter(
         para_format_hash,
     );
     let cache_key = structured_cache_key(&book_id, chapter_index, &params);
-    if STRUCTURED_PAGINATION_CACHE.lock().unwrap().contains(&cache_key) {
-        return Ok(true);
+    // 阶段2优化：检查缓存存在且未过期
+    if let Some(entry) = STRUCTURED_PAGINATION_CACHE.lock().unwrap().peek(&cache_key) {
+        if !entry.is_expired(STRUCTURED_CACHE_TTL_SECS) {
+            return Ok(true);
+        }
     }
     Ok(process_structured_chapter(&book_id, chapter_index, &params, true)?.is_some())
 }
