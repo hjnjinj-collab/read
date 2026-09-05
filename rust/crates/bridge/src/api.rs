@@ -1312,9 +1312,20 @@ pub fn get_page(
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = build_layout_engine(config, font_manager);
-    engine.get_page(&content, chapter_index, page_index)?
-        .map(PageInfo::from)
-        .ok_or_else(|| anyhow::anyhow!("Page not found"))
+    // A25c：越界兜底——陈旧索引钳制到末页（对齐 processed 路径）
+    match engine.get_page(&content, chapter_index, page_index)? {
+        Some(p) => Ok(PageInfo::from(p)),
+        None => {
+            eprintln!(
+                "[READER][clamp] get_page requested={page_index} -> 末页"
+            );
+            let count = engine.get_page_count(&content, chapter_index)?;
+            engine
+                .get_page(&content, chapter_index, count.saturating_sub(1))?
+                .map(PageInfo::from)
+                .ok_or_else(|| anyhow::anyhow!("Page not found"))
+        }
+    }
 }
 
 /// Get page count for a chapter (using new layout engine)
@@ -1441,6 +1452,17 @@ pub fn get_page_processed(
         Some(offset) => locate_page_for_offset(&pages, offset),
         None => page_index,
     };
+
+    // 4. 越界兜底（A25c）：无锚点请求的页码可能来自旧排版的陈旧索引
+    // （设置变更竞态/邻页预取在途）——钳制到末页而非抛错。错误页会
+    // 打断阅读；Dart 端 adopt 指纹校验识别内容不符后按新状态重试。
+    if pages.get(effective).is_none() {
+        eprintln!(
+            "[READER][clamp] get_page_processed requested={effective} pages={} -> 末页",
+            pages.len()
+        );
+    }
+    let effective = effective.min(pages.len().saturating_sub(1));
 
     pages
         .get(effective)
@@ -2209,6 +2231,15 @@ pub fn get_page_structured(
         Some(offset) => locate_structured_page(&pages, offset),
         None => page_index,
     };
+
+    // A25c：越界兜底（对齐 get_page_processed）——陈旧索引钳制到末页
+    if pages.get(effective).is_none() {
+        eprintln!(
+            "[READER][clamp] get_page_structured requested={effective} pages={} -> 末页",
+            pages.len()
+        );
+    }
+    let effective = effective.min(pages.len().saturating_sub(1));
 
     pages
         .get(effective)
