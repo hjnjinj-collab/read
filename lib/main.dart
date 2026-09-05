@@ -11,6 +11,7 @@ import 'features/reader/presentation/providers/reader_provider.dart';
 import 'features/reader/presentation/providers/reader_settings.dart';
 import 'core/ffi/book_service.dart';
 import 'core/services/reader_font.dart';
+import 'features/about/presentation/pages/about_page.dart';
 
 /// P6：清掉自定义字体持久化（副本丢失/恢复失败时回退内置），其余设置原样保留
 void _clearCustomFontPersisted() {
@@ -265,6 +266,18 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       appBar: AppBar(
         title: const Text('Legado Flutter'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: '关于',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AboutPage()),
+              );
+            },
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

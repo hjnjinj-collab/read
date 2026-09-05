@@ -1,9 +1,25 @@
 # 架构设计：端到端处理框架
 
-> 更新: 2026-09-04
+> 更新: 2026-09-05
 > 地位: 本文档是当前架构的**权威描述**，以代码实际状态为准。
 > 视角: **主流程主线**——从应用启动到阅读翻页的完整链路；按模块查代码的速查表见 §11。
-> 上一版（2026-09-02）覆盖到 A18/M10-B/M11/M12；本次更新到 **A19 翻页动画家族（水波纹 v16.10 / 坍塌溶解 / 快照按页 LRU / 手势互斥治理）**，动画域权威文档见 [PAGE_TURN_ANIMATION_ARCHITECTURE.md](./PAGE_TURN_ANIMATION_ARCHITECTURE.md)。
+> 上一版（2026-09-04）覆盖到 A19 翻页动画家族 + A25 行级分页统一；本次更新增加**版本管理说明**。
+
+---
+
+## 版本管理说明
+
+**本文档中的 A1-A25 是 ADR 编号（Architecture Decision Record，架构决策记录）**，用于追踪技术决策历史，**独立于用户可见的应用版本号**。
+
+- **应用版本号**：在 `pubspec.yaml` 中维护（格式：`1.0.0+1`，遵循[语义化版本](https://semver.org/lang/zh-CN/)）
+- **版本历史**：在根目录 `CHANGELOG.md` 中记录（遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式）
+- **版本同步**：`pubspec.yaml` 版本号自动同步到 Android `versionCode`/`versionName` 和 iOS `CFBundleVersion`/`CFBundleShortVersionString`
+- **git tag**：每次正式发布时创建对应 tag（如 `v1.0.1`）
+
+ADR 编号示例：
+- **A25**：统一 EPUB/TXT 行级分页精度（2026-09-05 技术决策）
+- **A19**：翻页动画家族架构（水波纹/坍塌/快照 LRU）
+- **M9**：段落格式化共享切分器
 
 ---
 
