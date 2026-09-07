@@ -218,6 +218,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 重置 _pendingRetryCount，tap 的等待轮次必须用独立计数
   int _tapWaitRounds = 0;
 
+  /// A29 手势接管：动画在途被新手势快进时，_runAuto 的 aborted 分支
+  /// 转为「立即提交」而非复位。提交输入必须在 fastForward **之前**捕获
+  /// ——_runAuto 的 await 异步恢复时会读到新手势覆写后的
+  /// _turnDirection/_targetFrame，不能用。
+  bool _takeoverPendingCommit = false;
+  PageDirection? _takeoverCommitDirection;
+  PageFrame? _takeoverCommitFrame;
+
   @override
   void initState() {
     super.initState();
@@ -526,8 +534,41 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   // ── 公开方法：由 ReaderPage 经 Bridge 调用 ──
 
+  /// A29 手势接管：在途自动动画快进到终点。
+  ///
+  /// 真机日志证实快翻手势（30-150ms）与收尾动画（600-1100ms）冲突：
+  /// 此前在途动画期间新手势整段拒绝/排队 →「不跟手、松手等一会才动画」。
+  /// 接管 = 动画立即到终点 + 走提交链路，新手势登记 pending 等发布
+  /// （commit.pageDone 实测 10-90ms）后由 _retryPendingTurn 启动跟手。
+  ///
+  /// - 翻页动画在途 → 快进到 1.0，_runAuto aborted 分支转提交
+  /// - 回弹动画在途 → 快进到 0.0，走正常复位
+  /// 返回后 isAnimating=false；调用方负责登记 pending 或继续正常流程。
+  void _takeOverInFlightAnimation() {
+    final isTurn = _autoIsTurn;
+    // 提交输入先于 fastForward 捕获（fastForward 的隐式 stop 会让
+    // _runAuto 在微任务中恢复，读到新手势覆写后的字段）
+    _takeoverCommitDirection = _turnDirection;
+    _takeoverCommitFrame = _targetFrame;
+    _takeoverPendingCommit = isTurn;
+    _turnController?.fastForward(toEnd: isTurn);
+    // 新手势取代排队意图（覆盖式单槽语义不变，由接管替代整段排队等待）
+    _queuedTapTurn = null;
+    readerTrace('turn.takeover', {'wasTurn': isTurn});
+  }
+
   /// 拖拽开始：门控目标帧（不变量 4），就绪才创建动画控制器
   void onDragStart(PageDirection direction, Offset localTouch) {
+    // A29 手势接管：动画在途（非提交/定格窗口）→ 快进 + 登记 pending，
+    // 提交落地后立即跟手（提交输入已在接管时捕获，此处不再走门控——
+    // state 尚未前进，正常门控会拿到旧帧造成双重推进竞态）
+    if (_turnController?.isAnimating == true &&
+        !_commitInFlight &&
+        !_holdingFinalFrame) {
+      _takeOverInFlightAnimation();
+      _registerPending(direction, isTap: false, touch: localTouch);
+      return;
+    }
     // F1 守卫：动画播放中忽略新请求（防 dispose 正在 tick 的控制器）
     if (_isActive || _turnController?.isAnimating == true) return;
     // M9.5-J：已有挂起手势则拒绝重入（同方向或反方向都算）。
@@ -611,6 +652,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         // 2026-09-04 修复"动画直接消失"：挂起窗口内帧往往已就绪
         // （发布/解码在几十 ms 内完成），此时补跑完整动画而非直翻；
         // 仅越界（章节边界/加载失败）才直翻保功能。
+        // A29：上一翻页提交在途（接管快进触发）——state 尚未前进，
+        // 此刻门控会拿到旧帧造成双重推进，登记等发布后重试。
+        if (_commitInFlight || _holdingFinalFrame) {
+          _registerPending(d, isTap: false, touch: _dragFirstTouch);
+          return;
+        }
         final result = _targetFrameFor(d);
         if (result is TargetReady) {
           await _startTurnAnimated(d, _dragFirstTouch, isTap: false, autoPlay: true);
@@ -665,6 +712,15 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         _holdingFinalFrame ||
         _commitInFlight ||
         _turnController?.isAnimating == true) {
+      // A29：动画在途（非提交/定格窗口）→ 接管快进 + 登记 pending，
+      // 点击翻页立即生效（此前排队等整段动画播完才补播）
+      if (_turnController?.isAnimating == true &&
+          !_commitInFlight &&
+          !_holdingFinalFrame) {
+        _takeOverInFlightAnimation();
+        _registerPending(direction, isTap: true, touch: tapPosition ?? Offset.zero);
+        return;
+      }
       _queuedTapTurn = direction;
       _queuedTapPosition = tapPosition;
       readerTrace('turn.queued', {'direction': direction});
@@ -1140,6 +1196,22 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     if (shouldTurn) {
       final completed = await controller.animateTurn();
       if (!completed) {
+        // A29 手势接管：动画被新手势 fastForward 快进到终点——按接管时
+        // 捕获的提交输入直接提交（不复位：新手势已登记 pending，等本次
+        // 提交落地发布后由 _retryPendingTurn 启动跟手）。
+        if (_takeoverPendingCommit) {
+          _takeoverPendingCommit = false;
+          final d = _takeoverCommitDirection ?? _turnDirection;
+          final frame = _takeoverCommitFrame;
+          readerTrace('turn.takeover.commit', {
+            'direction': d,
+            'target': frame == null
+                ? 'null'
+                : '${frame.page.chapterIndex}/${frame.page.pageIndex}',
+          });
+          await _commitPageTurn(d, frame);
+          return;
+        }
         // 动画被打断（TickerCanceled）：不得提交翻页，复位回空闲态。
         // 此前该 await 永不完成，_turnEndInFlight 悬置 → 手势全被吞。
         readerTrace('turn.aborted', {
@@ -1149,9 +1221,15 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         });
         _resetState();
         _maybeRunQueuedTurn();
+        // A29：接管回弹场景——复位后无发布会触发，主动重试已登记的新手势
+        if (_pendingDirection != null) {
+          unawaited(_retryPendingTurn());
+        }
         return;
       }
-      await _commitPageTurn();
+      // 动画自然完成（与接管快进的竞态窗口兜底：清标志，正常提交）
+      _takeoverPendingCommit = false;
+      await _commitPageTurn(_turnDirection, _targetFrame);
     } else {
       await controller.animateSnapBack();
       _resetState();
@@ -1162,9 +1240,16 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
   /// 提交翻页：先定格目标帧（消除 state 更新间隙的旧页闪现），
   /// 再带预载页即时换页（跳过 FFI，对齐 legado onAnimStop→fillPage 同步机制）
-  Future<void> _commitPageTurn() async {
-    final d = _turnDirection;
-    final frame = _targetFrame;
+  ///
+  /// A29：[directionOverride]/[frameOverride] 供手势接管路径使用——
+  /// 快进提交异步恢复时 _turnDirection/_targetFrame 已被新手势覆写，
+  /// 必须用接管时捕获的输入。
+  Future<void> _commitPageTurn([
+    PageDirection? directionOverride,
+    PageFrame? frameOverride,
+  ]) async {
+    final d = directionOverride ?? _turnDirection;
+    final frame = frameOverride ?? _targetFrame;
     final sw = Stopwatch()..start();
     // A28 排障：悬挂定位检查点——stage 标记当前阻塞在哪一步
     var stage = 'enter';

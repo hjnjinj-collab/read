@@ -110,6 +110,18 @@ abstract class PageTurnAnimationController {
     _controller.stop();
   }
 
+  /// A29 手势接管快进：立即结束在途自动动画并停在目标值
+  /// （翻页 → 1.0 / 回弹 → 0.0）。
+  ///
+  /// 在途的 animateTo 被 value 赋值隐式 stop → 其 Future 经 orCancel
+  /// 返回 false——调用方（composer._runAuto）依据接管标志决定走
+  /// 「立即提交」还是「正常复位」。
+  void fastForward({required bool toEnd}) {
+    _controller.stop();
+    _controller.value = toEnd ? 1.0 : 0.0;
+    repaintNotifier.value++;
+  }
+
   void _onTick() {
     onProgressUpdate(_controller.value);
   }
