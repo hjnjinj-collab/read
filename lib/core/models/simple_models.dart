@@ -185,6 +185,28 @@ class PageInfo {
   });
 }
 
+/// A30：书内全文搜索单条命中（Dart 友好模型，int 已从 FFI BigInt 转换）
+class SearchHit {
+  /// 命中所在章节
+  final int chapterIndex;
+
+  /// 章内字符锚点（与书签 charOffset 同机制，跳转直接复用）
+  final int anchorCharOffset;
+
+  /// 命中前后摘录（约 ±40 字符）
+  final String excerpt;
+
+  /// 命中词在摘录中的字符偏移（高亮用）
+  final int matchOffsetInExcerpt;
+
+  const SearchHit({
+    required this.chapterIndex,
+    required this.anchorCharOffset,
+    required this.excerpt,
+    required this.matchOffsetInExcerpt,
+  });
+}
+
 class ReadingState {
   final String? bookId;
 

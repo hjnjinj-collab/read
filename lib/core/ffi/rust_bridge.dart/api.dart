@@ -7,9 +7,9 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_justify`, `effective_paragraph_spacing`, `effective_punct_compress`, `ensure_epub_cleaned_cache`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `is_expired`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `remember_txt_layout`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_justify`, `effective_paragraph_spacing`, `effective_punct_compress`, `ensure_epub_cleaned_cache`, `find_all_ci`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `is_expired`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredCacheEntry`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
@@ -459,6 +459,29 @@ Future<String> getBookFormat({required String bookId}) => RustLib.instance.api.c
 
 /// Get glyph cache statistics
 Future<String> getCacheStats() => RustLib.instance.api.crateApiGetCacheStats();
+
+/// A30：书内全文搜索
+///
+/// 命中词集合 = 原词 + 双向简繁变体（展示文本可能被转换，用户输入方向不定）。
+/// 计算全在本函数（同步、调用方经 flutter_rust_bridge 线程池异步执行）；
+/// 超过 [SEARCH_TIME_BUDGET_MS] 或命中 [max_hits] 即停止扫描。
+Future<List<SearchHit>> searchInBook({
+  required String bookId,
+  required String query,
+  required bool removeDuplicateTitle,
+  required bool reSegment,
+  required int chineseConvert,
+  required List<FfiReplaceRule> replaceRules,
+  required BigInt maxHits,
+}) => RustLib.instance.api.crateApiSearchInBook(
+  bookId: bookId,
+  query: query,
+  removeDuplicateTitle: removeDuplicateTitle,
+  reSegment: reSegment,
+  chineseConvert: chineseConvert,
+  replaceRules: replaceRules,
+  maxHits: maxHits,
+);
 
 /// Release book from memory
 Future<void> releaseBook({required String bookId}) => RustLib.instance.api.crateApiReleaseBook(bookId: bookId);
@@ -948,4 +971,41 @@ class FfiTextWidth {
           fontSize == other.fontSize &&
           text == other.text &&
           width == other.width;
+}
+
+/// 单条搜索命中（EPUB/TXT 同构契约）
+class SearchHit {
+  final BigInt chapterIndex;
+
+  /// 章内字符偏移（锚点口径）：
+  /// TXT = processed + 段落格式化后文本（与 layout_text 输入同源）；
+  /// EPUB = IR 布局项字符流（与 layout_items 的 char_index 累加同源）
+  final BigInt anchorCharOffset;
+
+  /// 命中前后摘录（约 ±40 字符）
+  final String excerpt;
+
+  /// 命中词在摘录中的字符偏移
+  final BigInt matchOffsetInExcerpt;
+
+  const SearchHit({
+    required this.chapterIndex,
+    required this.anchorCharOffset,
+    required this.excerpt,
+    required this.matchOffsetInExcerpt,
+  });
+
+  @override
+  int get hashCode =>
+      chapterIndex.hashCode ^ anchorCharOffset.hashCode ^ excerpt.hashCode ^ matchOffsetInExcerpt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SearchHit &&
+          runtimeType == other.runtimeType &&
+          chapterIndex == other.chapterIndex &&
+          anchorCharOffset == other.anchorCharOffset &&
+          excerpt == other.excerpt &&
+          matchOffsetInExcerpt == other.matchOffsetInExcerpt;
 }

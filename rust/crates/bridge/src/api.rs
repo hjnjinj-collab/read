@@ -2438,6 +2438,354 @@ pub fn get_cache_stats() -> String {
     "Cache stats: Use layout engine instance to get detailed stats".to_string()
 }
 
+// ===== A30：书内全文搜索 =====
+//
+// 设计约束（用户定案）：
+// - 计算全在 Rust（单次异步 FFI，flutter_rust_bridge 线程池执行），Dart 零扫描
+// - EPUB/TXT 同一 SearchHit 契约，格式分派封装在 Rust 内部
+// - 复用既有内容引擎产物（CleanedChapterCache / EpubCleanedBook / 预处理器），
+//   绝不走分页 API（防排版缓存污染 + BOOKS 写锁竞争）
+
+/// 单条搜索命中（EPUB/TXT 同构契约）
+#[derive(Clone, Debug)]
+pub struct SearchHit {
+    pub chapter_index: usize,
+    /// 章内字符偏移（锚点口径）：
+    /// TXT = processed + 段落格式化后文本（与 layout_text 输入同源）；
+    /// EPUB = IR 布局项字符流（与 layout_items 的 char_index 累加同源）
+    pub anchor_char_offset: usize,
+    /// 命中前后摘录（约 ±40 字符）
+    pub excerpt: String,
+    /// 命中词在摘录中的字符偏移
+    pub match_offset_in_excerpt: usize,
+}
+
+/// 命中前后摘录字符数
+const SEARCH_EXCERPT_CONTEXT_CHARS: usize = 40;
+/// 全书扫描时间预算（超即停，返回已得结果）
+const SEARCH_TIME_BUDGET_MS: u128 = 5000;
+
+/// A30：书内全文搜索
+///
+/// 命中词集合 = 原词 + 双向简繁变体（展示文本可能被转换，用户输入方向不定）。
+/// 计算全在本函数（同步、调用方经 flutter_rust_bridge 线程池异步执行）；
+/// 超过 [SEARCH_TIME_BUDGET_MS] 或命中 [max_hits] 即停止扫描。
+pub fn search_in_book(
+    book_id: String,
+    query: String,
+    remove_duplicate_title: bool,
+    re_segment: bool,
+    chinese_convert: u8,
+    replace_rules: Vec<FfiReplaceRule>,
+    max_hits: usize,
+) -> anyhow::Result<Vec<SearchHit>> {
+    let started = std::time::Instant::now();
+    let query = query.trim().to_string();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let max_hits = max_hits.clamp(1, 500);
+
+    // 命中词集合：原词 + 双向简繁变体（去重）
+    let mut needle_strings = vec![query.clone()];
+    for mode in [1u8, 2] {
+        let v = if mode == 1 {
+            book_parser::chinese_convert::convert_s2t(&query)
+        } else {
+            book_parser::chinese_convert::convert_t2s(&query)
+        };
+        if !needle_strings.contains(&v) {
+            needle_strings.push(v);
+        }
+    }
+    let needles: Vec<Vec<char>> = needle_strings
+        .iter()
+        .map(|s| s.chars().collect())
+        .collect();
+
+    let format = get_book_format(book_id.clone())?;
+    let total_chapters = {
+        let books = BOOKS.read().unwrap();
+        books
+            .get(&book_id)
+            .map(|h| h.book.chapters.len())
+            .ok_or_else(|| anyhow::anyhow!("Book not found"))?
+    };
+
+    // 替换规则（TXT 预处理同口径；EPUB 结构化路径不应用规则，与展示一致）
+    let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
+
+    let mut hits: Vec<SearchHit> = Vec::new();
+    for chapter_index in 0..total_chapters {
+        if hits.len() >= max_hits || started.elapsed().as_millis() > SEARCH_TIME_BUDGET_MS {
+            break;
+        }
+        let result = match format.as_str() {
+            "epub" => search_epub_chapter(
+                &book_id,
+                chapter_index,
+                chinese_convert,
+                &needles,
+                &mut hits,
+                max_hits,
+            ),
+            _ => search_txt_chapter(
+                &book_id,
+                chapter_index,
+                remove_duplicate_title,
+                re_segment,
+                chinese_convert,
+                &rules,
+                &needles,
+                &mut hits,
+                max_hits,
+            ),
+        };
+        if let Err(e) = result {
+            log::warn!("search_in_book 章节搜索失败 chapter={}: {}", chapter_index, e);
+        }
+    }
+
+    readerTraceCompat(&format!(
+        "search.in_book done hits={} truncated={} elapsed_ms={}",
+        hits.len(),
+        hits.len() >= max_hits,
+        started.elapsed().as_millis()
+    ));
+    Ok(hits)
+}
+
+/// 诊断输出（复用 readerTrace 控制台约定：print 直出便于真机查看）
+fn readerTraceCompat(msg: &str) {
+    println!("[READER][search] {}", msg);
+}
+
+/// 字符级 1:1 小写化（多字符展开取首字符——中文场景无影响，保留下标对齐）
+fn search_lower_char(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
+/// 大小写不敏感查找：返回全部命中的起始字符偏移（升序、非重叠）
+fn find_all_ci(hay: &[char], needle: &[char]) -> Vec<usize> {
+    let n = needle.len();
+    if n == 0 || hay.len() < n {
+        return Vec::new();
+    }
+    let hay_lower: Vec<char> = hay.iter().map(|c| search_lower_char(*c)).collect();
+    let nd_lower: Vec<char> = needle.iter().map(|c| search_lower_char(*c)).collect();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    while start + n <= hay_lower.len() {
+        if hay_lower[start..start + n] == nd_lower[..] {
+            out.push(start);
+            start += n; // 非重叠：同词连续命中取第一个
+        } else {
+            start += 1;
+        }
+    }
+    out
+}
+
+/// 多词命中收集：合并 + 按偏移排序 + 重叠去重（保留最先者）
+fn merge_needle_hits(
+    text_chars: &[char],
+    needles: &[Vec<char>],
+    hits: &mut Vec<SearchHit>,
+    chapter_index: usize,
+    anchor_base: usize,
+    max_hits: usize,
+) {
+    let mut offsets: Vec<(usize, usize)> = Vec::new(); // (char offset, needle len)
+    for nd in needles {
+        for off in find_all_ci(text_chars, nd) {
+            offsets.push((off, nd.len()));
+        }
+    }
+    if offsets.is_empty() {
+        return;
+    }
+    offsets.sort_by_key(|(off, _)| *off);
+    let mut accepted: Vec<(usize, usize)> = Vec::new();
+    for (off, len) in offsets {
+        if hits.len() + accepted.len() >= max_hits {
+            break;
+        }
+        if let Some(&(po, pl)) = accepted.last() {
+            if off < po + pl {
+                continue; // 与前一命中重叠 → 丢弃
+            }
+        }
+        accepted.push((off, len));
+    }
+    for (off, len) in accepted {
+        let (excerpt, mo) = build_excerpt(text_chars, off, len);
+        hits.push(SearchHit {
+            chapter_index,
+            anchor_char_offset: anchor_base + off,
+            excerpt,
+            match_offset_in_excerpt: mo,
+        });
+    }
+}
+
+/// 摘录构造：命中词前后 ±40 字符的字符安全窗口
+fn build_excerpt(text_chars: &[char], match_start: usize, match_len: usize) -> (String, usize) {
+    let from = match_start.saturating_sub(SEARCH_EXCERPT_CONTEXT_CHARS);
+    let to = (match_start + match_len + SEARCH_EXCERPT_CONTEXT_CHARS).min(text_chars.len());
+    let excerpt: String = text_chars[from..to].iter().collect();
+    (excerpt, match_start - from)
+}
+
+/// TXT 章节搜索：processed + 段落格式化后文本（与 layout_text 输入同源，
+/// 锚点口径天然一致）。管线与 process_and_layout_chapter :843-874 严格同源，
+/// 但**不回填 PREPROCESSED_CACHE**（全书扫描会挤占 20 章 LRU 阅读窗口）。
+fn search_txt_chapter(
+    book_id: &str,
+    chapter_index: usize,
+    remove_duplicate_title: bool,
+    re_segment: bool,
+    chinese_convert: u8,
+    rules: &[ReplaceRule],
+    needles: &[Vec<char>],
+    hits: &mut Vec<SearchHit>,
+    max_hits: usize,
+) -> anyhow::Result<()> {
+    let raw_content = get_chapter_content_quiet(book_id.to_string(), chapter_index)?;
+    let chapter_title = {
+        let books = BOOKS.read().unwrap();
+        books
+            .get(book_id)
+            .ok_or_else(|| anyhow::anyhow!("Book not found"))?
+            .book
+            .chapters
+            .get(chapter_index)
+            .map(|ch| ch.title.clone())
+            .unwrap_or_default()
+    };
+    let options = ProcessOptions {
+        book_name: String::new(),
+        title: chapter_title,
+        chapter_index,
+        remove_duplicate_title,
+        re_segment,
+        chinese_convert: match chinese_convert {
+            1 => Some(ChineseConvertType::S2T),
+            2 => Some(ChineseConvertType::T2S),
+            _ => None,
+        },
+        adapt_special_style: true,
+        apply_user_markings: false,
+    };
+    let preprocessor = get_preprocessor_for_rules(rules);
+    let processed = shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
+    // 段落格式化（缩进字符注入/重新分段改变文本与偏移——锚点口径必须含此步）
+    let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    let processed = if para_settings.needs_formatting() {
+        reader_core::ParagraphFormatter::new(para_settings).format(&processed)
+    } else {
+        processed
+    };
+    let text_chars: Vec<char> = processed.chars().collect();
+    merge_needle_hits(&text_chars, needles, hits, chapter_index, 0, max_hits);
+    Ok(())
+}
+
+/// EPUB 章节搜索：IR 布局项字符流精算锚点（与 process_structured_chapter
+/// :2031-2045 提取+段落格式化同源、与 layout_items char_index 累加同规则：
+/// Text = text.chars()+1 段落 newline；Image = 0；Table = Σ单元格段落(chars+1)）
+fn search_epub_chapter(
+    book_id: &str,
+    chapter_index: usize,
+    chinese_convert: u8,
+    needles: &[Vec<char>],
+    hits: &mut Vec<SearchHit>,
+    max_hits: usize,
+) -> anyhow::Result<()> {
+    let convert_mode = match chinese_convert {
+        1 => book_parser::content_cleaner::ConvertMode::SimplifiedToTraditional,
+        2 => book_parser::content_cleaner::ConvertMode::TraditionalToSimplified,
+        _ => book_parser::content_cleaner::ConvertMode::None,
+    };
+    // IR 提取（写锁内，parser 独占可变状态——与分页路径同模式）。
+    // font_size 仅影响 IR 的图片尺寸提示，与文本锚点无关——搜索取默认基准。
+    let content = {
+        let mut books = BOOKS.write().unwrap();
+        let handle = books
+            .get_mut(book_id)
+            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+        let structured = handle
+            .structured
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("非结构化书籍"))?;
+        structured
+            .parser
+            .get_chapter_content_structured_ex(
+                chapter_index,
+                convert_mode,
+                book_parser::epub_parser::DEFAULT_BASE_FONT_PX,
+            )?
+    };
+    let mut content = content;
+    {
+        let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+        if para_settings.needs_formatting() {
+            apply_paragraph_format_settings(&mut content.blocks, &para_settings);
+        }
+    }
+    // 块流 → 布局项（与分页路径调用同一函数，规则零漂移）
+    let mut items = Vec::with_capacity(content.blocks.len());
+    blocks_to_layout_items(&content.blocks, &mut items);
+
+    let mut accumulated = 0usize;
+    for item in &items {
+        if hits.len() >= max_hits {
+            return Ok(());
+        }
+        match item {
+            layout_engine::LayoutItem::Text(t) => {
+                let text_chars: Vec<char> = t.text.chars().collect();
+                if text_chars.is_empty() {
+                    continue;
+                }
+                merge_needle_hits(
+                    &text_chars,
+                    needles,
+                    hits,
+                    chapter_index,
+                    accumulated,
+                    max_hits,
+                );
+                // +1 段落 newline（layout_items :803）
+                accumulated += text_chars.len() + 1;
+            }
+            layout_engine::LayoutItem::Image { .. } => {}
+            layout_engine::LayoutItem::Table(table) => {
+                for row in &table.rows {
+                    for cell in row {
+                        for titem in &cell.items {
+                            let text_chars: Vec<char> = titem.text.chars().collect();
+                            if text_chars.is_empty() {
+                                continue;
+                            }
+                            merge_needle_hits(
+                                &text_chars,
+                                needles,
+                                hits,
+                                chapter_index,
+                                accumulated,
+                                max_hits,
+                            );
+                            // +1 段落 newline（layout_table :1828）
+                            accumulated += text_chars.len() + 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Release book from memory
 pub fn release_book(book_id: String) -> anyhow::Result<()> {
     let mut books = BOOKS.write().unwrap();
@@ -3380,6 +3728,7 @@ static PRELOAD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write as IoWrite;
 
     /// M9.4-F：SHARED_GLYPH_CACHE 首次取用即触发 prewarm，
     /// 且热路径键（font_name="default", font_size=18.0）直接命中预热条目
@@ -3891,5 +4240,177 @@ mod tests {
         }
         assert!(saw_cell_text, "应产出表格条目");
         assert_eq!(saw_top_indent, Some(None), "顶层无 CSS 缩进段落透传 None");
+    }
+
+    // ── A30：书内全文搜索对齐验证 ────────────────────────────────
+
+    /// A30 红线验证：TXT 搜索锚点必须落页含命中词。
+    /// anchor 口径 = processed + 段落格式化后文本（与 layout_text 输入同源），
+    /// 本测试同时锁定「搜索管线与展示管线同源」——若任一侧规则漂移即偏页。
+    #[test]
+    fn search_in_book_txt_anchor_alignment() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+        let dir = std::env::temp_dir().join(format!("a30_txt_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let txt_path = dir.join("search.txt");
+        std::fs::write(
+            &txt_path,
+            "第一章 起点\n\n正文内容第一段落。\n\n第二章 终点\n\n第二章节的正文内容提到搜索目标词两次：搜索目标词。\n",
+        )
+        .unwrap();
+        let book_id =
+            parse_txt_file(txt_path.to_string_lossy().to_string(), None).expect("TXT 导入失败");
+
+        let hits = search_in_book(
+            book_id.clone(),
+            "搜索目标词".into(),
+            false,
+            false,
+            0,
+            Vec::new(),
+            100,
+        )
+        .expect("搜索失败");
+        assert_eq!(hits.len(), 2, "第二章应命中两次：{:?}", hits);
+        assert!(hits.iter().all(|h| h.chapter_index == 1), "命中应在第二章");
+
+        // 锚点对齐：每个命中 anchor 经 locate_page_for_offset 定位的页面
+        // 文本必须包含命中词
+        let config = layout_engine::LayoutConfig {
+            width: 360.0,
+            height: 640.0,
+            font_size: 18.0,
+            line_height_multiplier: 1.5,
+            padding: layout_engine::EdgeInsets {
+                left: 20.0,
+                top: 20.0,
+                right: 20.0,
+                bottom: 20.0,
+            },
+            font_name: "TestFont".into(),
+            letter_spacing: 0.0,
+            paragraph_spacing: 18.0 * 0.8,
+            page_fill_threshold: 0.9,
+            show_comments: true,
+            justify: false,
+            punctuation_compress: false,
+        };
+        for hit in &hits {
+            let pages = process_and_layout_chapter(
+                &book_id, hit.chapter_index, &config, false, false, 0, &[], 0,
+            )
+            .expect("分页失败");
+            let page_idx = locate_page_for_offset(&pages, hit.anchor_char_offset);
+            let page_text: String = pages[page_idx]
+                .entries
+                .iter()
+                .filter_map(|e| match e {
+                    layout_engine::PageEntry::Text(l) => Some(l.text.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                page_text.contains("搜索目标词"),
+                "anchor={} 定位页应包含命中词，实际页文本：{}",
+                hit.anchor_char_offset,
+                page_text
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A30 红线验证：EPUB 搜索锚点必须落页含命中词（IR 字符流累计规则
+    /// 与 layout_items 同源——Text chars+1 段落 newline / Image 0 / Table
+    /// Σ单元格段落(chars+1)）。规则漂移即偏页，本测试是漂移探测器。
+    #[test]
+    fn search_in_book_epub_anchor_alignment() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+        let dir = std::env::temp_dir().join(format!("a30_epub_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("OEBPS")).unwrap();
+        std::fs::create_dir_all(dir.join("META-INF")).unwrap();
+
+        let ch1 = "<?xml version=\"1.0\" encoding=\"utf-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>c1</title></head><body><p>这是第一章的正文内容，藏着独特关键词蓝鲸座。</p></body></html>";
+        let ch2 = "<?xml version=\"1.0\" encoding=\"utf-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>c2</title></head><body><p>第二章正文也提到蓝鲸座，还有普通句子。</p></body></html>";
+        std::fs::write(dir.join("OEBPS/ch1.xhtml"), ch1).unwrap();
+        std::fs::write(dir.join("OEBPS/ch2.xhtml"), ch2).unwrap();
+        let container = "<?xml version=\"1.0\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>";
+        std::fs::write(dir.join("META-INF/container.xml"), container).unwrap();
+        let opf = "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"id\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>搜索测试书</dc:title><dc:language>zh</dc:language><dc:creator>t</dc:creator><dc:identifier id=\"id\">search-test</dc:identifier></metadata><manifest><item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine></package>";
+        std::fs::write(dir.join("OEBPS/content.opf"), opf).unwrap();
+
+        let epub_path = dir.join("test.epub");
+        {
+            let file = std::fs::File::create(&epub_path).unwrap();
+            let mut zw = zip::ZipWriter::new(file);
+            let opts = zip::write::FileOptions::default();
+            zw.start_file("mimetype", opts).unwrap();
+            zw.write_all(b"application/epub+zip").unwrap();
+            zw.start_file(
+                "META-INF/container.xml",
+                zip::write::FileOptions::default(),
+            )
+            .unwrap();
+            zw.write_all(container.as_bytes()).unwrap();
+            zw.start_file("OEBPS/content.opf", zip::write::FileOptions::default())
+                .unwrap();
+            zw.write_all(opf.as_bytes()).unwrap();
+            zw.start_file("OEBPS/ch1.xhtml", zip::write::FileOptions::default())
+                .unwrap();
+            zw.write_all(ch1.as_bytes()).unwrap();
+            zw.start_file("OEBPS/ch2.xhtml", zip::write::FileOptions::default())
+                .unwrap();
+            zw.write_all(ch2.as_bytes()).unwrap();
+            zw.finish().unwrap();
+        }
+
+        let book_id = parse_txt_file_inner(
+            epub_path.to_string_lossy().to_string(),
+            None,
+            None,
+        )
+        .expect("EPUB 导入失败");
+
+        let hits = search_in_book(
+            book_id.clone(),
+            "蓝鲸座".into(),
+            false,
+            false,
+            0,
+            Vec::new(),
+            100,
+        )
+        .expect("搜索失败");
+        assert_eq!(hits.len(), 2, "两章应各命中一次：{:?}", hits);
+        assert_eq!(hits[0].chapter_index, 0);
+        assert_eq!(hits[1].chapter_index, 1);
+
+        // 锚点对齐：每个命中 anchor 经 locate_structured_page 定位的页面
+        // 文本必须包含命中词
+        let params = StructuredParams::from_args(
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+            "TestFont".to_string(), 0, 0.9, true, 0,
+        );
+        for hit in &hits {
+            let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)
+                .expect("分页失败")
+                .expect("前台语义恒 Some");
+            let page_idx = locate_structured_page(&pages, hit.anchor_char_offset);
+            let page_text: String = pages[page_idx]
+                .entries
+                .iter()
+                .filter_map(|e| e.text.clone())
+                .collect();
+            assert!(
+                page_text.contains("蓝鲸座"),
+                "anchor={} 定位页应包含命中词，实际页文本：{}",
+                hit.anchor_char_offset,
+                page_text
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

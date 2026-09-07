@@ -325,6 +325,51 @@ class BookService {
     await rust_api.releaseBook(bookId: bookId);
   }
 
+  /// A30：书内全文搜索（单次异步 FFI，全书扫描/匹配全在 Rust 线程池执行，
+  /// UI 线程零参与）。命中词自动叠加双向简繁变体；超时/命中上限由 Rust
+  /// 内置预算控制。
+  ///
+  /// [replaceRules] 与当前阅读设置同口径传入（TXT 预处理应用，EPUB 与
+  /// 展示一致不应用）。
+  Future<List<SearchHit>> searchInBook(
+    String bookId,
+    String query, {
+    required bool removeDuplicateTitle,
+    required bool reSegment,
+    required int chineseConvert, // 0=none, 1=s2t, 2=t2s
+    List<ReplaceRuleItem> replaceRules = const [],
+    int maxHits = 200,
+  }) async {
+    final hits = await rust_api.searchInBook(
+      bookId: bookId,
+      query: query,
+      removeDuplicateTitle: removeDuplicateTitle,
+      reSegment: reSegment,
+      chineseConvert: chineseConvert,
+      replaceRules: replaceRules
+          .map(
+            (r) => rust_api.FfiReplaceRule(
+              pattern: r.pattern,
+              replacement: r.replacement,
+              ruleType: r.isRegex ? 1 : 0,
+              enabled: r.enabled,
+            ),
+          )
+          .toList(),
+      maxHits: BigInt.from(maxHits),
+    );
+    return hits
+        .map(
+          (h) => SearchHit(
+            chapterIndex: h.chapterIndex.toInt(),
+            anchorCharOffset: h.anchorCharOffset.toInt(),
+            excerpt: h.excerpt,
+            matchOffsetInExcerpt: h.matchOffsetInExcerpt.toInt(),
+          ),
+        )
+        .toList();
+  }
+
   // ===== 结构化阅读路径（EPUB 路线2） =====
 
   /// 书籍格式标记（"epub" | "txt"），Dart 据此分流分页 API
