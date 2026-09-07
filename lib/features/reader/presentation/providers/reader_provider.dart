@@ -447,9 +447,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
     if (state.bookId == null) return;
 
-    // EPUB：净化选项经 getPageStructured 的 chineseConvert 参数随调用
-    // 下发（缓存键含转换位，切换即换键重算）；去广告在 JS 提取层恒开，
-    // 不调 updateBookCleaning（无导入级净化缓存）
+    // EPUB：净化选项经 getPageStructured 随调用下发——简繁经 chineseConvert、
+    // 用户替换规则经 replaceRules（A30b），两者哈希均入 Rust 结构化分页缓存
+    // 键，切换/改规则即换键重算；去广告在 JS 提取层恒开，不调
+    // updateBookCleaning（无导入级净化缓存）
     if (_isEpub) {
       await _loadCurrentPage(
         anchorCharOffset: state.currentPage?.startCharIndex,
@@ -622,6 +623,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           pageFillThreshold: _pageFillThreshold,
           showComments: _showComments,
           paraFormatHash: _paraFormatHash,
+          replaceRules: _replaceRules, // A30b：EPUB 净化规则同口径下发
         );
       } else {
         // 转换简繁设置为数字代码
@@ -1237,6 +1239,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
         paraFormatHash: _paraFormatHash,
+        replaceRules: _replaceRules, // A30b：邻居页排版与前台同参（含规则）
       );
     } else {
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1299,6 +1302,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
         paraFormatHash: _paraFormatHash,
+        replaceRules: _replaceRules, // A30b：预取与前台完全同参（含规则）
       ),
     );
   }
@@ -1498,6 +1502,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
         paraFormatHash: _paraFormatHash,
+        replaceRules: _replaceRules, // A30b：页数与页内容同参（含规则）
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1873,6 +1878,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           pageFillThreshold: _pageFillThreshold,
           showComments: _showComments,
           paraFormatHash: _paraFormatHash,
+          replaceRules: _replaceRules, // A30b：图片预热取页与前台同参
         );
       } else {
         return;  // TXT 暂不支持预测预热

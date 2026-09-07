@@ -733,6 +733,8 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A23 | P3 动画域清理：v15 fallback 删除 + buildSimulation 家族/PageFlipSession/viewport 只写链清退 | ✅ 2026-09-05 |
 | A24 | 字体设置批次（字号/行距滑杆 + 字体选择持久化）+ EPUB 分页碎片化回归修复 | ✅ 2026-09-05 |
 | A25 | 统一行级分页精度：EPUB 场景 A/B 退役 + fill_threshold 语义重定义（双路径统一消费） | ✅ 2026-09-05 |
+| A30 | 书内全文搜索（Rust 统一 API + 锚点对齐单测 + UI 跳转） | ✅ 2026-09-07 |
+| A30b | EPUB 替换规则接入（块级应用 + rules_hash 缓存键）+ 搜索键盘/跳转闪帧修复 | ✅ 2026-09-07 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
@@ -1036,7 +1038,44 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   换后 EpubCleanedBook 已退化）——「已物化」不等于「仍同源」；②跨语
   言锚点换算的规则必须以**对齐单测**锁死，而非人工推演。
 
-**所有 A1–A30 + APK 全线落地**。下一阶段候选：
+**A30b 详细说明（EPUB 替换规则接入 + 搜索闪帧修复，2026-09-07 真机验证反馈）**：
+
+- **问题一（EPUB 替换规则不生效）**：规则仅在 TXT 预处理路径生效
+  （`ContentPreprocessor::process` 内），EPUB 结构化管线
+  （`get_page_structured`→`process_structured_chapter`）设计上未接
+  replace_rules（api.rs 旧注释自认「与展示一致」——展示本身就没规则）。
+- **修复（块级应用）**：`StructuredParams` 增 `rules: Arc<Vec<ReplaceRule>>`
+  + `rules_hash`；三 FFI 入口（get_page_structured /
+  get_page_count_structured / prefetch_structured_chapter）加
+  `replace_rules` 参数，`rules_hash` 入 `StructuredPageKey`（换规则即
+  换键重算，Dart 页数缓存键经 layoutFingerprint 已含规则指纹无需改）。
+  新增 `apply_replace_rules_to_blocks`：递归应用 Paragraph/Heading/
+  List/Quote/Table 单元格（Image/Rule 跳过），经 `shared_tokio_runtime
+  ().block_on` 调用（复用 `get_preprocessor_for_rules` 正则 LRU）；
+  **规则先于段落格式化**（文本长度变化不得污染缩进注入）；文本变化的
+  块清空 runs（StyledRun 字符区间基于原文，降级整块统一样式防错位绘
+  制）。`search_epub_chapter` 同函数同时机应用——搜索/展示/锚点三方
+  同源（红线保持）。语义差异：TXT 整章应用（跨行正则可命中），EPUB
+  按块（跨段正则不命中，legado 规则以段内为主，可接受）。
+- **问题二（搜索输入时内容闪现刷新）**：搜索对话框是唯一带输入框的对
+  话框——TextField 弹软键盘 → Scaffold resizeToAvoidBottomInset 压缩
+  body → LayoutBuilder 测得假尺寸变化 → onWindowResized 全章重排。
+- **修复（视口冻结）**：`viewInsets.bottom > 0` 期间跳过尺寸变化登记
+  （键盘收起后 constraints 回原值自然恢复；分屏/转屏 insets 不变照常
+  重排）。
+- **问题三（跳转旧章闪帧）**：jumpToSearchHit/jumpToBookmark 先
+  copyWith 切章再加载 → 加载期间显示旧章一帧 + FFI 返回二次重建。
+- **修复（deferred commit）**：`_loadCurrentPage` 加 `targetChapterIndex`
+  参数，目标章排版在 FFI 内完成，章节切换与页面在返回后一次性提交；
+  状态守卫基准改为「请求发起时章节」（普通加载两者相等语义不变）。
+- **测试**：`tests/epub_replace_rules.rs` 三红线——展示含规则后文本/
+  换规则换缓存键重算（哈希不在键则第二次调用命中旧缓存必红）/搜索
+  「规则后文本」命中且锚点落页含命中词。
+- **教训**：①「展示路径不应用 X」的旧注释会固化为隐式契约，新功能接
+  X 时搜索侧若同步跟进反而固化错误——对齐的基准是**正确口径**而非现
+  状；②递归 async fn 必须显式 Box::pin（块流递归深度浅，开销可忽略）。
+
+**所有 A1–A30b + APK 全线落地**。下一阶段候选：
 - P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）
 - P2：TTS 朗读（渲染高亮基建已有，缺语音引擎+分句调度）
 - P2：笔记/划线持久化（ReaderSelection 渲染模型已有，缺表结构与 UI）

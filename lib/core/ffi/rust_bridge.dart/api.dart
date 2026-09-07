@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_justify`, `effective_paragraph_spacing`, `effective_punct_compress`, `ensure_epub_cleaned_cache`, `find_all_ci`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `is_expired`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `apply_replace_rules_to_blocks_inner`, `apply_replace_rules_to_blocks`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_justify`, `effective_paragraph_spacing`, `effective_punct_compress`, `ensure_epub_cleaned_cache`, `find_all_ci`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `is_expired`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredCacheEntry`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
 
@@ -330,6 +330,8 @@ Future<BigInt> getPageCountProcessed({
 /// `anchor_char_offset`: 进度锚点——章内文本字符偏移（与 TXT 路径同语义，
 /// 图片项不消耗锚点）；提供时返回包含该偏移的页（跳过纯图装饰页）。
 /// `chinese_convert`: 阅读级简繁转换（0=无 1=简→繁 2=繁→简；与 TXT 同编码）
+/// `replace_rules`: 用户替换规则（A30b：块级应用；哈希入缓存键，规则变更
+/// 即换键重算。与 TXT 路径同口径）
 Future<PageInfo> getPageStructured({
   required String bookId,
   required BigInt chapterIndex,
@@ -348,6 +350,7 @@ Future<PageInfo> getPageStructured({
   required double pageFillThreshold,
   required bool showComments,
   required BigInt paraFormatHash,
+  required List<FfiReplaceRule> replaceRules,
 }) => RustLib.instance.api.crateApiGetPageStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -366,6 +369,7 @@ Future<PageInfo> getPageStructured({
   pageFillThreshold: pageFillThreshold,
   showComments: showComments,
   paraFormatHash: paraFormatHash,
+  replaceRules: replaceRules,
 );
 
 /// 结构化分页计数（EPUB 主路径）
@@ -385,6 +389,7 @@ Future<BigInt> getPageCountStructured({
   required double pageFillThreshold,
   required bool showComments,
   required BigInt paraFormatHash,
+  required List<FfiReplaceRule> replaceRules,
 }) => RustLib.instance.api.crateApiGetPageCountStructured(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -401,6 +406,7 @@ Future<BigInt> getPageCountStructured({
   pageFillThreshold: pageFillThreshold,
   showComments: showComments,
   paraFormatHash: paraFormatHash,
+  replaceRules: replaceRules,
 );
 
 /// EPUB 翻章预取：以与前台完全一致的参数预计算目标章分页并写入缓存。
@@ -425,6 +431,7 @@ Future<bool> prefetchStructuredChapter({
   required double pageFillThreshold,
   required bool showComments,
   required BigInt paraFormatHash,
+  required List<FfiReplaceRule> replaceRules,
 }) => RustLib.instance.api.crateApiPrefetchStructuredChapter(
   bookId: bookId,
   chapterIndex: chapterIndex,
@@ -441,6 +448,7 @@ Future<bool> prefetchStructuredChapter({
   pageFillThreshold: pageFillThreshold,
   showComments: showComments,
   paraFormatHash: paraFormatHash,
+  replaceRules: replaceRules,
 );
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）

@@ -252,15 +252,19 @@ struct StructuredPageKey {
     show_comments: bool,
     /// M9 段落格式化设置哈希（缩进/重分段/间距变更即换键）
     para_format_hash: u64,
+    /// A30b：用户替换规则集哈希（规则变更即换键自然重算）
+    rules_hash: u64,
 }
 
 impl StructuredPageKey {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         book_id: &str,
         chapter_index: usize,
         config: &LayoutConfig,
         convert_mode: u8,
         para_format_hash: u64,
+        rules_hash: u64,
     ) -> Self {
         Self {
             cache_schema_revision: CACHE_SCHEMA_REVISION,
@@ -282,6 +286,7 @@ impl StructuredPageKey {
             page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
             show_comments: config.show_comments,
             para_format_hash,
+            rules_hash,
         }
     }
 }
@@ -1974,6 +1979,61 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
     }
 }
 
+/// A30b：对 IR 块流递归应用用户替换规则（EPUB 结构化路径）。
+///
+/// TXT 侧规则在 ContentPreprocessor::process 内整章应用；EPUB 无整章文本
+/// 形态，按块应用（跨段正则不命中——legado 净化规则以段内模式为主，可接受）。
+/// 文本发生变化的块清空 runs（StyledRun 字符区间基于原文，规则改写后区间
+/// 失配，降级为整块统一样式，防错位绘制）。
+fn apply_replace_rules_to_blocks(
+    blocks: &mut [book_parser::ContentBlock],
+    pre: &ContentPreprocessor,
+) -> anyhow::Result<()> {
+    shared_tokio_runtime().block_on(apply_replace_rules_to_blocks_inner(blocks, pre))
+}
+
+async fn apply_replace_rules_to_blocks_inner(
+    blocks: &mut [book_parser::ContentBlock],
+    pre: &ContentPreprocessor,
+) -> anyhow::Result<()> {
+    for block in blocks.iter_mut() {
+        match block {
+            book_parser::ContentBlock::Paragraph { text, runs, .. } => {
+                let new_text = pre.apply_replace_rules(text, "").await?;
+                if new_text != *text {
+                    runs.clear();
+                    *text = new_text;
+                }
+            }
+            book_parser::ContentBlock::Heading { text, .. } => {
+                let new_text = pre.apply_replace_rules(text, "").await?;
+                if new_text != *text {
+                    *text = new_text;
+                }
+            }
+            book_parser::ContentBlock::List { items, .. } => {
+                for item in items.iter_mut() {
+                    // 递归 async fn 需装箱引入间接层（嵌套仅 2-3 层深，开销可忽略）
+                    Box::pin(apply_replace_rules_to_blocks_inner(&mut item.blocks, pre)).await?;
+                }
+            }
+            book_parser::ContentBlock::Quote { blocks } => {
+                Box::pin(apply_replace_rules_to_blocks_inner(blocks, pre)).await?;
+            }
+            book_parser::ContentBlock::Table { rows, .. } => {
+                for row in rows.iter_mut() {
+                    for cell in row.iter_mut() {
+                        Box::pin(apply_replace_rules_to_blocks_inner(&mut cell.blocks, pre))
+                            .await?;
+                    }
+                }
+            }
+            _ => {} // Image / Rule 无文本
+        }
+    }
+    Ok(())
+}
+
 /// 结构化章节的「提取 + 分页」（带 LRU 缓存；键含排版配置+简繁模式）
 ///
 /// `prefer_try_lock`: 预取语义——提取段用 try_write 抢 BOOKS 写锁，
@@ -2037,6 +2097,14 @@ fn process_structured_chapter(
     // M9.1：EPUB 段落格式化（超长段切短 + 用户缩进覆盖 CSS）。
     // 设置经 para_format_hash 入缓存键——变更即换键重排，此处读全局即可。
     let mut content = content;
+
+    // A30b：用户替换规则块级应用（与 TXT 预处理同口径；规则可能改变文本
+    // 长度，必须先于段落格式化与布局项字符累计——展示/搜索/锚点三方同源）。
+    if !params.rules.is_empty() {
+        let pre = get_preprocessor_for_rules(&params.rules);
+        apply_replace_rules_to_blocks(&mut content.blocks, pre.as_ref())?;
+    }
+
     {
         let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
         if para_settings.needs_formatting() {
@@ -2154,11 +2222,15 @@ fn structured_layout_config(
 /// 三个 FFI 入口（get_page_structured / get_page_count_structured /
 /// prefetch_structured_chapter）与 process_structured_chapter 全部经由
 /// 本结构构造 config 与缓存键，杜绝「多处手抄参数 → bit 级错位 → 静默 miss」。
-/// FFI 签名不变，无需 codegen。
+///
+/// A30b：新增用户替换规则（块级应用）。rules_hash 入结构化分页缓存键——
+/// 规则变更即换键自然重算；规则本体供 process_structured_chapter 应用。
 struct StructuredParams {
     config: LayoutConfig,
     convert_mode: u8,
     para_format_hash: u64,
+    rules: Arc<Vec<ReplaceRule>>,
+    rules_hash: u64,
 }
 
 impl StructuredParams {
@@ -2177,7 +2249,10 @@ impl StructuredParams {
         page_fill_threshold: f32,
         show_comments: bool,
         para_format_hash: u64,
+        replace_rules: Vec<FfiReplaceRule>,
     ) -> Self {
+        let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
+        let rules_hash = CacheKey::hash_replace_rules(&rules);
         Self {
             config: structured_layout_config(
                 width,
@@ -2194,6 +2269,8 @@ impl StructuredParams {
             ),
             convert_mode: chinese_convert,
             para_format_hash,
+            rules: Arc::new(rules),
+            rules_hash,
         }
     }
 }
@@ -2210,6 +2287,7 @@ fn structured_cache_key(
         &params.config,
         params.convert_mode,
         params.para_format_hash,
+        params.rules_hash,
     )
 }
 
@@ -2218,6 +2296,8 @@ fn structured_cache_key(
 /// `anchor_char_offset`: 进度锚点——章内文本字符偏移（与 TXT 路径同语义，
 /// 图片项不消耗锚点）；提供时返回包含该偏移的页（跳过纯图装饰页）。
 /// `chinese_convert`: 阅读级简繁转换（0=无 1=简→繁 2=繁→简；与 TXT 同编码）
+/// `replace_rules`: 用户替换规则（A30b：块级应用；哈希入缓存键，规则变更
+/// 即换键重算。与 TXT 路径同口径）
 #[allow(clippy::too_many_arguments)]
 pub fn get_page_structured(
     book_id: String,
@@ -2237,6 +2317,7 @@ pub fn get_page_structured(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<crate::PageInfo> {
     // M12-v4 诊断：输出 FFI 入口收到的 width 参数（仅首次）
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -2260,6 +2341,7 @@ pub fn get_page_structured(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        replace_rules,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &params, false)?
@@ -2303,6 +2385,7 @@ pub fn get_page_count_structured(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<usize> {
     let params = StructuredParams::from_args(
         width,
@@ -2318,6 +2401,7 @@ pub fn get_page_count_structured(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        replace_rules,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &params, false)?
@@ -2348,6 +2432,7 @@ pub fn prefetch_structured_chapter(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<bool> {
     let params = StructuredParams::from_args(
         width,
@@ -2363,6 +2448,7 @@ pub fn prefetch_structured_chapter(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        replace_rules,
     );
     let cache_key = structured_cache_key(&book_id, chapter_index, &params);
     // 阶段2优化：检查缓存存在且未过期
@@ -2512,7 +2598,8 @@ pub fn search_in_book(
             .ok_or_else(|| anyhow::anyhow!("Book not found"))?
     };
 
-    // 替换规则（TXT 预处理同口径；EPUB 结构化路径不应用规则，与展示一致）
+    // 用户替换规则：TXT 在预处理内应用；A30b 起 EPUB 结构化路径块级应用
+    // （与展示同口径），两格式搜索与展示同源
     let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
 
     let mut hits: Vec<SearchHit> = Vec::new();
@@ -2525,6 +2612,7 @@ pub fn search_in_book(
                 &book_id,
                 chapter_index,
                 chinese_convert,
+                &rules,
                 &needles,
                 &mut hits,
                 max_hits,
@@ -2691,12 +2779,15 @@ fn search_txt_chapter(
 }
 
 /// EPUB 章节搜索：IR 布局项字符流精算锚点（与 process_structured_chapter
-/// :2031-2045 提取+段落格式化同源、与 layout_items char_index 累加同规则：
-/// Text = text.chars()+1 段落 newline；Image = 0；Table = Σ单元格段落(chars+1)）
+/// 提取+规则应用+段落格式化同源、与 layout_items char_index 累加同规则：
+/// Text = text.chars()+1 段落 newline；Image = 0；Table = Σ单元格段落(chars+1)）。
+/// A30b：replace_rules 在段落格式化前块级应用（与展示路径同函数同时机，
+/// 锚点/摘录基于「规则后文本」——与展示口径一致）
 fn search_epub_chapter(
     book_id: &str,
     chapter_index: usize,
     chinese_convert: u8,
+    rules: &[ReplaceRule],
     needles: &[Vec<char>],
     hits: &mut Vec<SearchHit>,
     max_hits: usize,
@@ -2726,6 +2817,14 @@ fn search_epub_chapter(
             )?
     };
     let mut content = content;
+
+    // A30b：用户替换规则块级应用——与 process_structured_chapter 同函数
+    // 同时机（先规则后段落格式化），锚点字符流与展示天然同源
+    if !rules.is_empty() {
+        let pre = get_preprocessor_for_rules(rules);
+        apply_replace_rules_to_blocks(&mut content.blocks, pre.as_ref())?;
+    }
+
     {
         let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
         if para_settings.needs_formatting() {
@@ -4392,7 +4491,7 @@ mod tests {
         // 文本必须包含命中词
         let params = StructuredParams::from_args(
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
-            "TestFont".to_string(), 0, 0.9, true, 0,
+            "TestFont".to_string(), 0, 0.9, true, 0, Vec::new(),
         );
         for hit in &hits {
             let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)

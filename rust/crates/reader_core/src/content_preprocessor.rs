@@ -351,7 +351,10 @@ impl ContentPreprocessor {
     /// 规则类型路由（D9）：JS 脚本为主路径；string/regex 为兜底。
     /// JS 规则失败（语法/执行/超时）只跳过该规则并告警，不中断流水线、
     /// 不自动禁用——脚本错误不应殃及整章渲染。
-    async fn apply_replace_rules(
+    ///
+    /// A30b 起 pub：bridge 的 EPUB 结构化路径按块调用（TXT 仍在 process
+    /// 内整章应用）。
+    pub async fn apply_replace_rules(
         &self,
         content: &str,
         book_name: &str,

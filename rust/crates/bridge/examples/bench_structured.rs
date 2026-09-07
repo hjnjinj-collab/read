@@ -68,6 +68,8 @@ fn main() -> anyhow::Result<()> {
         paragraph_spacing: 18.0 * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: false,
+        punctuation_compress: false,
     };
 
     // ===== 1. 冷布局（每次新建 GlyphCache） =====

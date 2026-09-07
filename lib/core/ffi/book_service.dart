@@ -370,6 +370,20 @@ class BookService {
         .toList();
   }
 
+  /// ReplaceRuleItem → FfiReplaceRule 统一转换（rule_type: 0=字符串 1=正则；
+  /// A30b 起 EPUB 结构化路径也消费规则，转换收敛到单点）
+  List<rust_api.FfiReplaceRule> _toFfiRules(List<ReplaceRuleItem> rules) =>
+      rules
+          .map(
+            (r) => rust_api.FfiReplaceRule(
+              pattern: r.pattern,
+              replacement: r.replacement,
+              ruleType: r.isRegex ? 1 : 0,
+              enabled: r.enabled,
+            ),
+          )
+          .toList();
+
   // ===== 结构化阅读路径（EPUB 路线2） =====
 
   /// 书籍格式标记（"epub" | "txt"），Dart 据此分流分页 API
@@ -445,6 +459,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     final rustPage = await rust_api.getPageStructured(
       bookId: bookId,
@@ -466,6 +481,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      replaceRules: _toFfiRules(replaceRules),
     );
     return _mapPage(rustPage);
   }
@@ -487,6 +503,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     final count = await rust_api.getPageCountStructured(
       bookId: bookId,
@@ -504,6 +521,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      replaceRules: _toFfiRules(replaceRules),
     );
     return count.toInt();
   }
@@ -529,6 +547,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     return await rust_api.prefetchStructuredChapter(
       bookId: bookId,
@@ -546,6 +565,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      replaceRules: _toFfiRules(replaceRules),
     );
   }
 
