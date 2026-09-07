@@ -1,3 +1,8 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 /// 阅读器翻页诊断日志。
 ///
 /// 使用 print 而不是 debugPrint，保证 Windows CMD 中按事件顺序立即可见。
@@ -6,6 +11,10 @@
 /// A28 排障：每帧/每次绘制触发的噪声事件默认抑制（[_frameNoiseEvents]），
 /// 仅保留生命周期与错误事件；定位渲染细节时置 [readerTraceVerbose] = true
 /// 全量输出。
+///
+/// A28 文件日志：真机排障无法直接看控制台，[readerTrace] 同步双写文件
+/// （`<appDocuments>/reader_trace.log`，启动时轮转上一会话到 .old），
+/// 菜单栏「日志导出」按钮经 [readTraceLogs] + FilePicker SAF 导出。
 bool readerTraceVerbose = false;
 
 /// 每帧/每次绘制/高频循环触发的噪声事件（默认抑制）
@@ -37,8 +46,95 @@ void readerTrace(String event, [Map<String, Object?> fields = const {}]) {
   final details = fields.entries
       .map((entry) => '${entry.key}=${entry.value}')
       .join(' ');
-  print('[READER][$timestamp] $event${details.isEmpty ? '' : ' $details'}');
+  final line =
+      '[READER][$timestamp] $event${details.isEmpty ? '' : ' $details'}';
+  print(line);
+  // 文件双写（异步，失败静默——诊断通道不得影响功能）
+  unawaited(_TraceFileSink.instance.write(line));
 }
+
+// ── 文件日志 sink（A28 真机排障）──────────────────────────────────
+
+/// 文件日志单例：始终开启，与控制台同源同过滤。
+/// - 启动首次写入时轮转：上一会话 reader_trace.log → reader_trace.old.log
+/// - 2MB 上限防无限增长（超过后静默停写）
+/// - 所有 IO 异常静默吞掉：日志失败绝不能影响阅读功能
+class _TraceFileSink {
+  _TraceFileSink._();
+  static final _TraceFileSink instance = _TraceFileSink._();
+
+  static const int _maxBytes = 2 * 1024 * 1024;
+
+  File? _file;
+  IOSink? _sink;
+  Future<void>? _initFuture;
+  int _bytes = 0;
+
+  Future<void> _ensureInit() {
+    _initFuture ??= _doInit();
+    return _initFuture!;
+  }
+
+  Future<void> _doInit() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/reader_trace.log');
+      final old = File('${dir.path}/reader_trace.old.log');
+      if (await file.exists()) {
+        if (await old.exists()) {
+          await old.delete();
+        }
+        await file.rename(old.path);
+      }
+      _file = file;
+      _sink = file.openWrite(mode: FileMode.append);
+      _bytes = 0;
+    } catch (_) {
+      _file = null;
+      _sink = null; // 文件日志不可用 → 仅控制台
+    }
+  }
+
+  Future<void> write(String line) async {
+    await _ensureInit();
+    final sink = _sink;
+    if (sink == null || _bytes > _maxBytes) return;
+    try {
+      sink.writeln(line);
+      _bytes += line.length + 1;
+    } catch (_) {}
+  }
+
+  Future<void> flush() async {
+    try {
+      await _sink?.flush();
+    } catch (_) {}
+  }
+
+  /// 读取全部日志（上次会话 .old + 本次），供导出
+  Future<String?> readAll() async {
+    await flush();
+    try {
+      final old = File('${_file?.parent.path}/reader_trace.old.log');
+      final buffer = StringBuffer();
+      if (await old.exists()) {
+        buffer.writeln('===== 上一会话 (reader_trace.old.log) =====');
+        buffer.writeln(await old.readAsString());
+      }
+      if (_file != null && await _file!.exists()) {
+        buffer.writeln('===== 本次会话 (reader_trace.log) =====');
+        buffer.writeln(await _file!.readAsString());
+      }
+      final content = buffer.toString();
+      return content.isEmpty ? null : content;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// 导出用：读取全部日志文本（上一会话 + 本次）；null = 暂无日志
+Future<String?> readTraceLogs() => _TraceFileSink.instance.readAll();
 
 int readerObjectId(Object? value) =>
     value == null ? 0 : identityHashCode(value);

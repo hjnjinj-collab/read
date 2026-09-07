@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
+import '../diagnostics/reader_trace.dart';
 import '../providers/reader_provider.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import 'chapter_list_dialog.dart';
@@ -245,6 +250,11 @@ class ReaderMenu extends ConsumerWidget {
                       );
                     },
                   ),
+                  _MenuButton(
+                    icon: Icons.receipt_long,
+                    label: '日志导出',
+                    onTap: () => _exportTraceLogs(context),
+                  ),
                 ],
               ),
             ),
@@ -252,6 +262,33 @@ class ReaderMenu extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// A28 排障：导出阅读器诊断日志（FilePicker SAF，无需存储权限）
+  Future<void> _exportTraceLogs(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final content = await readTraceLogs();
+    if (content == null || content.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('暂无日志')));
+      return;
+    }
+    try {
+      final ts = DateTime.now()
+          .toIso8601String()
+          .replaceAll(RegExp(r'[:.]'), '-');
+      // file_picker 12.x：纯静态 API，bytes 经 SAF 写出（无需存储权限）
+      final result = await FilePicker.saveFile(
+        fileName: 'reader_trace_$ts.log',
+        bytes: Uint8List.fromList(utf8.encode(content)),
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(result != null ? '日志已导出' : '已取消导出'),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('导出失败: $e')));
+    }
   }
 }
 
