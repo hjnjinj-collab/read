@@ -1209,7 +1209,15 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
                 ? 'null'
                 : '${frame.page.chapterIndex}/${frame.page.pageIndex}',
           });
+          // 动画已被快进终结——必须立即复位活跃态，否则发布触发的
+          // _onModelPublished 会被 _isActive 守卫挡掉 → pending 无人
+          // 消费 → 400ms 超时 directFlip =「闪一下」（真机日志实锤）
+          _isActive = false;
           await _commitPageTurn(d, frame);
+          // 发布 postFrame 重试之外的双保险：提交已落地，直接重试 pending
+          if (_pendingDirection != null && mounted) {
+            unawaited(_retryPendingTurn());
+          }
           return;
         }
         // 动画被打断（TickerCanceled）：不得提交翻页，复位回空闲态。
@@ -1235,6 +1243,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       _resetState();
       // 2026-09-04: 回弹落地回 idle → 补跑排队的点击翻页
       _maybeRunQueuedTurn();
+      // A29：接管回弹场景——复位后无发布会触发，主动重试已登记的新手势
+      if (_pendingDirection != null) {
+        unawaited(_retryPendingTurn());
+      }
     }
   }
 
