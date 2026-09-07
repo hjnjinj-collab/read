@@ -338,7 +338,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             // 布 → 文字左对齐、右侧空白 → 用户视觉"偏右"。
             final wLayout = constraints.maxWidth;
             final hLayout = constraints.maxHeight;
-            if (wLayout != notifier.screenWidth || hLayout != notifier.screenHeight) {
+            // A30 真机修复（2026-09-07）：软键盘弹出时 Scaffold
+            // resizeToAvoidBottomInset 会临时压缩 body，LayoutBuilder 测得
+            // "假尺寸变化"→ onWindowResized 全章重排 → 内容闪一下。搜索
+            // 对话框是唯一带输入框的对话框，故搜索时必现。键盘弹出期间
+            // （viewInsets.bottom > 0）属临时视口态，跳过重排登记；键盘
+            // 收起后 constraints 回到原值自然恢复，无需补偿。分屏/转屏时
+            // insets 不变，真实尺寸变化照常重排，行为不受影响。
+            final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+            if (!keyboardVisible &&
+                (wLayout != notifier.screenWidth ||
+                    hLayout != notifier.screenHeight)) {
               if (notifier.hasBook) {
                 // 已开书：尺寸变化 → postFrame 锚点重排（onWindowResized
                 // 内部 setScreenSize + FrameSet 作废 + 带锚点重载）

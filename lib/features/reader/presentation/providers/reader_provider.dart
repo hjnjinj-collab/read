@@ -561,7 +561,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
   ///
   /// [anchorCharOffset] 进度锚点：设置变更后用章内字符偏移重新定位，
   /// 返回页的 pageIndex 会同步回状态，保证停留在原阅读位置。
-  Future<void> _loadCurrentPage({int? anchorCharOffset}) async {
+  ///
+  /// [targetChapterIndex] 跨章跳转目标（A30 真机修复）：提供时本次请求
+  /// 直接排版目标章（页索引从 0 起，锚点精确定位），state 的章节切换
+  /// 推迟到 FFI 返回后与页面一次性提交——旧实现"先 copyWith 切章再
+  /// 加载"会让 reader_page 在加载期间闪现旧章内容一帧。普通加载不传，
+  /// 行为完全不变。
+  Future<void> _loadCurrentPage({
+    int? anchorCharOffset,
+    int? targetChapterIndex,
+  }) async {
     if (state.bookId == null) return;
 
     final generation = ++_requestGeneration;
@@ -570,8 +579,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 「旧宽度排版画新宽度画布」= 内容偏右/右侧空白消失（曲面屏实测）。
     final fpSnapshot = layoutFingerprint();
     final requestedBookId = state.bookId!;
-    final requestedChapterIndex = state.currentChapterIndex;
-    final requestedPageIndex = state.currentPageIndex;
+    // 状态守卫基准：请求发起时的章节。跨章跳转时 state 尚未切换，
+    // 守卫比对"发起时章节"（防止加载途中 state 被别处移走后旧结果
+    // 仍被提交）；普通加载两者相等，语义与旧实现一致。
+    final originChapterIndex = state.currentChapterIndex;
+    final requestedChapterIndex = targetChapterIndex ?? originChapterIndex;
+    final requestedPageIndex =
+        targetChapterIndex != null ? 0 : state.currentPageIndex;
     readerTrace('page.load.start', {
       'generation': generation,
       'book': requestedBookId,
@@ -644,7 +658,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 结果回写前校验请求代际和阅读会话，防止旧请求覆盖新页。
       if (generation != _requestGeneration ||
           state.bookId != requestedBookId ||
-          state.currentChapterIndex != requestedChapterIndex) {
+          state.currentChapterIndex != originChapterIndex) {
         readerTrace('page.load.drop', {
           'generation': generation,
           'currentGeneration': _requestGeneration,
@@ -673,17 +687,22 @@ class ReaderNotifier extends Notifier<ReadingState> {
         });
         _fpReloadDepth++;
         try {
-          await _loadCurrentPage(anchorCharOffset: anchorCharOffset);
+          await _loadCurrentPage(
+            anchorCharOffset: anchorCharOffset,
+            targetChapterIndex: targetChapterIndex,
+          );
         } finally {
           _fpReloadDepth--;
         }
         return;
       }
 
-      // 锚点定位后页码可能与请求不同：同步回状态
+      // 锚点定位后页码可能与请求不同：同步回状态。
+      // 跨章跳转：章节切换在此处与页面一次性提交（deferred commit）。
       state = state.copyWith(
         currentPage: page,
         currentPageIndex: page.pageIndex,
+        currentChapterIndex: targetChapterIndex,
       );
       readerTrace('page.load.commit', {
         'generation': generation,
@@ -1327,14 +1346,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   Future<void> deleteBookmark(int id) => _db.deleteBookmark(id);
 
-  /// 跳转到书签位置（章节 + 字符锚点，与进度恢复同一机制）
+  /// 跳转到书签位置（章节 + 字符锚点，与进度恢复同一机制）。
+  /// A30 真机修复：章节随页面一次性提交（deferred commit），不再
+  /// 提前 copyWith 切章——消除加载期间旧章内容闪现一帧。
   Future<void> jumpToBookmark(Bookmark bookmark) async {
     if (bookmark.chapterIndex >= state.chapters.length) return;
-    state = state.copyWith(
-      currentChapterIndex: bookmark.chapterIndex,
-      currentPageIndex: 0,
+    await _loadCurrentPage(
+      anchorCharOffset: bookmark.charOffset,
+      targetChapterIndex: bookmark.chapterIndex,
     );
-    await _loadCurrentPage(anchorCharOffset: bookmark.charOffset);
   }
 
   /// A30：书内全文搜索（参数与展示管线同口径；计算在 Rust 线程池，
@@ -1358,14 +1378,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
   }
 
-  /// A30：跳转到搜索命中位置（复用书签跳转机制：章节 + 字符锚点）
+  /// A30：跳转到搜索命中位置（复用书签跳转机制：章节 + 字符锚点）。
+  /// A30 真机修复：同 jumpToBookmark，章节随页面一次性提交，消除旧章闪帧。
   Future<void> jumpToSearchHit(SearchHit hit) async {
     if (hit.chapterIndex >= state.chapters.length) return;
-    state = state.copyWith(
-      currentChapterIndex: hit.chapterIndex,
-      currentPageIndex: 0,
+    await _loadCurrentPage(
+      anchorCharOffset: hit.anchorCharOffset,
+      targetChapterIndex: hit.chapterIndex,
     );
-    await _loadCurrentPage(anchorCharOffset: hit.anchorCharOffset);
   }
 
   /// 章节页数（按格式分流；供翻页边界判定）
