@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1134219809;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1232727182;
 
 // Section: executor
 
@@ -2808,6 +2808,56 @@ fn wire__crate__api__search_book_by_json_impl(
         },
     )
 }
+fn wire__crate__api__search_in_book_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "search_in_book",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_query = <String>::sse_decode(&mut deserializer);
+            let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
+            let api_re_segment = <bool>::sse_decode(&mut deserializer);
+            let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
+            let api_replace_rules =
+                <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_max_hits = <usize>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::search_in_book(
+                            api_book_id,
+                            api_query,
+                            api_remove_duplicate_title,
+                            api_re_segment,
+                            api_chinese_convert,
+                            api_replace_rules,
+                            api_max_hits,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__set_book_source_enabled_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3337,6 +3387,18 @@ impl SseDecode for Vec<usize> {
     }
 }
 
+impl SseDecode for Vec<crate::api::SearchHit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::SearchHit>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3472,6 +3534,22 @@ impl SseDecode for crate::PageSegInfo {
             italic: var_italic,
             underline: var_underline,
             letter_spacing: var_letterSpacing,
+        };
+    }
+}
+
+impl SseDecode for crate::api::SearchHit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_chapterIndex = <usize>::sse_decode(deserializer);
+        let mut var_anchorCharOffset = <usize>::sse_decode(deserializer);
+        let mut var_excerpt = <String>::sse_decode(deserializer);
+        let mut var_matchOffsetInExcerpt = <usize>::sse_decode(deserializer);
+        return crate::api::SearchHit {
+            chapter_index: var_chapterIndex,
+            anchor_char_offset: var_anchorCharOffset,
+            excerpt: var_excerpt,
+            match_offset_in_excerpt: var_matchOffsetInExcerpt,
         };
     }
 }
@@ -3626,15 +3704,16 @@ fn pde_ffi_dispatcher_primary_impl(
         66 => wire__crate__api__release_book_impl(port, ptr, rust_vec_len, data_len),
         67 => wire__crate__api__search_book_impl(port, ptr, rust_vec_len, data_len),
         68 => wire__crate__api__search_book_by_json_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__set_book_source_enabled_impl(port, ptr, rust_vec_len, data_len),
-        70 => {
+        69 => wire__crate__api__search_in_book_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__set_book_source_enabled_impl(port, ptr, rust_vec_len, data_len),
+        71 => {
             wire__crate__api__set_content_cleaning_options_impl(port, ptr, rust_vec_len, data_len)
         }
-        71 => wire__crate__api__set_default_font_impl(port, ptr, rust_vec_len, data_len),
-        72 => {
+        72 => wire__crate__api__set_default_font_impl(port, ptr, rust_vec_len, data_len),
+        73 => {
             wire__crate__api__set_paragraph_format_settings_impl(port, ptr, rust_vec_len, data_len)
         }
-        73 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__update_book_cleaning_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3932,6 +4011,24 @@ impl flutter_rust_bridge::IntoIntoDart<crate::PageSegInfo> for crate::PageSegInf
         self
     }
 }
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::SearchHit {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.chapter_index.into_into_dart().into_dart(),
+            self.anchor_char_offset.into_into_dart().into_dart(),
+            self.excerpt.into_into_dart().into_dart(),
+            self.match_offset_in_excerpt.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SearchHit {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::SearchHit> for crate::api::SearchHit {
+    fn into_into_dart(self) -> crate::api::SearchHit {
+        self
+    }
+}
 
 impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4168,6 +4265,16 @@ impl SseEncode for Vec<usize> {
     }
 }
 
+impl SseEncode for Vec<crate::api::SearchHit> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::SearchHit>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4262,6 +4369,16 @@ impl SseEncode for crate::PageSegInfo {
         <bool>::sse_encode(self.italic, serializer);
         <bool>::sse_encode(self.underline, serializer);
         <Option<f32>>::sse_encode(self.letter_spacing, serializer);
+    }
+}
+
+impl SseEncode for crate::api::SearchHit {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <usize>::sse_encode(self.chapter_index, serializer);
+        <usize>::sse_encode(self.anchor_char_offset, serializer);
+        <String>::sse_encode(self.excerpt, serializer);
+        <usize>::sse_encode(self.match_offset_in_excerpt, serializer);
     }
 }
 

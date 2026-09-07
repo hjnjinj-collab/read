@@ -989,10 +989,57 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   状态转换（图片就绪）永远不会触发重建；③快照失效必须尊重纹理使用
   中禁 dispose 红线（挂起到复位点，对齐快照串行链/排队机制先例）。
 
-**所有 A1–A28 + APK 全线落地**。下一阶段候选：
-- P2：标点压缩行中邻接挤压补全（A21 完成行尾悬挂；segments 细化 + letterSpacing 负值合并通道已备）
+**A29 详细说明（翻页手势接管，2026-09-07）**：
+
+- **背景（真机日志实锤）**：快翻拖拽仅 30-150ms 而收尾动画 600-1100ms，
+  动画在途期间新手势被排队互斥整段拒绝（A19/A24 防动画消失的架构），
+  观感「不跟手、松手后等一会才动画」；快速点击偶发「闪一下」（A29b：
+  接管提交后 `_isActive` 未复位 → 发布重试被守卫挡掉 → pending 400ms
+  超时 directFlip 无动画跳页）。
+- **接管机制**：动画在途（非提交/定格窗口）+ 新手势 → `fastForward`
+  快进到终点（翻页→1.0/回弹→0.0）→ 在途 animateTo 经 orCancel 返回
+  false → `_runAuto` aborted 分支按接管标志转「立即提交」——提交输入
+  在 fastForward 前捕获（`_commitPageTurn` 加可选参数），规避异步恢复
+  期 `_turnDirection/_targetFrame` 被新手势覆写的竞态。
+- **新手势启动**：registerPending 等发布重试（提交实测 10-90ms），不
+  走旧帧门控——杜绝双重推进。A29b 修复：接管分支 `_isActive` 置 false
+  （发布 postFrame 重试通过 `_onModelPublished` 守卫）+ 提交后主动
+  `_retryPendingTurn` 双保险 + 回弹分支补重试 + end-during-pending
+  提交窗口期重新登记（不用旧帧开新动画）。
+- **教训**：①接管类功能必须审计「异步恢复期读到的共享字段是否已被
+  覆写」——提交输入前置捕获是唯一安全姿势；②新增提交路径后，发布
+  驱动的重试守卫链（_isActive/_pendingDirection）必须逐一对账。
+
+**A30 详细说明（书内全文搜索，2026-09-07）**：
+
+- **功能**：菜单「搜索」→ 关键词全书搜索 → 结果列表（章节+摘录，命中
+  词高亮）→ 点击跳转命中位置（复用书签的章节+字符锚点机制，零新定位
+  逻辑）。TXT/EPUB 统一体验。
+- **架构（用户定案）**：①计算全在 Rust——单次异步 FFI `search_in_book`
+  （flutter_rust_bridge 线程池），Dart 零逐章循环/文本处理，UI 线程零
+  堵塞；②格式分派封装在 Rust 内部，SearchHit 契约统一；③复用既有内
+  容引擎（preprocessor 替换规则/简繁、`blocks_to_layout_items` 同函数
+  映射），bridge 薄封装。
+- **锚点同源（正确性核心）**：TXT 锚点 = processed + 段落格式化后文本
+  （与 layout_text 输入同源，搜索管线与展示管线 :843-874 严格同源）；
+  EPUB 锚点 = IR 布局项字符流，字符累计与 `layout_items` 的 char_index
+  同规则（Text=chars+1 段落 newline :803 / Table=Σ单元格段落(chars+1)
+  :1828 / Image=0）——**对齐单测**（`search_in_book_{txt,epub}_anchor_
+  alignment`）对每个命中 anchor 经 locate 断言落页含命中词，规则漂移
+  即红。
+- **高效性**：命中词集合 = 原词 + 双向简繁变体（一次扫描覆盖转换方向）；
+  预算 200 命中/5s 扫描即停；逐章短锁；TXT 不回填 PREPROCESSED_CACHE
+  （全书扫描不挤占 20 章 LRU 阅读窗口）；不走分页 API（零排版缓存污
+  染）。原计划 EpubCleanedBook 章节预筛经查在路线2下退化（book.content
+  置空），已改为预算内全章 IR 扫描。
+- **教训**：①复用引擎产物前必须验证产物在当前管线下仍有效（路线2切
+  换后 EpubCleanedBook 已退化）——「已物化」不等于「仍同源」；②跨语
+  言锚点换算的规则必须以**对齐单测**锁死，而非人工推演。
+
+**所有 A1–A30 + APK 全线落地**。下一阶段候选：
+- P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）
+- P2：TTS 朗读（渲染高亮基建已有，缺语音引擎+分句调度）
+- P2：笔记/划线持久化（ReaderSelection 渲染模型已有，缺表结构与 UI）
+- P3：书架管理完善（分组/排序/书架内搜索/重命名）
 - P2：智能分段规则继续扩展（A22 已落地诗歌/引用/对话；候选：竖排诗、信件体）
-- P3：图文混排（EPUB 链路已具备，关键扩 Page 结构）
-- P3：Android 真机验证动画体系（手势坐标/dpr/toImage 性能）
 - P4：首字下沉、竖排（远期）
-- 字体：字重滑杆评估（A24 已落地字号/行距滑杆 + 字体持久化；内置 Noto Regular 非变量字体，多档字重意义有限）

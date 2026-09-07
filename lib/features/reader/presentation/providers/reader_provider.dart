@@ -1337,6 +1337,37 @@ class ReaderNotifier extends Notifier<ReadingState> {
     await _loadCurrentPage(anchorCharOffset: bookmark.charOffset);
   }
 
+  /// A30：书内全文搜索（参数与展示管线同口径；计算在 Rust 线程池，
+  /// UI 线程零参与）
+  Future<List<SearchHit>> searchInBook(String query) async {
+    final bookId = state.bookId;
+    if (bookId == null || query.trim().isEmpty) return const [];
+    final convertCode = _chineseConvert == ChineseConvertType.s2t
+        ? 1
+        : _chineseConvert == ChineseConvertType.t2s
+        ? 2
+        : 0;
+    return _bookService.searchInBook(
+      bookId,
+      query,
+      removeDuplicateTitle: _removeDuplicateTitle,
+      // M9.3：旧重排已被 ParagraphFormatter 取代，恒关（与展示管线一致）
+      reSegment: false,
+      chineseConvert: convertCode,
+      replaceRules: _replaceRules,
+    );
+  }
+
+  /// A30：跳转到搜索命中位置（复用书签跳转机制：章节 + 字符锚点）
+  Future<void> jumpToSearchHit(SearchHit hit) async {
+    if (hit.chapterIndex >= state.chapters.length) return;
+    state = state.copyWith(
+      currentChapterIndex: hit.chapterIndex,
+      currentPageIndex: 0,
+    );
+    await _loadCurrentPage(anchorCharOffset: hit.anchorCharOffset);
+  }
+
   /// 章节页数（按格式分流；供翻页边界判定）
   ///
   /// M8-P4：先查内存缓存 `_chapterPageCounts`，命中直接返回；

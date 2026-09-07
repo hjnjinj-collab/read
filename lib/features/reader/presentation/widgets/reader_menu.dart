@@ -9,6 +9,7 @@ import '../diagnostics/reader_trace.dart';
 import '../providers/reader_provider.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import 'chapter_list_dialog.dart';
+import 'book_search_dialog.dart';
 import 'reader_settings_dialog.dart';
 
 class ReaderMenu extends ConsumerWidget {
@@ -227,6 +228,16 @@ class ReaderMenu extends ConsumerWidget {
                       showDialog(
                         context: context,
                         builder: (context) => const ChapterListDialog(),
+                      );
+                    },
+                  ),
+                  _MenuButton(
+                    icon: Icons.search,
+                    label: '搜索',
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => const BookSearchDialog(),
                       );
                     },
                   ),
