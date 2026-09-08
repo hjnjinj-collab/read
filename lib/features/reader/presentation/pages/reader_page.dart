@@ -314,6 +314,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       // 2026-09-04 P1 暗黑主题：Scaffold 背景跟随阅读主题（内容区由
       // PagePainter 纸色底全覆盖，此处主要影响加载/无内容态观感）
       backgroundColor: PageContentRenderer.theme.scaffoldColor,
+      // A30b 真机修复：阅读器不参与键盘避让——配 合 manifest
+      // adjustNothing（窗口不缩小），背景内容在软键盘弹出/收起全程
+      // 纹丝不动（阅读场景无输入框，无需为键盘腾位）。
+      resizeToAvoidBottomInset: false,
       // LayoutBuilder = 权威 viewport 测量点：constraints 即 SafeArea
       // 内实际可用区域，与 CustomPaint 画布尺寸严格一致。排版
       // LayoutConfig、翻页几何、手势归一化全部同源于此（禁止

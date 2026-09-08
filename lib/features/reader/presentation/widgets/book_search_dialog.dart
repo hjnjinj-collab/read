@@ -90,7 +90,15 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
     final state = ref.watch(readerProvider);
     final chapters = state.chapters;
 
-    return AlertDialog(
+    // A30b：manifest adjustNothing 后窗口不再随键盘缩小，对话框需自行
+    // 腾出键盘空间——底部按 viewInsets 抬升、内容高度同步收缩（结果列
+    // 表收窄，输入框恒在键盘上方）。桌面端 insets 恒 0，行为不变。
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+    final contentHeight = (420.0 - keyboardHeight).clamp(280.0, 420.0);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardHeight),
+      child: AlertDialog(
       title: Row(
         children: [
           const Expanded(child: Text('书内搜索')),
@@ -103,7 +111,7 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
       ),
       content: SizedBox(
         width: double.maxFinite,
-        height: 420,
+        height: contentHeight,
         child: Column(
           children: [
             TextField(
@@ -183,6 +191,7 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
           child: const Text('关闭'),
         ),
       ],
+      ),
     );
   }
 }

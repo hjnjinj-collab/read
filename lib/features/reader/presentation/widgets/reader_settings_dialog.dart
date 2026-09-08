@@ -236,9 +236,14 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // A30b：adjustNothing 后键盘悬浮，底部按 viewInsets 收缩（设置列表
+    // ListView 吸收高度变化，滚动可达任何输入框）
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: Column(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: keyboardHeight),
+        child: Column(
         children: [
           // Header
           Container(
@@ -870,6 +875,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

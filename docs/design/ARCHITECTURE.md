@@ -1057,21 +1057,28 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   制）。`search_epub_chapter` 同函数同时机应用——搜索/展示/锚点三方
   同源（红线保持）。语义差异：TXT 整章应用（跨行正则可命中），EPUB
   按块（跨段正则不命中，legado 规则以段内为主，可接受）。
-- **问题二（搜索输入时内容闪现刷新）**：搜索对话框是唯一带输入框的对
-  话框——TextField 弹软键盘 → Scaffold resizeToAvoidBottomInset 压缩
-  body → LayoutBuilder 测得假尺寸变化 → onWindowResized 全章重排。
-  真机日志实锤：键盘开屏动画 15+ 帧 = 15+ 次 window-resized → 15 次
-  page.load.start（808→478 逐帧下滑），收起时反向再来一遍（808 的最
-  终 commit 就是闪现来源）；且该设备上 viewInsets 与窗口压缩不同步，
-  推断式守卫失效。
-- **修复（显式冻结 + 防抖，用户定案「查找只是查找，只有点击结果才切
-  换内容」）**：①搜索对话框 initState/dispose 接线
-  `setViewportResizeFrozen`——冻结期间 onWindowResized 直接忽略（不更
-  新尺寸、不作废 FrameSet、不重排），冻结瞬间丢弃在途防抖；②尺寸变
-  化 200ms 防抖——动画期中间值被后到事件覆盖，动画结束只应用最终值
-  一次；键盘收回时最终值==冻结前原值 → 天然零重排。冻结只拦视口尺
-  寸处理，不拦页面加载（点击结果时对话框先 pop 再 jumpToSearchHit，
-  时序正确）。诊断入口：`viewport.resize.frozen` 日志行。
+- **问题二（搜索输入时内容闪现刷新 + 内容被推上去）**：搜索对话框是唯
+  一带输入框的对话框——TextField 弹软键盘 → adjustResize 窗口整体缩
+  小 → LayoutBuilder 每帧测得中间高度（日志实锤 15+ 帧 = 15+ 次
+  window-resized → page.load.start，808→478 逐帧下滑），逐帧全章重
+  排 + 内容被上推；收起时反向再来。viewInsets 推断式守卫失效的根因
+  也是 adjustResize：窗口缩小后 insets 上报≈0，守卫判 0 直接放行。
+- **修复（adjustNothing + 阅读器恒定全高 + 对话框自行避让）**：
+  ① manifest `windowSoftInputMode=adjustNothing`——窗口不再随键盘缩
+  小，键盘悬浮覆盖，"内容被推上去"从机制上消除；② reader_page
+  Scaffold `resizeToAvoidBottomInset: false`——阅读器不参与键盘避让
+  （阅读场景无输入框），背景恒定全高；③ 三个输入对话框（搜索/章节/
+  设置）各自按 `MediaQuery.viewInsetsOf` 腾出键盘空间——搜索框高度
+  随 insets 收缩（下限 280）、章节/设置对话框底部 padding 收缩
+  （Expanded/ListView 吸收）。adjustNothing 下 Flutter 仍上报键盘
+  insets，对话框避让与桌面端（insets 恒 0）互不影响。
+- **纵深防御（仍保留）**：①搜索对话框生命周期接线
+  `setViewportResizeFrozen`——冻结期间 onWindowResized 直接忽略（查
+  找只是查找，只有点击结果才触碰内容；冻结只拦视口尺寸处理，不拦页
+  面加载——点击结果先 pop 再 jumpToSearchHit，时序正确）；②尺寸变
+  化 200ms 防抖——即使有设备仍上报假 resize，动画期中间值被后到事
+  件覆盖，最终值==原值则零重排。诊断入口：`viewport.resize.frozen`
+  日志行。
 - **问题三（跳转旧章闪帧）**：jumpToSearchHit/jumpToBookmark 先
   copyWith 切章再加载 → 加载期间显示旧章一帧 + FFI 返回二次重建。
 - **修复（deferred commit）**：`_loadCurrentPage` 加 `targetChapterIndex`

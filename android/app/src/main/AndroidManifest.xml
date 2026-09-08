@@ -11,7 +11,12 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            <!-- A30b：adjustNothing——键盘悬浮覆盖，窗口不再缩小。原 adjustResize
+                 会整体上推应用内容（阅读器背景被压缩），且窗口缩小后 viewInsets
+                 上报≈0 导致 Dart 侧推断式守卫失效。键盘避让改由 Flutter 层
+                 处理：reader_page Scaffold resizeToAvoidBottomInset=false
+                 （背景恒定全高），输入对话框各自按 viewInsets 腾出键盘空间。 -->
+            android:windowSoftInputMode="adjustNothing">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
