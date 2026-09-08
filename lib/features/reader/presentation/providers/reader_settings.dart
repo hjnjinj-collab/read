@@ -74,6 +74,7 @@ class ReaderSettings {
   final List<ReplaceRuleItem> replaceRules;
   final bool removeHtmlTags;
   final bool removeAds;
+  final bool reSegment; // A35-L1: 智能分段增强
   final bool boldEnabled;
   final bool italicEnabled;
   final bool showComments;
@@ -116,6 +117,7 @@ class ReaderSettings {
     required this.replaceRules,
     required this.removeHtmlTags,
     required this.removeAds,
+    required this.reSegment, // A35-L1
     required this.boldEnabled,
     required this.italicEnabled,
     required this.showComments,
@@ -147,6 +149,7 @@ class ReaderSettings {
         replaceRules: [],
         removeHtmlTags: true,
         removeAds: true,
+        reSegment: false, // A35-L1: 默认关闭，用户按需开启
         boldEnabled: true,
         italicEnabled: true,
         showComments: true,
@@ -184,6 +187,7 @@ class ReaderSettings {
         replaceRules: _rules(j['replaceRules']),
         removeHtmlTags: _b(j, 'removeHtmlTags', true),
         removeAds: _b(j, 'removeAds', true),
+        reSegment: _b(j, 'reSegment', false), // A35-L1
         boldEnabled: _b(j, 'boldEnabled', true),
         italicEnabled: _b(j, 'italicEnabled', true),
         showComments: _b(j, 'showComments', true),

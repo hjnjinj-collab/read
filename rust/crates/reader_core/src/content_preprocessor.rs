@@ -301,25 +301,89 @@ impl ContentPreprocessor {
     }
 
     /// Re-segment: ensure paragraphs are separated by single newlines.
+    /// 
+    /// L1 启发式规则增强：
+    /// - 对话检测：引号结尾后保留换行
+    /// - 场景切换：*** / --- 分隔符保留
+    /// - 诗词保护：短行（<20字符）不合并
     fn re_segment(content: &str) -> String {
-        let mut result = String::with_capacity(content.len());
-        let mut prev_was_newline = false;
-
-        for ch in content.chars() {
-            match ch {
-                '\n' | '\r' => {
-                    if !prev_was_newline {
-                        result.push('\n');
-                        prev_was_newline = true;
-                    }
-                }
-                _ => {
-                    result.push(ch);
-                    prev_was_newline = false;
-                }
-            }
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return String::new();
         }
-        result
+
+        let mut result = Vec::new();
+
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i].trim();
+            
+            // 空行：跳过（会被合并）
+            if line.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            // 场景切换分隔符：保留独立段落
+            if Self::is_scene_separator(line) {
+                result.push(line.to_string());
+                i += 1;
+                continue;
+            }
+
+            // 诗词保护：短行独立成段
+            if Self::is_short_line(line) {
+                result.push(line.to_string());
+                i += 1;
+                continue;
+            }
+
+            // 对话检测：引号结尾独立成段
+            if Self::is_dialogue_end(line) {
+                result.push(line.to_string());
+                i += 1;
+                continue;
+            }
+
+            // 普通行：添加到结果
+            result.push(line.to_string());
+            i += 1;
+        }
+
+        result.join("\n")
+    }
+
+    /// 判断是否为场景切换分隔符
+    fn is_scene_separator(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.len() < 3 {
+            return false;
+        }
+
+        // *** 或 ---（至少3个）
+        let all_stars = trimmed.chars().all(|c| c == '*');
+        let all_dashes = trimmed.chars().all(|c| c == '-' || c == '—');
+        
+        all_stars || all_dashes
+    }
+
+    /// 判断是否为短行（可能是诗词）
+    fn is_short_line(line: &str) -> bool {
+        line.chars().count() < 20
+    }
+
+    /// 判断是否为对话结尾
+    fn is_dialogue_end(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        // 中文引号结尾
+        trimmed.ends_with('"') || trimmed.ends_with('"') || 
+        trimmed.ends_with('」') || trimmed.ends_with('』') ||
+        // 英文引号结尾
+        trimmed.ends_with('"') || trimmed.ends_with('\'')
     }
 
     /// Simplified -> Traditional Chinese conversion.

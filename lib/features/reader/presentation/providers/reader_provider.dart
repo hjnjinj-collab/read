@@ -44,6 +44,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _replaceRules = persisted.replaceRules;
     _removeHtmlTags = persisted.removeHtmlTags;
     _removeAds = persisted.removeAds;
+    _reSegment = persisted.reSegment; // A35-L1
     _boldEnabled = persisted.boldEnabled;
     _italicEnabled = persisted.italicEnabled;
     _showComments = persisted.showComments;
@@ -89,10 +90,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _removeHtmlTags = true;
   bool _removeAds = true;
 
+  // A35-L1: 智能分段增强（对话检测/场景切换/诗词保护）
+  bool _reSegment = false;
+
   // M9.3 清理说明：旧「智能重新分段」开关（_reSegment）已被 M9
   // ParagraphFormatter 取代，UI 移除、FFI 恒传 false；
   // 净化层「智能分段」（smart_paragraph）为导入/净化内部行为，
   // 恒用默认开启值，不再暴露设置项。
+  // 
+  // 2026-09-08 A35-L1: 重新启用智能分段，使用增强的启发式规则
+  // （对话检测/场景切换/诗词保护）
 
   // 字形样式开关（EPUB 行内粗斜体；TXT 章节标题加粗）。
   // 纯绘制期过滤：不进任何缓存键，切换零缓存失效
@@ -165,6 +172,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   List<ReplaceRuleItem> get replaceRules => List.unmodifiable(_replaceRules);
   bool get removeHtmlTags => _removeHtmlTags;
   bool get removeAds => _removeAds;
+  bool get reSegment => _reSegment; // A35-L1: 智能分段开关
   bool get boldEnabled => _boldEnabled;
   bool get italicEnabled => _italicEnabled;
   bool get showComments => _showComments;
@@ -326,6 +334,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         ],
         'removeHtmlTags': _removeHtmlTags,
         'removeAds': _removeAds,
+        'reSegment': _reSegment, // A35-L1: 智能分段
         'boldEnabled': _boldEnabled,
         'italicEnabled': _italicEnabled,
         'showComments': _showComments,
@@ -426,6 +435,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required List<ReplaceRuleItem> replaceRules,
     required bool removeHtmlTags,
     required bool removeAds,
+    required bool reSegment, // A35-L1
     required bool boldEnabled,
     required bool italicEnabled,
     required double pageFillThreshold,
@@ -447,6 +457,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     final bool needsCleaningUpdate = (
       _removeHtmlTags != removeHtmlTags ||
       _removeAds != removeAds ||
+      _reSegment != reSegment || // A35-L1
       _chineseConvert != chineseConvert ||
       _replaceRules.length != replaceRules.length ||
       !_listEquals(_replaceRules, replaceRules)
@@ -457,6 +468,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _replaceRules = replaceRules;
     _removeHtmlTags = removeHtmlTags;
     _removeAds = removeAds;
+    _reSegment = reSegment; // A35-L1
     _boldEnabled = boldEnabled;
     _italicEnabled = italicEnabled;
     _pageFillThreshold = pageFillThreshold;
@@ -698,7 +710,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingBottom: _paddingVertical,
           fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
           removeDuplicateTitle: _removeDuplicateTitle,
-          reSegment: false, // M9.3：旧重排已被 ParagraphFormatter 取代，恒关
+          reSegment: _reSegment, // A35-L1：智能分段增强
           chineseConvert: chineseConvertCode,
           replaceRules: _replaceRules,
           anchorCharOffset: anchorCharOffset,
@@ -1312,7 +1324,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingBottom: _paddingVertical,
         fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
         removeDuplicateTitle: _removeDuplicateTitle,
-        reSegment: false,
+        reSegment: _reSegment,
         chineseConvert: chineseConvertCode,
         replaceRules: _replaceRules,
         pageFillThreshold: _pageFillThreshold,

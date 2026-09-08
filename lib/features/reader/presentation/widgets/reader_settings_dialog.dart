@@ -23,6 +23,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   // Content cleaning settings
   bool _removeHtmlTags = true;
   bool _removeAds = true;
+  bool _reSegment = false; // A35-L1: 智能分段增强
 
   // 字形样式开关
   bool _boldEnabled = true;
@@ -78,6 +79,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _replaceRules.addAll(n.replaceRules);
     _removeHtmlTags = n.removeHtmlTags;
     _removeAds = n.removeAds;
+    _reSegment = n.reSegment; // A35-L1
     _boldEnabled = n.boldEnabled;
     _italicEnabled = n.italicEnabled;
     _fontSize = n.fontSize;
@@ -195,6 +197,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         replaceRules: List.of(_replaceRules),
         removeHtmlTags: _removeHtmlTags,
         removeAds: _removeAds,
+        reSegment: _reSegment, // A35-L1
         boldEnabled: _boldEnabled,
         italicEnabled: _italicEnabled,
         pageFillThreshold: _pageFillThreshold,
@@ -401,6 +404,14 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   value: _removeAds,
                   onChanged: (value) {
                     setState(() => _removeAds = value);
+                  },
+                ),
+                _buildSwitchTile(
+                  title: '智能分段',
+                  subtitle: '启发式规则增强：对话检测、场景切换、诗词保护',
+                  value: _reSegment,
+                  onChanged: (value) {
+                    setState(() => _reSegment = value);
                   },
                 ),
 
