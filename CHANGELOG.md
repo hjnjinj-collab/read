@@ -15,7 +15,7 @@
 
 ### 修复
 - A30b：EPUB 搜索输入时阅读内容闪现刷新一次——软键盘开/关动画每帧触发全章重排（真机日志实锤 15+ 次）。修复：搜索对话框存活期间**显式冻结**视口尺寸处理（查找只是查找，只有点击结果才切换内容）+ 尺寸变化 200ms 防抖（动画中间值互相覆盖，最终值与原值一致则零重排）
-- A30b：键盘弹出时应用内容被整体上推——manifest adjustResize 导致 Android 窗口随键盘缩小。改 adjustNothing（键盘悬浮覆盖），阅读器 Scaffold 恒定全高；搜索/章节/设置三个输入对话框各自按 viewInsets 腾出键盘空间
+- A30b：键盘弹出时应用内容被整体上推——manifest adjustResize 导致 Android 窗口随键盘缩小。改 adjustNothing（键盘悬浮覆盖），阅读器 Scaffold 恒定全高；输入对话框不做任何基于 viewInsets 的布局（本设备 insets 上报不可靠，会报≈整屏高度把对话框挤扁），搜索提交后主动收起键盘使结果完整可见
 - A30b：搜索/书签跨章跳转先切章再加载导致旧章内容闪现一帧——章节随页面在 FFI 返回后一次性提交（deferred commit）
 - 修复两个 bench example 缺失 LayoutConfig 新字段的历史编译错误
 

@@ -46,6 +46,9 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
   Future<void> _doSearch() async {
     final query = _controller.text.trim();
     if (query.isEmpty || _searching) return;
+    // A30b：搜索提交后收起键盘——结果列表完整可见（键盘悬浮模式下会
+    // 遮住对话框下半部；本设备 viewInsets 上报不可靠，不做 insets 布局）
+    FocusScope.of(context).unfocus();
     setState(() {
       _searching = true;
       _error = null;
@@ -90,15 +93,12 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
     final state = ref.watch(readerProvider);
     final chapters = state.chapters;
 
-    // A30b：manifest adjustNothing 后窗口不再随键盘缩小，对话框需自行
-    // 腾出键盘空间——底部按 viewInsets 抬升、内容高度同步收缩（结果列
-    // 表收窄，输入框恒在键盘上方）。桌面端 insets 恒 0，行为不变。
-    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
-    final contentHeight = (420.0 - keyboardHeight).clamp(280.0, 420.0);
+    // A30b：键盘悬浮模式（manifest adjustNothing）下不做任何基于
+    // viewInsets 的布局——本设备 insets 上报不可靠（曾报≈整屏高度，
+    // 把对话框挤成标题条）。对话框保持原尺寸居中：输入框在顶部恒在
+    // 键盘上方，键盘只遮住结果列表下半部；提交搜索时主动收起键盘。
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: keyboardHeight),
-      child: AlertDialog(
+    return AlertDialog(
       title: Row(
         children: [
           const Expanded(child: Text('书内搜索')),
@@ -111,7 +111,7 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
       ),
       content: SizedBox(
         width: double.maxFinite,
-        height: contentHeight,
+        height: 420,
         child: Column(
           children: [
             TextField(
@@ -191,7 +191,6 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
           child: const Text('关闭'),
         ),
       ],
-      ),
     );
   }
 }

@@ -39,11 +39,9 @@ class _ChapterListDialogState extends ConsumerState<ChapterListDialog> {
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-      // A30b：adjustNothing 后键盘悬浮，底部按 viewInsets 收缩（列表
-      // Expanded 吸收高度变化，搜索框恒在键盘上方）
-      child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: Column(
+      // A30b：不做 viewInsets 布局——本设备 insets 上报不可靠。键盘悬浮
+      // 只遮住章节列表下半部，顶部搜索框恒可见，列表可滚动查看。
+      child: Column(
         children: [
           // Header
           Container(
@@ -195,7 +193,6 @@ class _ChapterListDialogState extends ConsumerState<ChapterListDialog> {
             ),
           ),
         ],
-        ),
       ),
     );
   }
