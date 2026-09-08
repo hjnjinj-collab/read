@@ -1206,12 +1206,16 @@ fn wire__crate__api__get_chapter_content_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_book_id = <String>::sse_decode(&mut deserializer);
             let api_chapter_index = <usize>::sse_decode(&mut deserializer);
+            let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
-                        let output_ok =
-                            crate::api::get_chapter_content(api_book_id, api_chapter_index)?;
+                        let output_ok = crate::api::get_chapter_content(
+                            api_book_id,
+                            api_chapter_index,
+                            api_remove_duplicate_title,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )

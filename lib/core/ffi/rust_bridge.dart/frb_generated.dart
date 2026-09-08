@@ -162,7 +162,11 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateApiGetCacheStats();
 
-  Future<String> crateApiGetChapterContent({required String bookId, required BigInt chapterIndex});
+  Future<String> crateApiGetChapterContent({
+    required String bookId,
+    required BigInt chapterIndex,
+    required bool removeDuplicateTitle,
+  });
 
   Future<String> crateApiGetChapterContentFromSource({required FfiBookSource source, required String chapterUrl});
 
@@ -1184,25 +1188,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiGetCacheStatsConstMeta => const TaskConstMeta(debugName: "get_cache_stats", argNames: []);
 
   @override
-  Future<String> crateApiGetChapterContent({required String bookId, required BigInt chapterIndex}) {
+  Future<String> crateApiGetChapterContent({
+    required String bookId,
+    required BigInt chapterIndex,
+    required bool removeDuplicateTitle,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(bookId, serializer);
           sse_encode_usize(chapterIndex, serializer);
+          sse_encode_bool(removeDuplicateTitle, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 32, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiGetChapterContentConstMeta,
-        argValues: [bookId, chapterIndex],
+        argValues: [bookId, chapterIndex, removeDuplicateTitle],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiGetChapterContentConstMeta =>
-      const TaskConstMeta(debugName: "get_chapter_content", argNames: ["bookId", "chapterIndex"]);
+  TaskConstMeta get kCrateApiGetChapterContentConstMeta => const TaskConstMeta(
+    debugName: "get_chapter_content",
+    argNames: ["bookId", "chapterIndex", "removeDuplicateTitle"],
+  );
 
   @override
   Future<String> crateApiGetChapterContentFromSource({required FfiBookSource source, required String chapterUrl}) {

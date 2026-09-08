@@ -184,8 +184,15 @@ Future<List<ChapterInfo>> getChapters({required String bookId}) =>
     RustLib.instance.api.crateApiGetChapters(bookId: bookId);
 
 /// Get chapter content
-Future<String> getChapterContent({required String bookId, required BigInt chapterIndex}) =>
-    RustLib.instance.api.crateApiGetChapterContent(bookId: bookId, chapterIndex: chapterIndex);
+Future<String> getChapterContent({
+  required String bookId,
+  required BigInt chapterIndex,
+  required bool removeDuplicateTitle,
+}) => RustLib.instance.api.crateApiGetChapterContent(
+  bookId: bookId,
+  chapterIndex: chapterIndex,
+  removeDuplicateTitle: removeDuplicateTitle,
+);
 
 /// Get chapter content with preprocessing (简繁转换、去重标题等)
 Future<String> getChapterContentProcessed({

@@ -100,10 +100,15 @@ class BookService {
   }
 
   /// Get chapter content
-  Future<String> getChapterContent(String bookId, int chapterIndex) async {
+  Future<String> getChapterContent(
+    String bookId, 
+    int chapterIndex, {
+    bool removeDuplicateTitle = false,
+  }) async {
     return await rust_api.getChapterContent(
       bookId: bookId,
       chapterIndex: BigInt.from(chapterIndex),
+      removeDuplicateTitle: removeDuplicateTitle,
     );
   }
 

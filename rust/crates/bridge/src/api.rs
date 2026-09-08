@@ -980,9 +980,9 @@ fn process_and_layout_chapter_inner(
         None => {
             // 未命中：重活全部在锁外执行（quiet 回源，是否触发预热由调用方语义决定）
             let raw_content = if allow_preload_trigger {
-                get_chapter_content(book_id.to_string(), chapter_index)?
+                get_chapter_content(book_id.to_string(), chapter_index, remove_duplicate_title)?
             } else {
-                get_chapter_content_quiet(book_id.to_string(), chapter_index)?
+                get_chapter_content_quiet(book_id.to_string(), chapter_index, remove_duplicate_title)?
             };
             let chapter_title = {
                 let books = BOOKS.read().unwrap();
@@ -1140,21 +1140,30 @@ pub fn get_chapters(book_id: String) -> anyhow::Result<Vec<ChapterInfo>> {
 }
 
 /// Get chapter content
-pub fn get_chapter_content(book_id: String, chapter_index: usize) -> anyhow::Result<String> {
-    get_chapter_content_impl(book_id, chapter_index, true)
+pub fn get_chapter_content(
+    book_id: String,
+    chapter_index: usize,
+    remove_duplicate_title: bool,
+) -> anyhow::Result<String> {
+    get_chapter_content_impl(book_id, chapter_index, true, remove_duplicate_title)
 }
 
 /// M9.3：get_chapter_content 的"安静版"——跳过 trigger_preload_async。
 /// 仅供 process_and_layout_chapter 回源使用（预加载路径严禁再触发预热，
 /// 否则形成自激级联：warm→miss→trigger→warm→…推进到全书末尾）。
-fn get_chapter_content_quiet(book_id: String, chapter_index: usize) -> anyhow::Result<String> {
-    get_chapter_content_impl(book_id, chapter_index, false)
+fn get_chapter_content_quiet(
+    book_id: String,
+    chapter_index: usize,
+    remove_duplicate_title: bool,
+) -> anyhow::Result<String> {
+    get_chapter_content_impl(book_id, chapter_index, false, remove_duplicate_title)
 }
 
 fn get_chapter_content_impl(
     book_id: String,
     chapter_index: usize,
     trigger_preload: bool,
+    remove_duplicate_title: bool,
 ) -> anyhow::Result<String> {
     use book_parser::TxtParser;
 
@@ -1191,13 +1200,34 @@ fn get_chapter_content_impl(
                 return Err(anyhow::anyhow!("Parser not available"));
             }
         };
+        
+        // 应用去重标题（与 EPUB 同口径，TXT 路径在此处直接处理）
+        let final_content = if remove_duplicate_title {
+            // 获取章节标题
+            let title = {
+                let books = BOOKS.read().unwrap();
+                let handle = books.get(&book_id)
+                    .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                handle.book.chapters.get(chapter_index)
+                    .map(|ch| ch.title.clone())
+                    .unwrap_or_default()
+            };
+            
+            if !title.is_empty() {
+                reader_core::ContentPreprocessor::remove_duplicate_title(&content, &title)
+            } else {
+                content.to_string()
+            }
+        } else {
+            content.to_string()
+        };
 
         // 异步触发预加载（非阻塞；quiet 路径跳过以打断自激级联）
         if trigger_preload {
             trigger_preload_async(book_id, chapter_index);
         }
 
-        Ok(content)
+        Ok(final_content)
     } else {
         // 3. 无 parser（工厂已拒绝其他格式，此分支必为 EPUB）
         let options_snapshot = CONTENT_CLEANING_OPTIONS.lock().unwrap().clone();
@@ -1377,7 +1407,7 @@ pub fn get_chapter_content_processed(
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
 ) -> anyhow::Result<String> {
     // 1. 获取原始内容
-    let raw_content = get_chapter_content(book_id.clone(), chapter_index)?;
+    let raw_content = get_chapter_content(book_id.clone(), chapter_index, remove_duplicate_title)?;
     
     // 2. 获取章节标题
     let chapter_title = {
@@ -1427,7 +1457,7 @@ pub fn layout_chapter(
     padding_bottom: f32,
     font_name: String,
 ) -> anyhow::Result<Vec<PageInfo>> {
-    let content = get_chapter_content(book_id, chapter_index)?;
+    let content = get_chapter_content(book_id, chapter_index, false)?;
     
     let config = LayoutConfig {
         width,
@@ -1472,7 +1502,7 @@ pub fn get_page(
     font_name: String,
     page_fill_threshold: f32,
 ) -> anyhow::Result<PageInfo> {
-    let content = get_chapter_content(book_id, chapter_index)?;
+    let content = get_chapter_content(book_id, chapter_index, false)?;
 
     let config = LayoutConfig {
         width,
@@ -1527,7 +1557,7 @@ pub fn get_page_count(
     font_name: String,
     page_fill_threshold: f32,
 ) -> anyhow::Result<usize> {
-    let content = get_chapter_content(book_id, chapter_index)?;
+    let content = get_chapter_content(book_id, chapter_index, false)?;
 
     let config = LayoutConfig {
         width,
@@ -2964,7 +2994,7 @@ fn search_txt_chapter(
     hits: &mut Vec<SearchHit>,
     max_hits: usize,
 ) -> anyhow::Result<()> {
-    let raw_content = get_chapter_content_quiet(book_id.to_string(), chapter_index)?;
+    let raw_content = get_chapter_content_quiet(book_id.to_string(), chapter_index, remove_duplicate_title)?;
     let chapter_title = {
         let books = BOOKS.read().unwrap();
         books
@@ -3817,8 +3847,11 @@ pub fn process_chapter_content(
     chapter_index: usize,
     config: Option<FfiProcessOptions>,
 ) -> anyhow::Result<String> {
-    // 1. 获取原始内容
-    let raw_content = get_chapter_content(book_id.clone(), chapter_index)?;
+    // 1. 获取配置
+    let ffi_config = config.unwrap_or_default();
+    
+    // 2. 获取原始内容
+    let raw_content = get_chapter_content(book_id.clone(), chapter_index, ffi_config.remove_duplicate_title)?;
 
     // 2. 获取章节标题
     let chapter_title = {
@@ -3831,7 +3864,6 @@ pub fn process_chapter_content(
     };
 
     // 3. 构建处理选项
-    let ffi_config = config.unwrap_or_default();
     let options = ProcessOptions {
         book_name: String::new(),
         title: chapter_title,
@@ -3965,7 +3997,7 @@ pub fn diagnose_chapter_encoding_api(
     chapter_index: usize,
 ) -> anyhow::Result<String> {
     // 获取原始章节内容
-    let content = get_chapter_content(book_id.clone(), chapter_index)?;
+    let content = get_chapter_content(book_id.clone(), chapter_index, false)?;
     
     // 诊断内容
     let diagnostic_info = diagnose_chapter_content(&content)?;
@@ -3999,7 +4031,7 @@ pub fn compare_raw_and_processed_content(
     chapter_index: usize,
 ) -> anyhow::Result<String> {
     // 1. 获取原始内容
-    let raw_content = get_chapter_content(book_id.clone(), chapter_index)?;
+    let raw_content = get_chapter_content(book_id.clone(), chapter_index, false)?;
     
     // 2. 获取处理后的内容
     let processed_content = get_chapter_content_processed(

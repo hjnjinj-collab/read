@@ -258,7 +258,14 @@ impl ContentPreprocessor {
     /// 2. 对每一行去除前后空白（包括全角空格 \u{3000}）后与标题比较
     /// 3. 如果匹配，删除该行及其前面的所有空行
     /// 4. 支持多次重复的标题（如：标题连续出现2次）
-    fn remove_duplicate_title(content: &str, title: &str) -> String {
+    /// Remove duplicate title from the beginning of the content.
+    ///
+    /// 扫描开头的空行和标题行，移除所有与 title 全等的行（trim 后比较）。
+    /// 遇到第一个非空非标题行时停止扫描。
+    ///
+    /// 用于 TXT 章节内容去重：章节边界可能包含标题行，需在展示前移除。
+    /// EPUB 使用块级镜像版本 `remove_duplicate_title_blocks`（api.rs）。
+    pub fn remove_duplicate_title(content: &str, title: &str) -> String {
         let trimmed_title = title.trim();
         if trimmed_title.is_empty() {
             return content.to_string();
