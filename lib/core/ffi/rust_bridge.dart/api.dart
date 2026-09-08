@@ -110,6 +110,56 @@ Future<void> setParagraphFormatSettings({
 Future<void> updateBookCleaning({required String bookId, required ContentCleaningOptions options}) =>
     RustLib.instance.api.crateApiUpdateBookCleaning(bookId: bookId, options: options);
 
+/// A30d：批量定位笔记锚点（避免逐条 FFI 开销）
+///
+/// 给定章节内的多个字符偏移，返回对应的页面索引数组。
+///
+/// # 参数
+/// - `book_id`: 书籍 ID
+/// - `chapter_index`: 章节索引
+/// - `offsets`: 字符偏移数组（章节内，从 0 开始）
+/// - 其他分页参数：与 `get_page_count` 一致
+///
+/// # 返回
+/// - `Vec<usize>`：每个 offset 对应的页面索引（0-based）
+Future<Uint64List> batchLocateNotes({
+  required String bookId,
+  required BigInt chapterIndex,
+  required Uint64List offsets,
+  required double width,
+  required double height,
+  required double fontSize,
+  required double lineHeightMultiplier,
+  required double paddingLeft,
+  required double paddingTop,
+  required double paddingRight,
+  required double paddingBottom,
+  required String fontName,
+  required int chineseConvert,
+  required double pageFillThreshold,
+  required bool showComments,
+  required bool removeDuplicateTitle,
+  required List<FfiReplaceRule> replaceRules,
+}) => RustLib.instance.api.crateApiBatchLocateNotes(
+  bookId: bookId,
+  chapterIndex: chapterIndex,
+  offsets: offsets,
+  width: width,
+  height: height,
+  fontSize: fontSize,
+  lineHeightMultiplier: lineHeightMultiplier,
+  paddingLeft: paddingLeft,
+  paddingTop: paddingTop,
+  paddingRight: paddingRight,
+  paddingBottom: paddingBottom,
+  fontName: fontName,
+  chineseConvert: chineseConvert,
+  pageFillThreshold: pageFillThreshold,
+  showComments: showComments,
+  removeDuplicateTitle: removeDuplicateTitle,
+  replaceRules: replaceRules,
+);
+
 /// 解析 TXT 文件（带内容净化选项）
 Future<String> parseTxtFileWithCleaning({
   required String filePath,
