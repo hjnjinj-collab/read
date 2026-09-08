@@ -1200,34 +1200,16 @@ fn get_chapter_content_impl(
                 return Err(anyhow::anyhow!("Parser not available"));
             }
         };
-        
-        // 应用去重标题（与 EPUB 同口径，TXT 路径在此处直接处理）
-        let final_content = if remove_duplicate_title {
-            // 获取章节标题
-            let title = {
-                let books = BOOKS.read().unwrap();
-                let handle = books.get(&book_id)
-                    .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-                handle.book.chapters.get(chapter_index)
-                    .map(|ch| ch.title.clone())
-                    .unwrap_or_default()
-            };
-            
-            if !title.is_empty() {
-                reader_core::ContentPreprocessor::remove_duplicate_title(&content, &title)
-            } else {
-                content.to_string()
-            }
-        } else {
-            content.to_string()
-        };
 
+        // 去重标题逻辑已移至 ContentPreprocessor::process（Stage 1），
+        // 预处理缓存会包含去重后的内容，避免缓存命中时去重被跳过。
+        
         // 异步触发预加载（非阻塞；quiet 路径跳过以打断自激级联）
         if trigger_preload {
             trigger_preload_async(book_id, chapter_index);
         }
 
-        Ok(final_content)
+        Ok(content.to_string())
     } else {
         // 3. 无 parser（工厂已拒绝其他格式，此分支必为 EPUB）
         let options_snapshot = CONTENT_CLEANING_OPTIONS.lock().unwrap().clone();
