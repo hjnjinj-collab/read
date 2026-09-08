@@ -156,6 +156,9 @@ pub struct ContentPreprocessor {
     /// JS 规则执行池（D9 主路径；进程级共享，规则不变则引擎实例持续复用）
     #[cfg(feature = "js-engine")]
     js_pool: Arc<crate::processing::js_runtime_pool::JsRuntimePool>,
+    /// A30d：替换规则结果缓存（content_hash + rules_hash → 处理后文本）
+    /// 容量 100：覆盖典型阅读窗口（20 章 × 5 种规则组合）
+    result_cache: Arc<tokio::sync::Mutex<LruCache<(u64, u64), String>>>,
 }
 
 impl ContentPreprocessor {
@@ -166,6 +169,7 @@ impl ContentPreprocessor {
             regex_cache: Arc::new(tokio::sync::Mutex::new(RegexCache::new(256))),
             #[cfg(feature = "js-engine")]
             js_pool: crate::processing::js_runtime_pool::global_pool(),
+            result_cache: Arc::new(tokio::sync::Mutex::new(LruCache::new(NonZeroUsize::new(100).unwrap()))),
         }
     }
 
@@ -360,6 +364,25 @@ impl ContentPreprocessor {
         book_name: &str,
     ) -> Result<String, ContentProcessError> {
         let rules = self.replace_rules.read().await.clone();
+
+        // A30d：缓存键 = (内容哈希, 规则哈希)
+        let content_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            content.hash(&mut hasher);
+            hasher.finish()
+        };
+        let rules_hash = self.rules_hash_inner(&rules);
+
+        // 缓存命中：直接返回
+        {
+            let mut cache = self.result_cache.lock().await;
+            if let Some(cached_result) = cache.get(&(content_hash, rules_hash)) {
+                return Ok(cached_result.clone());
+            }
+        }
+
+        // 缓存未命中：执行规则应用（原逻辑）
         let mut result = content.to_string();
 
         for rule in rules.iter().filter(|r| r.enabled) {
@@ -381,6 +404,12 @@ impl ContentPreprocessor {
             }
         }
         let _ = book_name; // 预留：规则模板变量
+
+        // 缓存结果
+        {
+            let mut cache = self.result_cache.lock().await;
+            cache.put((content_hash, rules_hash), result.clone());
+        }
 
         Ok(result)
     }
@@ -480,6 +509,21 @@ impl ContentPreprocessor {
                 break;
             }
         }
+    }
+
+    /// A30d：计算规则集的哈希（用于缓存键）
+    fn rules_hash_inner(&self, rules: &[ReplaceRule]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+        for rule in rules {
+            rule.pattern.hash(&mut hasher);
+            rule.replacement.hash(&mut hasher);
+            (rule.rule_type as u8).hash(&mut hasher);
+            rule.enabled.hash(&mut hasher);
+        }
+
+        hasher.finish()
     }
 }
 

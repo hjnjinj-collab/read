@@ -758,6 +758,150 @@ fn locate_page_for_offset(pages: &[Page], char_offset: usize) -> usize {
     }
 }
 
+/// A30d：批量定位笔记锚点（避免逐条 FFI 开销）
+///
+/// 给定章节内的多个字符偏移，返回对应的页面索引数组。
+///
+/// # 参数
+/// - `book_id`: 书籍 ID
+/// - `chapter_index`: 章节索引
+/// - `offsets`: 字符偏移数组（章节内，从 0 开始）
+/// - 其他分页参数：与 `get_page_count` 一致
+///
+/// # 返回
+/// - `Vec<usize>`：每个 offset 对应的页面索引（0-based）
+pub fn batch_locate_notes(
+    book_id: String,
+    chapter_index: usize,
+    offsets: Vec<usize>,
+    // 分页参数（与 get_page_count 一致）
+    width: f32,
+    height: f32,
+    font_size: f32,
+    line_height_multiplier: f32,
+    padding_left: f32,
+    padding_top: f32,
+    padding_right: f32,
+    padding_bottom: f32,
+    font_name: String,
+    chinese_convert: u8,
+    page_fill_threshold: f32,
+    show_comments: bool,
+    remove_duplicate_title: bool,
+    replace_rules: Vec<FfiReplaceRule>,
+) -> anyhow::Result<Vec<usize>> {
+    // 参数校验
+    if offsets.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // 构造分页参数（复用 get_page_count 的逻辑）
+    let config = LayoutConfig {
+        width,
+        height,
+        font_size,
+        line_height_multiplier,
+        padding: EdgeInsets {
+            left: padding_left,
+            top: padding_top,
+            right: padding_right,
+            bottom: padding_bottom,
+        },
+        font_name: font_name.clone(),
+        letter_spacing: 0.0,
+        paragraph_spacing: effective_paragraph_spacing(font_size),
+        page_fill_threshold,
+        show_comments,
+        justify: effective_justify(),
+        punctuation_compress: effective_punct_compress(),
+    };
+
+    // 获取书籍
+    let books = BOOKS.read().map_err(|e| anyhow::anyhow!("锁失败: {}", e))?;
+    let handle = books
+        .get(&book_id)
+        .ok_or_else(|| anyhow::anyhow!("书籍未找到: {}", book_id))?;
+
+    // 分路径（EPUB 用结构化路径，TXT 用传统路径）
+    if handle.structured.is_some() {
+        // EPUB 路径：获取结构化分页并批量定位
+        let page_count = get_page_count_structured(
+            book_id.clone(),
+            chapter_index,
+            width,
+            height,
+            font_size,
+            line_height_multiplier,
+            padding_left,
+            padding_top,
+            padding_right,
+            padding_bottom,
+            font_name.clone(),
+            chinese_convert,
+            page_fill_threshold,
+            show_comments,
+            /* para_format_hash= */ 0,
+            remove_duplicate_title,
+            replace_rules.clone(),
+        )?;
+
+        // 构建页面起始偏移数组用于定位
+        let mut page_starts: Vec<usize> = Vec::with_capacity(page_count);
+        for page_idx in 0..page_count {
+            let page = get_page_structured(
+                book_id.clone(),
+                chapter_index,
+                page_idx,
+                width,
+                height,
+                font_size,
+                line_height_multiplier,
+                padding_left,
+                padding_top,
+                padding_right,
+                padding_bottom,
+                font_name.clone(),
+                /* anchor_char_offset= */ None,
+                chinese_convert,
+                page_fill_threshold,
+                show_comments,
+                /* para_format_hash= */ 0,
+                remove_duplicate_title,
+                replace_rules.clone(),
+            )?;
+            page_starts.push(page.start_char_index);
+        }
+
+        // 批量定位（复用 locate_page_for_offset 逻辑）
+        Ok(offsets
+            .into_iter()
+            .map(|offset| {
+                match page_starts.binary_search(&offset) {
+                    Ok(i) => i,
+                    Err(ins) => ins.saturating_sub(1),
+                }
+            })
+            .collect())
+    } else {
+        // TXT 路径：获取分页并批量定位
+        let pages = process_and_layout_chapter(
+            &book_id,
+            chapter_index,
+            &config,
+            remove_duplicate_title,
+            /* re_segment= */ false,
+            chinese_convert,
+            &replace_rules,
+            /* para_format_hash= */ 0,
+        )?;
+
+        Ok(offsets
+            .into_iter()
+            .map(|offset| locate_page_for_offset(&pages, offset))
+            .collect())
+    }
+}
+
 /// 统一的"内容处理 + 分页"实现，带 LRU 缓存
 ///
 /// 缓存 key 同时覆盖排版配置与处理选项（options_hash）：

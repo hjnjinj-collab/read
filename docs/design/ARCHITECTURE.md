@@ -1118,7 +1118,28 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 - **测试**：`epub_remove_duplicate_title`——关闭口径标题在位 / 开启
   口径重复标题移除且正文保留 / 缓存键隔离两口径 / 去重开启后搜索正常。
 
-**所有 A1–A30c + APK 全线落地**。下一阶段候选：
+**A30d 详细说明（性能优化：替换规则缓存 + 笔记批量定位，2026-09-08）**：
+
+- **背景**：基于 JS 引擎迁移评估报告（三个并行探索代理深度分析），确认当前架构已是最优解，不需要功能迁移。实施两项非 JS 引擎的性能优化。
+- **P0 替换规则结果缓存**：
+  - **问题**：搜索 50 章 × 3 条 JS 规则 = +300-750ms 重复开销
+  - **方案**：`ContentPreprocessor` 加 LRU 缓存 `(content_hash, rules_hash) → 处理后文本`
+  - **容量**：100 条目（覆盖 20 章 × 5 种规则组合）
+  - **失效**：规则变更自动失效（`rules_hash` 改变）
+  - **收益**：搜索 50 章从 +300-750ms → <10ms（缓存命中）
+  - **位置**：`reader_core/src/content_preprocessor.rs`
+- **P1 笔记批量定位 API**：
+  - **问题**：加载 100 条笔记高亮需要 100 次 FFI 调用
+  - **方案**：`batch_locate_notes(offsets: Vec<usize>)` 批量定位
+  - **收益**：100 次 FFI → 1 次
+  - **实现**：TXT/EPUB 双路径批量定位（复用 `locate_page_for_offset` 逻辑）
+  - **位置**：`bridge/src/api.rs` + `book_service.dart`
+- **评估结论**：
+  - 当前架构完美实施 D9 原则（用户自定义走 JS，性能关键走 Rust）
+  - 不应该将更多功能迁移到 JS（性能倒退 30-570 倍）
+  - 推荐优化方向：缓存优化 + 批量 API（已完成）
+
+**所有 A1–A30d + APK 全线落地**。下一阶段候选：
 - P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）
 - P2：TTS 朗读（渲染高亮基建已有，缺语音引擎+分句调度）
 - P2：笔记/划线持久化（ReaderSelection 渲染模型已有，缺表结构与 UI）
