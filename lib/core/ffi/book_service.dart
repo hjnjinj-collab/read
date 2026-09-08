@@ -459,6 +459,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     final rustPage = await rust_api.getPageStructured(
@@ -481,6 +482,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
     );
     return _mapPage(rustPage);
@@ -503,6 +505,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     final count = await rust_api.getPageCountStructured(
@@ -521,6 +524,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
     );
     return count.toInt();
@@ -547,6 +551,7 @@ class BookService {
     double pageFillThreshold = 1.0,
     bool showComments = true,
     BigInt? paraFormatHash,
+    bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
   }) async {
     return await rust_api.prefetchStructuredChapter(
@@ -565,6 +570,7 @@ class BookService {
       pageFillThreshold: pageFillThreshold,
       showComments: showComments,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
+      removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
     );
   }

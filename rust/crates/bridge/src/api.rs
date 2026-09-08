@@ -252,6 +252,8 @@ struct StructuredPageKey {
     show_comments: bool,
     /// M9 段落格式化设置哈希（缩进/重分段/间距变更即换键）
     para_format_hash: u64,
+    /// A30c：去重标题开关（变更即换键自然重算）
+    remove_duplicate_title: bool,
     /// A30b：用户替换规则集哈希（规则变更即换键自然重算）
     rules_hash: u64,
 }
@@ -264,6 +266,7 @@ impl StructuredPageKey {
         config: &LayoutConfig,
         convert_mode: u8,
         para_format_hash: u64,
+        remove_duplicate_title: bool,
         rules_hash: u64,
     ) -> Self {
         Self {
@@ -286,6 +289,7 @@ impl StructuredPageKey {
             page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
             show_comments: config.show_comments,
             para_format_hash,
+            remove_duplicate_title,
             rules_hash,
         }
     }
@@ -1979,6 +1983,51 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
     }
 }
 
+/// A30c：EPUB 去重标题（TXT `ContentPreprocessor::remove_duplicate_title`
+/// 的块级镜像，语义严格对齐）：
+/// - 逐块扫描开头，Paragraph/Heading 文本裁剪空白（含全角空格 \u{3000}）
+///   后与章节标题全等 → 该块移除（支持连续重复标题块）；
+/// - Image/Rule 等无文本块视作空行等价物，随标题一并移除；
+/// - 首个非空非标题块即停。
+/// 语义差异说明：TXT 预处理器做整章逐行扫描；EPUB 标题是结构化块（spine
+/// 导航的章名与正文首个 Heading 天然同文），仅开头扫描即可覆盖全部场景。
+fn remove_duplicate_title_blocks(blocks: &mut Vec<book_parser::ContentBlock>, title: &str) {
+    let title_trimmed = title.trim();
+    if title_trimmed.is_empty() {
+        return;
+    }
+    let mut last_match: Option<usize> = None;
+    for (i, block) in blocks.iter().enumerate() {
+        let text: Option<&str> = match block {
+            book_parser::ContentBlock::Paragraph { text, .. }
+            | book_parser::ContentBlock::Heading { text, .. } => Some(text),
+            book_parser::ContentBlock::Image { .. } | book_parser::ContentBlock::Rule => {
+                // 空白等价物：可随标题一并移除，继续向后扫描
+                continue;
+            }
+            // 其它结构块（List/Quote/Table）视作正文，停止扫描
+            _ => break,
+        };
+        match text {
+            Some(t) => {
+                let t_trimmed = t
+                    .trim_start_matches(|c: char| c.is_whitespace() || c == '\u{3000}')
+                    .trim_end();
+                if t_trimmed == title_trimmed {
+                    last_match = Some(i);
+                } else {
+                    break;
+                }
+            }
+            None => continue,
+        }
+    }
+    if let Some(idx) = last_match {
+        log::debug!("remove_duplicate_title_blocks: 移除开头 {} 个重复标题块", idx + 1);
+        blocks.drain(..=idx);
+    }
+}
+
 /// A30b：对 IR 块流递归应用用户替换规则（EPUB 结构化路径）。
 ///
 /// TXT 侧规则在 ContentPreprocessor::process 内整章应用；EPUB 无整章文本
@@ -2091,12 +2140,31 @@ fn process_structured_chapter(
     let content = structured
         .parser
         .get_chapter_content_structured_ex(chapter_index, convert_mode, params.config.font_size)?;
+    // A30c：章节标题（去重标题比对基准，与 search_txt_chapter 同源）；
+    // IR 文本已经过简繁转换，标题需按同一方向转换后再比对
+    let raw_title = handle
+        .book
+        .chapters
+        .get(chapter_index)
+        .map(|c| c.title.clone())
+        .unwrap_or_default();
     let background = content.background.clone();
     drop(books);
 
     // M9.1：EPUB 段落格式化（超长段切短 + 用户缩进覆盖 CSS）。
     // 设置经 para_format_hash 入缓存键——变更即换键重排，此处读全局即可。
     let mut content = content;
+
+    // A30c：去重标题（TXT 预处理 Stage1 同口径，先于替换规则——规则可能
+    // 改写标题文本）。IR 块文本是转换后文本，标题按同方向转换后比对。
+    if params.remove_duplicate_title {
+        let title_cmp = match params.convert_mode {
+            1 => book_parser::chinese_convert::convert_s2t(&raw_title),
+            2 => book_parser::chinese_convert::convert_t2s(&raw_title),
+            _ => raw_title,
+        };
+        remove_duplicate_title_blocks(&mut content.blocks, &title_cmp);
+    }
 
     // A30b：用户替换规则块级应用（与 TXT 预处理同口径；规则可能改变文本
     // 长度，必须先于段落格式化与布局项字符累计——展示/搜索/锚点三方同源）。
@@ -2229,6 +2297,8 @@ struct StructuredParams {
     config: LayoutConfig,
     convert_mode: u8,
     para_format_hash: u64,
+    /// A30c：去重标题（入缓存键：开关变更即换键重算）
+    remove_duplicate_title: bool,
     rules: Arc<Vec<ReplaceRule>>,
     rules_hash: u64,
 }
@@ -2249,6 +2319,7 @@ impl StructuredParams {
         page_fill_threshold: f32,
         show_comments: bool,
         para_format_hash: u64,
+        remove_duplicate_title: bool,
         replace_rules: Vec<FfiReplaceRule>,
     ) -> Self {
         let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
@@ -2269,6 +2340,7 @@ impl StructuredParams {
             ),
             convert_mode: chinese_convert,
             para_format_hash,
+            remove_duplicate_title,
             rules: Arc::new(rules),
             rules_hash,
         }
@@ -2287,6 +2359,7 @@ fn structured_cache_key(
         &params.config,
         params.convert_mode,
         params.para_format_hash,
+        params.remove_duplicate_title,
         params.rules_hash,
     )
 }
@@ -2298,6 +2371,8 @@ fn structured_cache_key(
 /// `chinese_convert`: 阅读级简繁转换（0=无 1=简→繁 2=繁→简；与 TXT 同编码）
 /// `replace_rules`: 用户替换规则（A30b：块级应用；哈希入缓存键，规则变更
 /// 即换键重算。与 TXT 路径同口径）
+/// `remove_duplicate_title`: 去重标题（A30c：TXT 预处理 Stage1 同口径，
+/// 开关入缓存键）
 #[allow(clippy::too_many_arguments)]
 pub fn get_page_structured(
     book_id: String,
@@ -2317,6 +2392,7 @@ pub fn get_page_structured(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<crate::PageInfo> {
     // M12-v4 诊断：输出 FFI 入口收到的 width 参数（仅首次）
@@ -2341,6 +2417,7 @@ pub fn get_page_structured(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        remove_duplicate_title,
         replace_rules,
     );
     let pages =
@@ -2385,6 +2462,7 @@ pub fn get_page_count_structured(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<usize> {
     let params = StructuredParams::from_args(
@@ -2401,6 +2479,7 @@ pub fn get_page_count_structured(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        remove_duplicate_title,
         replace_rules,
     );
     let pages =
@@ -2432,6 +2511,7 @@ pub fn prefetch_structured_chapter(
     page_fill_threshold: f32,
     show_comments: bool,
     para_format_hash: u64,
+    remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
 ) -> anyhow::Result<bool> {
     let params = StructuredParams::from_args(
@@ -2448,6 +2528,7 @@ pub fn prefetch_structured_chapter(
         page_fill_threshold,
         show_comments,
         para_format_hash,
+        remove_duplicate_title,
         replace_rules,
     );
     let cache_key = structured_cache_key(&book_id, chapter_index, &params);
@@ -2612,6 +2693,7 @@ pub fn search_in_book(
                 &book_id,
                 chapter_index,
                 chinese_convert,
+                remove_duplicate_title,
                 &rules,
                 &needles,
                 &mut hits,
@@ -2782,11 +2864,13 @@ fn search_txt_chapter(
 /// 提取+规则应用+段落格式化同源、与 layout_items char_index 累加同规则：
 /// Text = text.chars()+1 段落 newline；Image = 0；Table = Σ单元格段落(chars+1)）。
 /// A30b：replace_rules 在段落格式化前块级应用（与展示路径同函数同时机，
-/// 锚点/摘录基于「规则后文本」——与展示口径一致）
+/// 锚点/摘录基于「规则后文本」——与展示口径一致）。
+/// A30c：remove_duplicate_title 同步接入（先于规则，与展示同时机同语义）
 fn search_epub_chapter(
     book_id: &str,
     chapter_index: usize,
     chinese_convert: u8,
+    remove_duplicate_title: bool,
     rules: &[ReplaceRule],
     needles: &[Vec<char>],
     hits: &mut Vec<SearchHit>,
@@ -2799,7 +2883,7 @@ fn search_epub_chapter(
     };
     // IR 提取（写锁内，parser 独占可变状态——与分页路径同模式）。
     // font_size 仅影响 IR 的图片尺寸提示，与文本锚点无关——搜索取默认基准。
-    let content = {
+    let (content, raw_title) = {
         let mut books = BOOKS.write().unwrap();
         let handle = books
             .get_mut(book_id)
@@ -2808,15 +2892,32 @@ fn search_epub_chapter(
             .structured
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("非结构化书籍"))?;
-        structured
+        let content = structured
             .parser
             .get_chapter_content_structured_ex(
                 chapter_index,
                 convert_mode,
                 book_parser::epub_parser::DEFAULT_BASE_FONT_PX,
-            )?
+            )?;
+        let raw_title = handle
+            .book
+            .chapters
+            .get(chapter_index)
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        (content, raw_title)
     };
     let mut content = content;
+
+    // A30c：去重标题——与 process_structured_chapter 同时机同语义
+    if remove_duplicate_title {
+        let title_cmp = match chinese_convert {
+            1 => book_parser::chinese_convert::convert_s2t(&raw_title),
+            2 => book_parser::chinese_convert::convert_t2s(&raw_title),
+            _ => raw_title,
+        };
+        remove_duplicate_title_blocks(&mut content.blocks, &title_cmp);
+    }
 
     // A30b：用户替换规则块级应用——与 process_structured_chapter 同函数
     // 同时机（先规则后段落格式化），锚点字符流与展示天然同源
@@ -4491,7 +4592,7 @@ mod tests {
         // 文本必须包含命中词
         let params = StructuredParams::from_args(
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
-            "TestFont".to_string(), 0, 0.9, true, 0, Vec::new(),
+            "TestFont".to_string(), 0, 0.9, true, 0, false, Vec::new(),
         );
         for hit in &hits {
             let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)

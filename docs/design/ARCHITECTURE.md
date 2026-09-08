@@ -1095,7 +1095,30 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   守卫不可靠；凡"后台必须纹丝不动"的语义，冻结开关挂在语义主体（对
   话框）的生命周期上，而不是靠测量信号反推。
 
-**所有 A1–A30b + APK 全线落地**。下一阶段候选：
+**A30c 详细说明（EPUB 去重标题接入，2026-09-08）**：
+
+- **背景**：EPUB 的 removeDuplicateTitle 在 A30b 时明确留后续（标题在
+  spine 导航，正文 Heading 与标题的重复判定需文本等值语义）；用户验证
+  A30b 后定案补上。
+- **实现**：`remove_duplicate_title_blocks`——TXT
+  `ContentPreprocessor::remove_duplicate_title`（Stage1）的块级镜像：
+  逐块扫描开头，Paragraph/Heading 文本裁剪空白（含 \u{3000}）后与章节
+  标题全等即移除（支持连续重复块）；Image/Rule 无文本视作空行等价物；
+  首个非空非标题块即停。管线位置**先于替换规则**（TXT Stage1→Stage4
+  同序——规则可能改写标题文本）。
+- **比对基准**：`get_chapters` 的章节标题（与 search_txt_chapter 同源）；
+  IR 块文本已经简繁转换，标题按同方向转换后比对（TXT 是转换前比对，
+  EPUB 因 IR 提取时已转换，属同状态比对——两侧都是"比对时的文本状态
+  一致"）。
+- **管线接线**：`StructuredParams.remove_duplicate_title` + 开关入
+  `StructuredPageKey`（换开关即换键重算）；三 FFI 入口加
+  `remove_duplicate_title` 参数；`search_epub_chapter` 同步接入——展示
+  /搜索/锚点三方同源（红线保持）。Dart 侧五个 EPUB 调用点传
+  `_removeDuplicateTitle`，与 TXT 同口径。
+- **测试**：`epub_remove_duplicate_title`——关闭口径标题在位 / 开启
+  口径重复标题移除且正文保留 / 缓存键隔离两口径 / 去重开启后搜索正常。
+
+**所有 A1–A30c + APK 全线落地**。下一阶段候选：
 - P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）
 - P2：TTS 朗读（渲染高亮基建已有，缺语音引擎+分句调度）
 - P2：笔记/划线持久化（ReaderSelection 渲染模型已有，缺表结构与 UI）

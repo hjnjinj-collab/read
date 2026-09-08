@@ -278,6 +278,7 @@ abstract class RustLibApi extends BaseApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   });
 
@@ -321,6 +322,7 @@ abstract class RustLibApi extends BaseApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   });
 
@@ -392,6 +394,7 @@ abstract class RustLibApi extends BaseApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   });
 
@@ -1717,6 +1720,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   }) {
     return handler.executeNormal(
@@ -1738,6 +1742,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
           sse_encode_u_64(paraFormatHash, serializer);
+          sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 45, port: port_);
         },
@@ -1759,6 +1764,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pageFillThreshold,
           showComments,
           paraFormatHash,
+          removeDuplicateTitle,
           replaceRules,
         ],
         apiImpl: this,
@@ -1784,6 +1790,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "pageFillThreshold",
       "showComments",
       "paraFormatHash",
+      "removeDuplicateTitle",
       "replaceRules",
     ],
   );
@@ -1907,6 +1914,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   }) {
     return handler.executeNormal(
@@ -1930,6 +1938,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
           sse_encode_u_64(paraFormatHash, serializer);
+          sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 47, port: port_);
         },
@@ -1953,6 +1962,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pageFillThreshold,
           showComments,
           paraFormatHash,
+          removeDuplicateTitle,
           replaceRules,
         ],
         apiImpl: this,
@@ -1980,6 +1990,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "pageFillThreshold",
       "showComments",
       "paraFormatHash",
+      "removeDuplicateTitle",
       "replaceRules",
     ],
   );
@@ -2384,6 +2395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double pageFillThreshold,
     required bool showComments,
     required BigInt paraFormatHash,
+    required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
   }) {
     return handler.executeNormal(
@@ -2405,6 +2417,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_bool(showComments, serializer);
           sse_encode_u_64(paraFormatHash, serializer);
+          sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 64, port: port_);
         },
@@ -2426,6 +2439,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pageFillThreshold,
           showComments,
           paraFormatHash,
+          removeDuplicateTitle,
           replaceRules,
         ],
         apiImpl: this,
@@ -2451,6 +2465,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "pageFillThreshold",
       "showComments",
       "paraFormatHash",
+      "removeDuplicateTitle",
       "replaceRules",
     ],
   );

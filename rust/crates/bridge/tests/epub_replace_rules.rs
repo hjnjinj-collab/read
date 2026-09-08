@@ -119,7 +119,7 @@ fn epub_display_applies_replace_rules_and_recomputes_on_change() {
         book_id.clone(), 0, 0,
         360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
         "TestFont".to_string(),
-        None, 0, 0.9, true, 0,
+        None, 0, 0.9, true, 0, false,
         Vec::new(),
     )
     .expect("无规则取页失败");
@@ -131,7 +131,7 @@ fn epub_display_applies_replace_rules_and_recomputes_on_change() {
         book_id.clone(), 0, 0,
         360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
         "TestFont".to_string(),
-        None, 0, 0.9, true, 0,
+        None, 0, 0.9, true, 0, false,
         rules_a.clone(),
     )
     .expect("规则 A 取页失败");
@@ -154,7 +154,7 @@ fn epub_display_applies_replace_rules_and_recomputes_on_change() {
         book_id.clone(), 0, 0,
         360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
         "TestFont".to_string(),
-        None, 0, 0.9, true, 0,
+        None, 0, 0.9, true, 0, false,
         rules_b.clone(),
     )
     .expect("规则 B 取页失败");
@@ -171,7 +171,7 @@ fn epub_display_applies_replace_rules_and_recomputes_on_change() {
         book_id.clone(), 0, 0,
         360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
         "TestFont".to_string(),
-        None, 0, 0.9, true, 0,
+        None, 0, 0.9, true, 0, false,
         rules_off,
     )
     .expect("禁用规则取页失败");
@@ -185,7 +185,7 @@ fn epub_display_applies_replace_rules_and_recomputes_on_change() {
         book_id.clone(), 0,
         360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
         "TestFont".to_string(),
-        0, 0.9, true, 0,
+        0, 0.9, true, 0, false,
         rules_a,
     )
     .expect("带规则页数失败");
@@ -248,7 +248,7 @@ fn epub_search_anchor_alignment_with_replace_rules() {
             book_id.clone(), hit.chapter_index, 0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            Some(hit.anchor_char_offset), 0, 0.9, true, 0,
+            Some(hit.anchor_char_offset), 0, 0.9, true, 0, false,
             rules.clone(),
         )
         .expect("锚点定位取页失败");
@@ -260,6 +260,154 @@ fn epub_search_anchor_alignment_with_replace_rules() {
             text
         );
     }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 构造去重标题测试 EPUB（单章）：章标题既在 h2 又在正文首段重复出现，
+/// nav 标题与 h2 同文（去重比对基准 = get_chapters 的 title）
+fn build_dedup_epub(path: &std::path::Path) -> anyhow::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::FileOptions::default();
+
+    zip.start_file("mimetype", opts)?;
+    zip.write_all(b"application/epub+zip")?;
+
+    zip.start_file("META-INF/container.xml", opts)?;
+    zip.write_all(
+        br#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+    )?;
+
+    zip.start_file("OEBPS/content.opf", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">dedup-test</dc:identifier>
+    <dc:title>去重测试</dc:title>
+    <dc:language>zh</dc:language>
+    <meta property="dcterms:modified">2026-09-08T00:00:00Z</meta>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+  </spine>
+</package>"#
+            .as_bytes(),
+    )?;
+
+    zip.start_file("OEBPS/toc.ncx", opts)?;
+    zip.write_all(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx" version="2005-1">
+  <head><meta name="dtb:uid" content="dedup-test"/></head>
+  <docTitle><text>去重测试</text></docTitle>
+  <navMap>
+    <navPoint id="n1" playOrder="1"><navLabel><text>第一章 初入江湖</text></navLabel><content src="ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>"#
+            .as_bytes(),
+    )?;
+
+    // h2（章标题）+ 正文首段重复标题 + 正文
+    zip.start_file("OEBPS/ch1.xhtml", opts)?;
+    zip.write_all(
+        r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>c1</title></head>
+<body><h2>第一章 初入江湖</h2><p>第一章 初入江湖</p><p>主角在山中修行，一日千里。</p></body></html>"#
+            .as_bytes(),
+    )?;
+    zip.finish()?;
+    Ok(())
+}
+
+/// A30c：EPUB 去重标题——开关两个口径 + 缓存键区分（开关入键，换开关
+/// 即换键重算；若不入键，第二次调用会命中旧缓存导致断言失败）
+#[test]
+fn epub_remove_duplicate_title() {
+    let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+
+    let dir = std::env::temp_dir().join(format!("a30c_dedup_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("d.epub");
+    build_dedup_epub(&path).unwrap();
+    let book_id =
+        parse_txt_file(path.to_string_lossy().to_string(), None).expect("EPUB 导入失败");
+
+    // 去重关闭：章标题两处均在位（h2 + 正文重复段）
+    let page_off = get_page_structured(
+        book_id.clone(), 0, 0,
+        360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+        "TestFont".to_string(),
+        None, 0, 0.9, true, 0, false,
+        Vec::new(),
+    )
+    .expect("去重关闭取页失败");
+    let text_off = page_text(&page_off);
+    assert!(
+        text_off.contains("第一章 初入江湖"),
+        "去重关闭时章标题应在位：{}",
+        text_off
+    );
+
+    // 去重开启：h2 与正文重复段均被移除，正文保留
+    let page_on = get_page_structured(
+        book_id.clone(), 0, 0,
+        360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+        "TestFont".to_string(),
+        None, 0, 0.9, true, 0, true,
+        Vec::new(),
+    )
+    .expect("去重开启取页失败");
+    let text_on = page_text(&page_on);
+    assert!(
+        !text_on.contains("第一章 初入江湖"),
+        "去重开启时重复标题应被移除：{}",
+        text_on
+    );
+    assert!(
+        text_on.contains("山中修行"),
+        "去重开启时正文应保留：{}",
+        text_on
+    );
+
+    // 回到关闭：再次取页应命中关闭口径的缓存（off 的结果不受污染）
+    let page_off2 = get_page_structured(
+        book_id.clone(), 0, 0,
+        360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
+        "TestFont".to_string(),
+        None, 0, 0.9, true, 0, false,
+        Vec::new(),
+    )
+    .expect("去重关闭二次取页失败");
+    assert!(
+        page_text(&page_off2).contains("第一章 初入江湖"),
+        "缓存键应隔离两种口径"
+    );
+
+    // 搜索与展示同口径：去重开启后正文搜索仍正常（sanity）
+    let hits = search_in_book(
+        book_id.clone(),
+        "山中修行".into(),
+        true, // remove_duplicate_title 开启
+        false, 0,
+        Vec::new(),
+        100,
+    )
+    .expect("去重开启搜索失败");
+    assert!(
+        hits.iter().any(|h| h.excerpt.contains("山中修行")),
+        "去重开启后正文命中应保留：{:?}",
+        hits
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

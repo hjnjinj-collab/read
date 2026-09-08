@@ -163,6 +163,7 @@ fn jianlai_ch2_duplication_probe() {
         0.9,
         true,
         0,
+        false,
         Vec::new(),
     )
     .expect("分页计数失败");
@@ -187,6 +188,7 @@ fn jianlai_ch2_duplication_probe() {
             0.9,
             true,
             0,
+            false,
             Vec::new(),
         )
         .expect("取页失败");

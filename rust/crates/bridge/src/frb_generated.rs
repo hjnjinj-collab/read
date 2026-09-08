@@ -1815,6 +1815,7 @@ fn wire__crate__api__get_page_count_structured_impl(
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
             let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
+            let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -1837,6 +1838,7 @@ fn wire__crate__api__get_page_count_structured_impl(
                             api_page_fill_threshold,
                             api_show_comments,
                             api_para_format_hash,
+                            api_remove_duplicate_title,
                             api_replace_rules,
                         )?;
                         Ok(output_ok)
@@ -1959,6 +1961,7 @@ fn wire__crate__api__get_page_structured_impl(
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
             let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
+            let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -1983,6 +1986,7 @@ fn wire__crate__api__get_page_structured_impl(
                             api_page_fill_threshold,
                             api_show_comments,
                             api_para_format_hash,
+                            api_remove_duplicate_title,
                             api_replace_rules,
                         )?;
                         Ok(output_ok)
@@ -2635,6 +2639,7 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_show_comments = <bool>::sse_decode(&mut deserializer);
             let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
+            let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -2657,6 +2662,7 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
                             api_page_fill_threshold,
                             api_show_comments,
                             api_para_format_hash,
+                            api_remove_duplicate_title,
                             api_replace_rules,
                         )?;
                         Ok(output_ok)
