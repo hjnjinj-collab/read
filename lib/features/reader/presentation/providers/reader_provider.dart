@@ -208,7 +208,56 @@ class ReaderNotifier extends Notifier<ReadingState> {
   ///
   /// 分页缓存键含排版配置，新旧尺寸的页互不污染；锚点保证
   /// resize 后停留在原阅读位置（图片项不消耗锚点）。
+  ///
+  /// A30b 真机修复二（2026-09-07 日志实锤）：软键盘开/关动画期间
+  /// LayoutBuilder 每帧测得中间高度（日志实测一次开屏 15+ 次
+  /// window-resized → 15 次 page.load.start），逐帧全章重排 = 背景内容
+  /// 闪烁 + FFI 空转。此前基于 viewInsets 的推断式守卫在该设备上失效
+  /// （insets 与窗口压缩不同步），改为两层显式防御：
+  /// ① **搜索冻结**——对话框存活期间（setViewportResizeFrozen）完全
+  ///    忽略尺寸变化：查找只是查找，只有点击结果才允许触碰内容；
+  /// ② **防抖 200ms**——动画期的中间尺寸被后到事件覆盖，动画结束后
+  ///    只应用最终值一次（键盘收回时最终值==冻结前原值，天然零重排）。
+  bool _viewportResizeFrozen = false;
+  Timer? _resizeDebounce;
+  double? _pendingResizeW;
+  double? _pendingResizeH;
+
+  /// 搜索对话框打开期间冻结视口尺寸处理（接线：book_search_dialog
+  /// initState/dispose）。冻结期间 onWindowResized 直接忽略，不更新
+  /// 尺寸、不作废 FrameSet、不触发重排——背景内容纹丝不动。
+  void setViewportResizeFrozen(bool frozen) {
+    _viewportResizeFrozen = frozen;
+    if (frozen) {
+      // 丢弃冻结瞬间仍在途的待应用尺寸（打开动画的中间值）
+      _resizeDebounce?.cancel();
+      _pendingResizeW = null;
+      _pendingResizeH = null;
+    }
+  }
+
   Future<void> onWindowResized(double width, double height) async {
+    if (width == _screenWidth && height == _screenHeight) return;
+    if (_viewportResizeFrozen) {
+      readerTrace('viewport.resize.frozen', {'w': width, 'h': height});
+      return;
+    }
+    _pendingResizeW = width;
+    _pendingResizeH = height;
+    _resizeDebounce?.cancel();
+    _resizeDebounce = Timer(const Duration(milliseconds: 200), () {
+      final w = _pendingResizeW;
+      final h = _pendingResizeH;
+      _pendingResizeW = null;
+      _pendingResizeH = null;
+      if (w != null && h != null) {
+        _applyViewportResize(w, h);
+      }
+    });
+  }
+
+  /// 防抖到期后的实际尺寸应用（原 onWindowResized 主体）
+  Future<void> _applyViewportResize(double width, double height) async {
     if (width == _screenWidth && height == _screenHeight) return;
     _screenWidth = width;
     _screenHeight = height;

@@ -1060,9 +1060,18 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 - **问题二（搜索输入时内容闪现刷新）**：搜索对话框是唯一带输入框的对
   话框——TextField 弹软键盘 → Scaffold resizeToAvoidBottomInset 压缩
   body → LayoutBuilder 测得假尺寸变化 → onWindowResized 全章重排。
-- **修复（视口冻结）**：`viewInsets.bottom > 0` 期间跳过尺寸变化登记
-  （键盘收起后 constraints 回原值自然恢复；分屏/转屏 insets 不变照常
-  重排）。
+  真机日志实锤：键盘开屏动画 15+ 帧 = 15+ 次 window-resized → 15 次
+  page.load.start（808→478 逐帧下滑），收起时反向再来一遍（808 的最
+  终 commit 就是闪现来源）；且该设备上 viewInsets 与窗口压缩不同步，
+  推断式守卫失效。
+- **修复（显式冻结 + 防抖，用户定案「查找只是查找，只有点击结果才切
+  换内容」）**：①搜索对话框 initState/dispose 接线
+  `setViewportResizeFrozen`——冻结期间 onWindowResized 直接忽略（不更
+  新尺寸、不作废 FrameSet、不重排），冻结瞬间丢弃在途防抖；②尺寸变
+  化 200ms 防抖——动画期中间值被后到事件覆盖，动画结束只应用最终值
+  一次；键盘收回时最终值==冻结前原值 → 天然零重排。冻结只拦视口尺
+  寸处理，不拦页面加载（点击结果时对话框先 pop 再 jumpToSearchHit，
+  时序正确）。诊断入口：`viewport.resize.frozen` 日志行。
 - **问题三（跳转旧章闪帧）**：jumpToSearchHit/jumpToBookmark 先
   copyWith 切章再加载 → 加载期间显示旧章一帧 + FFI 返回二次重建。
 - **修复（deferred commit）**：`_loadCurrentPage` 加 `targetChapterIndex`
@@ -1073,7 +1082,11 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   「规则后文本」命中且锚点落页含命中词。
 - **教训**：①「展示路径不应用 X」的旧注释会固化为隐式契约，新功能接
   X 时搜索侧若同步跟进反而固化错误——对齐的基准是**正确口径**而非现
-  状；②递归 async fn 必须显式 Box::pin（块流递归深度浅，开销可忽略）。
+  状；②递归 async fn 必须显式 Box::pin（块流递归深度浅，开销可忽略）；
+  ③键盘动画引发的视口"假 resize"必须**显式冻结**（对话框生命周期钩子）
+  而非 viewInsets 推断——不同设备 insets 与窗口压缩时序不同步，推断式
+  守卫不可靠；凡"后台必须纹丝不动"的语义，冻结开关挂在语义主体（对
+  话框）的生命周期上，而不是靠测量信号反推。
 
 **所有 A1–A30b + APK 全线落地**。下一阶段候选：
 - P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）

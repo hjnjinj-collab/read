@@ -21,8 +21,24 @@ class _BookSearchDialogState extends ConsumerState<BookSearchDialog> {
   bool _searching = false;
   String? _error;
 
+  /// A30b：捕获 notifier 供 dispose 使用（dispose 中不再走 ref）
+  late final ReaderNotifier _notifier =
+      ref.read(readerProvider.notifier);
+
+  @override
+  void initState() {
+    super.initState();
+    // A30b 真机修复：查找只是查找——对话框存活期间冻结视口尺寸处理，
+    // 软键盘弹出/收起动画不得触发背景内容重排；只有点击搜索结果
+    // （jumpToSearchHit，先 pop 后跳转）才允许切换内容。
+    _notifier.setViewportResizeFrozen(true);
+  }
+
   @override
   void dispose() {
+    // 解冻：键盘收起动画的中间尺寸经 provider 防抖收敛，最终值与
+    // 冻结前一致则零重排（背景内容自始至终不动）
+    _notifier.setViewportResizeFrozen(false);
     _controller.dispose();
     super.dispose();
   }
