@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-09-04
+> 最后更新: 2026-09-09
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -45,6 +45,7 @@
 | **翻页动画中纯文字页出现两页文字重影（图片页正常）/ 动画中及完成后色差** | `_pageToImage` 快照没画纸色底（`paintPage` 契约"不含纸色底——调用方自绘"）→ 快照透明背景，两层文字笔画互相透叠；图片不透明盖住下层所以"碰巧正常"；仿真翻页自画 `_paperColor` 所以无此问题 | [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md) ⭐ 快照补纸色底 + `PageContentRenderer.paperColor` 公开同源 + 块级波浪/jitter 减法/两段式崩解（次生根因） |
 | **翻页动画完成瞬间闪烁一下（新旧两模式均见过）** | ①Flutter Ticker 尾随帧：progress 触顶后回退 0.9996~0.9999，完成短路阈值 `>=1.0` 不命中 → 残迹帧（仿真翻页 8-28 报告，阈值放宽 0.9995）②水波纹：短路路径直绘漏纸色底 + 渲染参数用默认值而非 notifier 同源 → trailing 帧与正式渲染不一致 | [bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹](./bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹.md) + [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md)（v16.9.5 段）⭐ 短路直绘必须与正式渲染逐像素同源（纸色底+渲染参数） |
 | **翻页动画卡死在中途某帧，之后所有翻页手势永久失效（调慢速度档位后必现）** | 双缺陷叠加：①`onDragUpdate` 只查 `_isActive` 不查 `isAnimating`——动画播放中第二次触摸的 dragTo 走到 `AnimationController.value setter`（内部隐式 `stop()`）静默打断动画 ②裸 `await animateTo` 的 TickerFuture 被取消后**永不完成** → `_runAuto` 挂死 → `_turnEndInFlight`/`_isActive` 永久 true → 后续手势全被守卫吞 | [bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持](./bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持.md) ⭐ `animateTo` 必须 `.orCancel`+catch；拖拽驱动入口必须挡 `isAnimating`；调慢动画是时序竞态的时间放大镜 |
+| **TXT 章节标题不显示在正文开头（标题被跳过）** | 章节边界计算中 `start_offset = line_start(line_number + 1)` **跳过标题行**——JS 引擎路径（`chapter_extractor.rs`）和 Rust 回退路径（`txt_parser.rs`）均存在；`remove_duplicate_title` 功能关闭时标题仍不显示（标题从不在内容中）；`align_offsets_by_title` 的 `tl + 1` 同源缺陷 | [bugfixes/2026-09-09_TXT章节标题不显示_章节边界跳过标题行](./bugfixes/2026-09-09_TXT章节标题不显示_章节边界跳过标题行.md) ⭐ 两路径统一：`line_number + 1` → `line_number`；`tl + 1` → `tl` |
 
 ## 二、按错误信息查找
 
