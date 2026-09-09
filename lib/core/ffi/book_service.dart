@@ -471,6 +471,8 @@ class BookService {
               isTableFrame: e.isTableFrame,
               isComment: e.isComment,
               letterGap: e.letterGap,
+              startCharIndex: e.startCharIndex.toInt(),
+              endCharIndex: e.endCharIndex.toInt(),
             ),
           )
           .toList(),

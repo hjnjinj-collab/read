@@ -108,6 +108,12 @@ pub struct TextLine {
     /// TextStyle.letterSpacing 消费（含行尾字符的 n_chars 均分语义）
     #[serde(default)]
     pub letter_gap: f32,
+    /// A31: 本行章内字符区间 [start, end)（锚点口径，与 Page.start/end_char_index
+    /// 同源计数器）。笔记/划线渲染与长按命中测试依赖；表格行 0/0=未知不高亮
+    #[serde(default)]
+    pub start_char_index: usize,
+    #[serde(default)]
+    pub end_char_index: usize,
 }
 
 /// 行内样式分段：`[start, end)` 字符区间（Rust char 计数）的样式覆盖。
@@ -401,6 +407,9 @@ impl LayoutEngine {
                     letter_gap: $letter_gap,
                     is_chapter_start: is_first_line,  // 标记章节第一行
                     is_comment: false,
+                    // A31: 行级字符区间（推进前打戳，与页级同计数器）
+                    start_char_index: char_index,
+                    end_char_index: char_index + $line_char_count,
                 });
                 is_first_line = false;
                 current_y += line_height;
@@ -762,6 +771,9 @@ impl LayoutEngine {
                         } else {
                             0.0
                         };
+                        // A31: 行级字符区间（增量前捕获；锚点口径与页级同计数器）
+                        let line_cs = char_index + line.newlines_before;
+                        let line_ce = line_cs + (line.char_end - line.char_start);
                         char_index += line.char_end - line.char_start + line.newlines_before;
                         // P3：悬挂行上报 raw 宽（先取再 move text）
                         let w_report =
@@ -788,6 +800,8 @@ impl LayoutEngine {
                             letter_gap: gap,
                             is_chapter_start: char_index == 0 && page_start_char == 0,
                             is_comment: item.is_comment,
+                            start_char_index: line_cs,
+                            end_char_index: line_ce,
                         }));
                         text_lines_on_page += 1;
                         current_y += line_h;
@@ -1820,6 +1834,10 @@ impl LayoutEngine {
                             letter_gap: 0.0,
                             is_chapter_start: false,
                             is_comment: false,
+                            // A31: 表格行区间未知（x/y 为单元格相对坐标），
+                            // 0/0 = 不参与高亮/命中
+                            start_char_index: 0,
+                            end_char_index: 0,
                         });
                         cy += line_h;
                         anchor_chars += line.char_end - line.char_start + line.newlines_before;
@@ -1882,6 +1900,71 @@ impl LayoutEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A31: TXT 路径行级字符区间一致性——区间单调、衔接、覆盖页级范围
+    #[test]
+    fn test_txt_entry_char_ranges_monotonic_and_covered() {
+        let (engine, config) = create_test_engine();
+        // 多段文本，触发分页与软换行
+        let text = format!("{}\n{}\n{}", "甲".repeat(80), "乙".repeat(80), "丙".repeat(40));
+        let pages = engine.layout_text(&text, 0).expect("布局失败");
+        assert!(pages.len() >= 1);
+
+        let mut prev_end: Option<usize> = None;
+        for page in &pages {
+            // 页级区间内的 Text entry 区间必须 ⊆ [page.start, page.end]
+            for entry in &page.entries {
+                if let PageEntry::Text(l) = entry {
+                    assert!(
+                        l.start_char_index < l.end_char_index,
+                        "区间必须有效: [{}, {})",
+                        l.start_char_index, l.end_char_index
+                    );
+                    assert!(
+                        l.start_char_index >= page.start_char_index
+                            && l.end_char_index <= page.end_char_index,
+                        "行区间 [{}, {}) 必须落在页区间 [{}, {}) 内",
+                        l.start_char_index, l.end_char_index,
+                        page.start_char_index, page.end_char_index
+                    );
+                    // 单调衔接（允许页间锚点间隙：空行 +1 等）
+                    if let Some(pe) = prev_end {
+                        assert!(
+                            l.start_char_index >= pe,
+                            "区间必须单调: prev_end={} start={}",
+                            pe, l.start_char_index
+                        );
+                    }
+                    prev_end = Some(l.end_char_index);
+                }
+            }
+        }
+    }
+
+    /// A31: styled（EPUB）路径行级字符区间一致性
+    #[test]
+    fn test_styled_entry_char_ranges_monotonic() {
+        let (engine, _config) = create_test_engine();
+        let items: Vec<LayoutItem> = vec![
+            LayoutItem::text("第一段比较长的内容，用来触发软换行断行逻辑的执行与验证。"),
+            LayoutItem::text("第二段同样足够长，跨越多行以验证行级区间的单调衔接性。"),
+        ];
+        let pages = engine.layout_items(&items, 0).expect("styled 布局失败");
+
+        let mut prev_end: Option<usize> = None;
+        for page in &pages {
+            for entry in &page.entries {
+                if let PageEntry::Text(l) = entry {
+                    assert!(l.start_char_index < l.end_char_index);
+                    assert!(l.end_char_index <= page.end_char_index);
+                    if let Some(pe) = prev_end {
+                        assert!(l.start_char_index >= pe, "区间必须单调");
+                    }
+                    prev_end = Some(l.end_char_index);
+                }
+            }
+        }
+    }
 
     fn create_test_engine() -> (LayoutEngine, LayoutConfig) {
         let mut font_manager = FontManager::new();

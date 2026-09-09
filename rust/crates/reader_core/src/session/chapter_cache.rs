@@ -205,6 +205,8 @@ mod tests {
                 letter_gap: 0.0,
                 is_chapter_start: false,
                 is_comment: false,
+                start_char_index: 0,
+                end_char_index: 0,
             })],
             start_char_index: page_index * 100,
             end_char_index: (page_index + 1) * 100,

@@ -98,6 +98,9 @@ pub struct PageEntryInfo {
     pub is_table_frame: bool,
     /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
     pub is_comment: bool,
+    /// A31: 本行章内字符区间 [start, end)（锚点口径；表格行 0/0=未知不高亮）
+    pub start_char_index: usize,
+    pub end_char_index: usize,
 }
 
 /// 文本行内样式分段
@@ -153,6 +156,8 @@ impl From<Page> for PageInfo {
                         is_chapter_start: line.is_chapter_start,
                         is_table_frame: false,
                         is_comment: line.is_comment,
+                        start_char_index: line.start_char_index,
+                        end_char_index: line.end_char_index,
                     },
                     layout_engine::PageEntry::Image(image) => PageEntryInfo {
                         text: None,
@@ -168,6 +173,8 @@ impl From<Page> for PageInfo {
                         is_chapter_start: false,
                         is_table_frame: false,
                         is_comment: false,
+                        start_char_index: 0,
+                        end_char_index: 0,
                     },
                     layout_engine::PageEntry::Rect(rect) => PageEntryInfo {
                         text: None,
@@ -183,6 +190,8 @@ impl From<Page> for PageInfo {
                         is_chapter_start: false,
                         is_table_frame: true,
                         is_comment: false,
+                        start_char_index: 0,
+                        end_char_index: 0,
                     },
                 })
                 .collect(),

@@ -170,6 +170,10 @@ class PageEntryInfo {
   /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
   final bool isComment;
 
+  /// A31: 本行章内字符区间 [start, end)（锚点口径；表格行 0/0=未知不高亮）
+  final BigInt startCharIndex;
+  final BigInt endCharIndex;
+
   const PageEntryInfo({
     this.text,
     this.resourceHref,
@@ -184,6 +188,8 @@ class PageEntryInfo {
     required this.isChapterStart,
     required this.isTableFrame,
     required this.isComment,
+    required this.startCharIndex,
+    required this.endCharIndex,
   });
 
   @override
@@ -200,7 +206,9 @@ class PageEntryInfo {
       letterGap.hashCode ^
       isChapterStart.hashCode ^
       isTableFrame.hashCode ^
-      isComment.hashCode;
+      isComment.hashCode ^
+      startCharIndex.hashCode ^
+      endCharIndex.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -219,7 +227,9 @@ class PageEntryInfo {
           letterGap == other.letterGap &&
           isChapterStart == other.isChapterStart &&
           isTableFrame == other.isTableFrame &&
-          isComment == other.isComment;
+          isComment == other.isComment &&
+          startCharIndex == other.startCharIndex &&
+          endCharIndex == other.endCharIndex;
 }
 
 /// FFI-safe page info

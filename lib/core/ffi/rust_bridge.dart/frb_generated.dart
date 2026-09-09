@@ -3211,7 +3211,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageEntryInfo dco_decode_page_entry_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13) throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 15) throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return PageEntryInfo(
       text: dco_decode_opt_String(arr[0]),
       resourceHref: dco_decode_opt_String(arr[1]),
@@ -3226,6 +3226,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       isChapterStart: dco_decode_bool(arr[10]),
       isTableFrame: dco_decode_bool(arr[11]),
       isComment: dco_decode_bool(arr[12]),
+      startCharIndex: dco_decode_usize(arr[13]),
+      endCharIndex: dco_decode_usize(arr[14]),
     );
   }
 
@@ -3755,6 +3757,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_isChapterStart = sse_decode_bool(deserializer);
     var var_isTableFrame = sse_decode_bool(deserializer);
     var var_isComment = sse_decode_bool(deserializer);
+    var var_startCharIndex = sse_decode_usize(deserializer);
+    var var_endCharIndex = sse_decode_usize(deserializer);
     return PageEntryInfo(
       text: var_text,
       resourceHref: var_resourceHref,
@@ -3769,6 +3773,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       isChapterStart: var_isChapterStart,
       isTableFrame: var_isTableFrame,
       isComment: var_isComment,
+      startCharIndex: var_startCharIndex,
+      endCharIndex: var_endCharIndex,
     );
   }
 
@@ -4208,6 +4214,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.isChapterStart, serializer);
     sse_encode_bool(self.isTableFrame, serializer);
     sse_encode_bool(self.isComment, serializer);
+    sse_encode_usize(self.startCharIndex, serializer);
+    sse_encode_usize(self.endCharIndex, serializer);
   }
 
   @protected

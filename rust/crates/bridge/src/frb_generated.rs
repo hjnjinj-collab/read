@@ -3602,6 +3602,8 @@ impl SseDecode for crate::PageEntryInfo {
         let mut var_isChapterStart = <bool>::sse_decode(deserializer);
         let mut var_isTableFrame = <bool>::sse_decode(deserializer);
         let mut var_isComment = <bool>::sse_decode(deserializer);
+        let mut var_startCharIndex = <usize>::sse_decode(deserializer);
+        let mut var_endCharIndex = <usize>::sse_decode(deserializer);
         return crate::PageEntryInfo {
             text: var_text,
             resource_href: var_resourceHref,
@@ -3616,6 +3618,8 @@ impl SseDecode for crate::PageEntryInfo {
             is_chapter_start: var_isChapterStart,
             is_table_frame: var_isTableFrame,
             is_comment: var_isComment,
+            start_char_index: var_startCharIndex,
+            end_char_index: var_endCharIndex,
         };
     }
 }
@@ -4108,6 +4112,8 @@ impl flutter_rust_bridge::IntoDart for crate::PageEntryInfo {
             self.is_chapter_start.into_into_dart().into_dart(),
             self.is_table_frame.into_into_dart().into_dart(),
             self.is_comment.into_into_dart().into_dart(),
+            self.start_char_index.into_into_dart().into_dart(),
+            self.end_char_index.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4514,6 +4520,8 @@ impl SseEncode for crate::PageEntryInfo {
         <bool>::sse_encode(self.is_chapter_start, serializer);
         <bool>::sse_encode(self.is_table_frame, serializer);
         <bool>::sse_encode(self.is_comment, serializer);
+        <usize>::sse_encode(self.start_char_index, serializer);
+        <usize>::sse_encode(self.end_char_index, serializer);
     }
 }
 

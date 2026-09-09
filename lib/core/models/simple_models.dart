@@ -96,6 +96,11 @@ class PageEntry {
   /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行；绘制端转 letterSpacing）
   final double letterGap;
 
+  /// A31: 本行章内字符区间 [startCharIndex, endCharIndex)（锚点口径）。
+  /// 笔记/划线渲染与长按命中测试依赖；null 或 start>=end = 未知（表格行）不高亮
+  final int? startCharIndex;
+  final int? endCharIndex;
+
   const PageEntry({
     this.text,
     this.resourceHref,
@@ -110,9 +115,17 @@ class PageEntry {
     this.isTableFrame = false,
     this.isComment = false,
     this.letterGap = 0.0,
+    this.startCharIndex,
+    this.endCharIndex,
   });
 
   bool get isImage => resourceHref != null;
+
+  /// A31: 行级字符区间是否可用于笔记渲染/命中
+  bool get hasCharRange =>
+      startCharIndex != null &&
+      endCharIndex != null &&
+      startCharIndex! < endCharIndex!;
 }
 
 /// 行内样式分段：`[start, end)` 字符区间的覆盖样式

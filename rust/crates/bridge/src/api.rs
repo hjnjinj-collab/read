@@ -1630,6 +1630,7 @@ pub fn get_page_count(
 }
 
 /// Get specific page with content preprocessing (带内容预处理的分页获取)
+/// A31: PageEntry 文本行携带行级字符区间 start/end_char_index（笔记划线用）
 ///
 /// `replace_rules`: 用户自定义替换规则（随设置传入，即时生效）
 /// `anchor_char_offset`: 进度锚点——章内字符偏移；提供时返回包含该偏移的页
