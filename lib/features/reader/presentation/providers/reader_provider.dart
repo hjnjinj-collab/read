@@ -702,7 +702,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：EPUB 去重标题同口径
           replaceRules: _replaceRules, // A30b：EPUB 净化规则同口径下发
-          segmentRules: _segmentRules, // A35-L2：分段规则同口径下发
         );
       } else {
         // 转换简繁设置为数字代码
@@ -1321,7 +1320,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：邻居页与前台同参
         replaceRules: _replaceRules, // A30b：邻居页排版与前台同参（含规则）
-        segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
       );
     } else {
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1387,7 +1385,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：预取与前台完全同参
         replaceRules: _replaceRules, // A30b：预取与前台完全同参（含规则）
-        segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
       ),
     );
   }
@@ -1590,7 +1587,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：页数与页内容同参
         replaceRules: _replaceRules, // A30b：页数与页内容同参（含规则）
-        segmentRules: _segmentRules, // A35-L2：分段规则与页内容同参
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1969,7 +1965,6 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：图片预热取页同参
           replaceRules: _replaceRules, // A30b：图片预热取页与前台同参
-          segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
         );
       } else {
         return;  // TXT 暂不支持预测预热
