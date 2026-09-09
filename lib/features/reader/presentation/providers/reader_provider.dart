@@ -93,6 +93,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // A35-L2: 用户自定义分段规则（统一规则模型：内置 + 用户同模型）
   List<SegmentRuleItem> _segmentRules = [];
 
+  // A31: 当前章节笔记缓存（章节切换时刷新）
+  List<Note> _currentChapterNotes = [];
+  int? _cachedNotesChapterIndex;
+
   // Content cleaning settings
   bool _removeHtmlTags = true;
   bool _removeAds = true;
@@ -649,6 +653,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
       } else {
         await _loadCurrentPage();
       }
+
+      // A31: 初始化当前章节笔记缓存
+      await _refreshCurrentChapterNotes();
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
@@ -811,6 +818,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'page': '${page.chapterIndex}/${page.pageIndex}',
         'range': '${page.startCharIndex}-${page.endCharIndex}',
       });
+
+      // A31: 章节切换时刷新笔记缓存（fire-and-forget，不阻塞页面显示）
+      if (targetChapterIndex != null && targetChapterIndex != originChapterIndex) {
+        _refreshCurrentChapterNotes();
+      }
 
       // 阶段1优化：立即预热当前页图片（fire-and-forget）
       // 在邻居页加载前启动，用户首屏图片零延迟
@@ -1452,6 +1464,82 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   Future<void> deleteBookmark(int id) => _db.deleteBookmark(id);
 
+  // ===== A31: 笔记/划线 =====
+
+  /// 当前书的所有笔记列表（新→旧）
+  Future<List<Note>> notesForCurrentBook() async {
+    final filePath = state.filePath;
+    if (filePath == null) return const [];
+    return _db.notesOf(filePath);
+  }
+
+  /// 当前章节的笔记（用于渲染高亮；带缓存）
+  List<Note> get currentChapterNotes => List.unmodifiable(_currentChapterNotes);
+
+  /// 刷新当前章节笔记缓存（章节切换时调用）
+  Future<void> _refreshCurrentChapterNotes() async {
+    final filePath = state.filePath;
+    final chapterIndex = state.currentChapterIndex;
+    if (filePath == null) {
+      _currentChapterNotes = [];
+      _cachedNotesChapterIndex = null;
+      return;
+    }
+    if (_cachedNotesChapterIndex == chapterIndex) return; // 已缓存
+    _currentChapterNotes = await _db.notesOfChapter(filePath, chapterIndex);
+    _cachedNotesChapterIndex = chapterIndex;
+  }
+
+  /// 添加笔记/划线
+  Future<int> addNote({
+    required int chapterIndex,
+    required int startCharOffset,
+    required int endCharOffset,
+    required String excerpt,
+    int colorIndex = 0,
+    String? note,
+  }) async {
+    final filePath = state.filePath;
+    if (filePath == null) return -1;
+    final id = await _db.addNote(
+      bookPath: filePath,
+      chapterIndex: chapterIndex,
+      startCharOffset: startCharOffset,
+      endCharOffset: endCharOffset,
+      excerpt: excerpt,
+      colorIndex: colorIndex,
+      note: note,
+    );
+    // 如果是当前章节，刷新缓存
+    if (chapterIndex == state.currentChapterIndex) {
+      await _refreshCurrentChapterNotes();
+    }
+    return id;
+  }
+
+  /// 更新笔记文本
+  Future<void> updateNoteText(int id, String noteText) async {
+    await _db.updateNoteText(id, noteText);
+    // 刷新当前章节缓存
+    await _refreshCurrentChapterNotes();
+  }
+
+  /// 删除笔记
+  Future<void> deleteNote(int id) async {
+    await _db.deleteNote(id);
+    // 刷新当前章节缓存
+    await _refreshCurrentChapterNotes();
+  }
+
+  /// 跳转到笔记位置（复用书签跳转机制）
+  Future<void> jumpToNote(Note note) async {
+    if (note.chapterIndex >= state.chapters.length) return;
+    await _loadCurrentPage(
+      anchorCharOffset: note.startCharOffset,
+      targetChapterIndex: note.chapterIndex,
+    );
+  }
+
   /// 跳转到书签位置（章节 + 字符锚点，与进度恢复同一机制）。
   /// A30 真机修复：章节随页面一次性提交（deferred commit），不再
   /// 提前 copyWith 切章——消除加载期间旧章内容闪现一帧。
@@ -2002,6 +2090,55 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 预测性预热失败不影响阅读，静默处理
       readerTrace('image.predict.error', {'error': e.toString()});
     }
+  }
+}
+
+/// 阅读状态（不可变快照）
+class ReadingState {
+  final String? bookId;
+  final String? filePath;
+  final String? bookTitle;
+  final List<Chapter> chapters;
+  final int currentChapterIndex;
+  final int currentPageIndex;
+  final PageInfo? currentPage;
+  final bool isLoading;
+  final String? error;
+
+  const ReadingState({
+    this.bookId,
+    this.filePath,
+    this.bookTitle,
+    this.chapters = const [],
+    this.currentChapterIndex = 0,
+    this.currentPageIndex = 0,
+    this.currentPage,
+    this.isLoading = false,
+    this.error,
+  });
+
+  ReadingState copyWith({
+    String? bookId,
+    String? filePath,
+    String? bookTitle,
+    List<Chapter>? chapters,
+    int? currentChapterIndex,
+    int? currentPageIndex,
+    PageInfo? currentPage,
+    bool? isLoading,
+    String? error,
+  }) {
+    return ReadingState(
+      bookId: bookId ?? this.bookId,
+      filePath: filePath ?? this.filePath,
+      bookTitle: bookTitle ?? this.bookTitle,
+      chapters: chapters ?? this.chapters,
+      currentChapterIndex: currentChapterIndex ?? this.currentChapterIndex,
+      currentPageIndex: currentPageIndex ?? this.currentPageIndex,
+      currentPage: currentPage ?? this.currentPage,
+      isLoading: isLoading ?? this.isLoading,
+      error: error ?? this.error,
+    );
   }
 }
 
