@@ -369,8 +369,8 @@ impl TxtParser {
 
         let mut offsets = Vec::with_capacity(title_lines.len());
         for (idx, &tl) in title_lines.iter().enumerate() {
-            // 章节起始：标题行之后；结束：下一章标题行之前
-            let start_pos = mapper.map_line_to_offset(tl + 1);
+            // 章节起始：标题行（包含标题）；结束：下一章标题行之前
+            let start_pos = mapper.map_line_to_offset(tl);
             let end_pos = if idx + 1 < title_lines.len() {
                 mapper.map_line_to_offset(title_lines[idx + 1])
             } else {
