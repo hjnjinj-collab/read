@@ -59,12 +59,34 @@ class AppSettings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [Books, ReadingProgress, Bookmarks, AppSettings])
+/// 笔记/划线（A31，2026-09-09）
+///
+/// 锚点口径：与书签/进度/搜索同源——章内字符偏移（TXT = 净化+格式化文本，
+/// EPUB = IR 布局项字符流）。颜色索引：0=黄色/1=绿色/2=蓝色/3=粉色/4=直线。
+class Notes extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get bookPath => text()();
+  IntColumn get chapterIndex => integer()();
+  /// 起始字符偏移（闭区间）
+  IntColumn get startCharOffset => integer()();
+  /// 结束字符偏移（开区间）
+  IntColumn get endCharOffset => integer()();
+  /// 摘录文本（用于列表显示和排版变更后模糊重定位）
+  TextColumn get excerpt => text()();
+  /// 颜色索引（0-3=背景高亮/4=下划线）
+  IntColumn get colorIndex => integer().withDefault(const Constant(0))();
+  /// 用户备注（可选）
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+@DriftDatabase(tables: [Books, ReadingProgress, Bookmarks, AppSettings, Notes])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -72,6 +94,10 @@ class AppDatabase extends _$AppDatabase {
           // v2: 新增 AppSettings KV 表（设置持久化，2026-09-04）
           if (from < 2) {
             await m.createTable(appSettings);
+          }
+          // v3: 新增 Notes 表（笔记/划线，2026-09-09 A31）
+          if (from < 3) {
+            await m.createTable(notes);
           }
         },
       );
@@ -130,6 +156,10 @@ class AppDatabase extends _$AppDatabase {
     return (delete(bookmarks)..where((m) => m.bookPath.equals(bookPath))).go();
   }
 
+  Future<int> deleteNotes(String bookPath) {
+    return (delete(notes)..where((n) => n.bookPath.equals(bookPath))).go();
+  }
+
   // ===== 阅读进度 =====
 
   Future<ReadingProgressData?> progressOf(String bookPath) {
@@ -179,6 +209,60 @@ class AppDatabase extends _$AppDatabase {
 
   Future<int> deleteBookmark(int id) {
     return (delete(bookmarks)..where((m) => m.id.equals(id))).go();
+  }
+
+  // ===== 笔记/划线 =====
+
+  /// 获取书籍的所有笔记（按创建时间倒序）
+  Future<List<Note>> notesOf(String bookPath) {
+    return (select(notes)
+          ..where((n) => n.bookPath.equals(bookPath))
+          ..orderBy([(n) => OrderingTerm.desc(n.createdAt)]))
+        .get();
+  }
+
+  /// 获取指定章节的笔记（用于渲染高亮）
+  Future<List<Note>> notesOfChapter(String bookPath, int chapterIndex) {
+    return (select(notes)
+          ..where((n) =>
+              n.bookPath.equals(bookPath) & n.chapterIndex.equals(chapterIndex)))
+        .get();
+  }
+
+  /// 添加笔记/划线
+  Future<int> addNote({
+    required String bookPath,
+    required int chapterIndex,
+    required int startCharOffset,
+    required int endCharOffset,
+    required String excerpt,
+    int colorIndex = 0,
+    String? note,
+  }) {
+    return into(notes).insert(NotesCompanion.insert(
+      bookPath: bookPath,
+      chapterIndex: chapterIndex,
+      startCharOffset: startCharOffset,
+      endCharOffset: endCharOffset,
+      excerpt: excerpt,
+      colorIndex: Value(colorIndex),
+      note: Value(note),
+    ));
+  }
+
+  /// 更新笔记备注
+  Future<int> updateNoteText(int id, String noteText) {
+    return (update(notes)..where((n) => n.id.equals(id))).write(
+      NotesCompanion(
+        note: Value(noteText),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  /// 删除笔记
+  Future<int> deleteNote(int id) {
+    return (delete(notes)..where((n) => n.id.equals(id))).go();
   }
 
   // ===== 应用设置 =====

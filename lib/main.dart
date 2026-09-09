@@ -185,6 +185,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     await _db.deleteBook(book.filePath);
     await (ref.read(appDatabaseProvider).deleteProgress(book.filePath));
     await ref.read(appDatabaseProvider).deleteBookmarks(book.filePath);
+    await ref.read(appDatabaseProvider).deleteNotes(book.filePath);
     _refresh();
   }
 

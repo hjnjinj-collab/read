@@ -1405,6 +1405,621 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
   }
 }
 
+class $NotesTable extends Notes with TableInfo<$NotesTable, Note> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NotesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _bookPathMeta = const VerificationMeta(
+    'bookPath',
+  );
+  @override
+  late final GeneratedColumn<String> bookPath = GeneratedColumn<String>(
+    'book_path',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chapterIndexMeta = const VerificationMeta(
+    'chapterIndex',
+  );
+  @override
+  late final GeneratedColumn<int> chapterIndex = GeneratedColumn<int>(
+    'chapter_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _startCharOffsetMeta = const VerificationMeta(
+    'startCharOffset',
+  );
+  @override
+  late final GeneratedColumn<int> startCharOffset = GeneratedColumn<int>(
+    'start_char_offset',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _endCharOffsetMeta = const VerificationMeta(
+    'endCharOffset',
+  );
+  @override
+  late final GeneratedColumn<int> endCharOffset = GeneratedColumn<int>(
+    'end_char_offset',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _excerptMeta = const VerificationMeta(
+    'excerpt',
+  );
+  @override
+  late final GeneratedColumn<String> excerpt = GeneratedColumn<String>(
+    'excerpt',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _colorIndexMeta = const VerificationMeta(
+    'colorIndex',
+  );
+  @override
+  late final GeneratedColumn<int> colorIndex = GeneratedColumn<int>(
+    'color_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _noteMeta = const VerificationMeta('note');
+  @override
+  late final GeneratedColumn<String> note = GeneratedColumn<String>(
+    'note',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    bookPath,
+    chapterIndex,
+    startCharOffset,
+    endCharOffset,
+    excerpt,
+    colorIndex,
+    note,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'notes';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Note> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('book_path')) {
+      context.handle(
+        _bookPathMeta,
+        bookPath.isAcceptableOrUnknown(data['book_path']!, _bookPathMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bookPathMeta);
+    }
+    if (data.containsKey('chapter_index')) {
+      context.handle(
+        _chapterIndexMeta,
+        chapterIndex.isAcceptableOrUnknown(
+          data['chapter_index']!,
+          _chapterIndexMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_chapterIndexMeta);
+    }
+    if (data.containsKey('start_char_offset')) {
+      context.handle(
+        _startCharOffsetMeta,
+        startCharOffset.isAcceptableOrUnknown(
+          data['start_char_offset']!,
+          _startCharOffsetMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_startCharOffsetMeta);
+    }
+    if (data.containsKey('end_char_offset')) {
+      context.handle(
+        _endCharOffsetMeta,
+        endCharOffset.isAcceptableOrUnknown(
+          data['end_char_offset']!,
+          _endCharOffsetMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_endCharOffsetMeta);
+    }
+    if (data.containsKey('excerpt')) {
+      context.handle(
+        _excerptMeta,
+        excerpt.isAcceptableOrUnknown(data['excerpt']!, _excerptMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_excerptMeta);
+    }
+    if (data.containsKey('color_index')) {
+      context.handle(
+        _colorIndexMeta,
+        colorIndex.isAcceptableOrUnknown(data['color_index']!, _colorIndexMeta),
+      );
+    }
+    if (data.containsKey('note')) {
+      context.handle(
+        _noteMeta,
+        note.isAcceptableOrUnknown(data['note']!, _noteMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Note map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Note(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      bookPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_path'],
+      )!,
+      chapterIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}chapter_index'],
+      )!,
+      startCharOffset: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}start_char_offset'],
+      )!,
+      endCharOffset: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}end_char_offset'],
+      )!,
+      excerpt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}excerpt'],
+      )!,
+      colorIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}color_index'],
+      )!,
+      note: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}note'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $NotesTable createAlias(String alias) {
+    return $NotesTable(attachedDatabase, alias);
+  }
+}
+
+class Note extends DataClass implements Insertable<Note> {
+  final int id;
+  final String bookPath;
+  final int chapterIndex;
+
+  /// 起始字符偏移（闭区间）
+  final int startCharOffset;
+
+  /// 结束字符偏移（开区间）
+  final int endCharOffset;
+
+  /// 摘录文本（用于列表显示和排版变更后模糊重定位）
+  final String excerpt;
+
+  /// 颜色索引（0-3=背景高亮/4=下划线）
+  final int colorIndex;
+
+  /// 用户备注（可选）
+  final String? note;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const Note({
+    required this.id,
+    required this.bookPath,
+    required this.chapterIndex,
+    required this.startCharOffset,
+    required this.endCharOffset,
+    required this.excerpt,
+    required this.colorIndex,
+    this.note,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['book_path'] = Variable<String>(bookPath);
+    map['chapter_index'] = Variable<int>(chapterIndex);
+    map['start_char_offset'] = Variable<int>(startCharOffset);
+    map['end_char_offset'] = Variable<int>(endCharOffset);
+    map['excerpt'] = Variable<String>(excerpt);
+    map['color_index'] = Variable<int>(colorIndex);
+    if (!nullToAbsent || note != null) {
+      map['note'] = Variable<String>(note);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  NotesCompanion toCompanion(bool nullToAbsent) {
+    return NotesCompanion(
+      id: Value(id),
+      bookPath: Value(bookPath),
+      chapterIndex: Value(chapterIndex),
+      startCharOffset: Value(startCharOffset),
+      endCharOffset: Value(endCharOffset),
+      excerpt: Value(excerpt),
+      colorIndex: Value(colorIndex),
+      note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory Note.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Note(
+      id: serializer.fromJson<int>(json['id']),
+      bookPath: serializer.fromJson<String>(json['bookPath']),
+      chapterIndex: serializer.fromJson<int>(json['chapterIndex']),
+      startCharOffset: serializer.fromJson<int>(json['startCharOffset']),
+      endCharOffset: serializer.fromJson<int>(json['endCharOffset']),
+      excerpt: serializer.fromJson<String>(json['excerpt']),
+      colorIndex: serializer.fromJson<int>(json['colorIndex']),
+      note: serializer.fromJson<String?>(json['note']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'bookPath': serializer.toJson<String>(bookPath),
+      'chapterIndex': serializer.toJson<int>(chapterIndex),
+      'startCharOffset': serializer.toJson<int>(startCharOffset),
+      'endCharOffset': serializer.toJson<int>(endCharOffset),
+      'excerpt': serializer.toJson<String>(excerpt),
+      'colorIndex': serializer.toJson<int>(colorIndex),
+      'note': serializer.toJson<String?>(note),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  Note copyWith({
+    int? id,
+    String? bookPath,
+    int? chapterIndex,
+    int? startCharOffset,
+    int? endCharOffset,
+    String? excerpt,
+    int? colorIndex,
+    Value<String?> note = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => Note(
+    id: id ?? this.id,
+    bookPath: bookPath ?? this.bookPath,
+    chapterIndex: chapterIndex ?? this.chapterIndex,
+    startCharOffset: startCharOffset ?? this.startCharOffset,
+    endCharOffset: endCharOffset ?? this.endCharOffset,
+    excerpt: excerpt ?? this.excerpt,
+    colorIndex: colorIndex ?? this.colorIndex,
+    note: note.present ? note.value : this.note,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  Note copyWithCompanion(NotesCompanion data) {
+    return Note(
+      id: data.id.present ? data.id.value : this.id,
+      bookPath: data.bookPath.present ? data.bookPath.value : this.bookPath,
+      chapterIndex: data.chapterIndex.present
+          ? data.chapterIndex.value
+          : this.chapterIndex,
+      startCharOffset: data.startCharOffset.present
+          ? data.startCharOffset.value
+          : this.startCharOffset,
+      endCharOffset: data.endCharOffset.present
+          ? data.endCharOffset.value
+          : this.endCharOffset,
+      excerpt: data.excerpt.present ? data.excerpt.value : this.excerpt,
+      colorIndex: data.colorIndex.present
+          ? data.colorIndex.value
+          : this.colorIndex,
+      note: data.note.present ? data.note.value : this.note,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Note(')
+          ..write('id: $id, ')
+          ..write('bookPath: $bookPath, ')
+          ..write('chapterIndex: $chapterIndex, ')
+          ..write('startCharOffset: $startCharOffset, ')
+          ..write('endCharOffset: $endCharOffset, ')
+          ..write('excerpt: $excerpt, ')
+          ..write('colorIndex: $colorIndex, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    bookPath,
+    chapterIndex,
+    startCharOffset,
+    endCharOffset,
+    excerpt,
+    colorIndex,
+    note,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Note &&
+          other.id == this.id &&
+          other.bookPath == this.bookPath &&
+          other.chapterIndex == this.chapterIndex &&
+          other.startCharOffset == this.startCharOffset &&
+          other.endCharOffset == this.endCharOffset &&
+          other.excerpt == this.excerpt &&
+          other.colorIndex == this.colorIndex &&
+          other.note == this.note &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class NotesCompanion extends UpdateCompanion<Note> {
+  final Value<int> id;
+  final Value<String> bookPath;
+  final Value<int> chapterIndex;
+  final Value<int> startCharOffset;
+  final Value<int> endCharOffset;
+  final Value<String> excerpt;
+  final Value<int> colorIndex;
+  final Value<String?> note;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  const NotesCompanion({
+    this.id = const Value.absent(),
+    this.bookPath = const Value.absent(),
+    this.chapterIndex = const Value.absent(),
+    this.startCharOffset = const Value.absent(),
+    this.endCharOffset = const Value.absent(),
+    this.excerpt = const Value.absent(),
+    this.colorIndex = const Value.absent(),
+    this.note = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  });
+  NotesCompanion.insert({
+    this.id = const Value.absent(),
+    required String bookPath,
+    required int chapterIndex,
+    required int startCharOffset,
+    required int endCharOffset,
+    required String excerpt,
+    this.colorIndex = const Value.absent(),
+    this.note = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  }) : bookPath = Value(bookPath),
+       chapterIndex = Value(chapterIndex),
+       startCharOffset = Value(startCharOffset),
+       endCharOffset = Value(endCharOffset),
+       excerpt = Value(excerpt);
+  static Insertable<Note> custom({
+    Expression<int>? id,
+    Expression<String>? bookPath,
+    Expression<int>? chapterIndex,
+    Expression<int>? startCharOffset,
+    Expression<int>? endCharOffset,
+    Expression<String>? excerpt,
+    Expression<int>? colorIndex,
+    Expression<String>? note,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (bookPath != null) 'book_path': bookPath,
+      if (chapterIndex != null) 'chapter_index': chapterIndex,
+      if (startCharOffset != null) 'start_char_offset': startCharOffset,
+      if (endCharOffset != null) 'end_char_offset': endCharOffset,
+      if (excerpt != null) 'excerpt': excerpt,
+      if (colorIndex != null) 'color_index': colorIndex,
+      if (note != null) 'note': note,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+    });
+  }
+
+  NotesCompanion copyWith({
+    Value<int>? id,
+    Value<String>? bookPath,
+    Value<int>? chapterIndex,
+    Value<int>? startCharOffset,
+    Value<int>? endCharOffset,
+    Value<String>? excerpt,
+    Value<int>? colorIndex,
+    Value<String?>? note,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+  }) {
+    return NotesCompanion(
+      id: id ?? this.id,
+      bookPath: bookPath ?? this.bookPath,
+      chapterIndex: chapterIndex ?? this.chapterIndex,
+      startCharOffset: startCharOffset ?? this.startCharOffset,
+      endCharOffset: endCharOffset ?? this.endCharOffset,
+      excerpt: excerpt ?? this.excerpt,
+      colorIndex: colorIndex ?? this.colorIndex,
+      note: note ?? this.note,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (bookPath.present) {
+      map['book_path'] = Variable<String>(bookPath.value);
+    }
+    if (chapterIndex.present) {
+      map['chapter_index'] = Variable<int>(chapterIndex.value);
+    }
+    if (startCharOffset.present) {
+      map['start_char_offset'] = Variable<int>(startCharOffset.value);
+    }
+    if (endCharOffset.present) {
+      map['end_char_offset'] = Variable<int>(endCharOffset.value);
+    }
+    if (excerpt.present) {
+      map['excerpt'] = Variable<String>(excerpt.value);
+    }
+    if (colorIndex.present) {
+      map['color_index'] = Variable<int>(colorIndex.value);
+    }
+    if (note.present) {
+      map['note'] = Variable<String>(note.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NotesCompanion(')
+          ..write('id: $id, ')
+          ..write('bookPath: $bookPath, ')
+          ..write('chapterIndex: $chapterIndex, ')
+          ..write('startCharOffset: $startCharOffset, ')
+          ..write('endCharOffset: $endCharOffset, ')
+          ..write('excerpt: $excerpt, ')
+          ..write('colorIndex: $colorIndex, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1414,6 +2029,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   );
   late final $BookmarksTable bookmarks = $BookmarksTable(this);
   late final $AppSettingsTable appSettings = $AppSettingsTable(this);
+  late final $NotesTable notes = $NotesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1423,6 +2039,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     readingProgress,
     bookmarks,
     appSettings,
+    notes,
   ];
 }
 
@@ -2204,6 +2821,296 @@ typedef $$AppSettingsTableProcessedTableManager =
       AppSetting,
       PrefetchHooks Function()
     >;
+typedef $$NotesTableCreateCompanionBuilder =
+    NotesCompanion Function({
+      Value<int> id,
+      required String bookPath,
+      required int chapterIndex,
+      required int startCharOffset,
+      required int endCharOffset,
+      required String excerpt,
+      Value<int> colorIndex,
+      Value<String?> note,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+typedef $$NotesTableUpdateCompanionBuilder =
+    NotesCompanion Function({
+      Value<int> id,
+      Value<String> bookPath,
+      Value<int> chapterIndex,
+      Value<int> startCharOffset,
+      Value<int> endCharOffset,
+      Value<String> excerpt,
+      Value<int> colorIndex,
+      Value<String?> note,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+
+class $$NotesTableFilterComposer extends Composer<_$AppDatabase, $NotesTable> {
+  $$NotesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookPath => $composableBuilder(
+    column: $table.bookPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get chapterIndex => $composableBuilder(
+    column: $table.chapterIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get startCharOffset => $composableBuilder(
+    column: $table.startCharOffset,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get endCharOffset => $composableBuilder(
+    column: $table.endCharOffset,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get excerpt => $composableBuilder(
+    column: $table.excerpt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get colorIndex => $composableBuilder(
+    column: $table.colorIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$NotesTableOrderingComposer
+    extends Composer<_$AppDatabase, $NotesTable> {
+  $$NotesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookPath => $composableBuilder(
+    column: $table.bookPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get chapterIndex => $composableBuilder(
+    column: $table.chapterIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get startCharOffset => $composableBuilder(
+    column: $table.startCharOffset,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get endCharOffset => $composableBuilder(
+    column: $table.endCharOffset,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get excerpt => $composableBuilder(
+    column: $table.excerpt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get colorIndex => $composableBuilder(
+    column: $table.colorIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$NotesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NotesTable> {
+  $$NotesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get bookPath =>
+      $composableBuilder(column: $table.bookPath, builder: (column) => column);
+
+  GeneratedColumn<int> get chapterIndex => $composableBuilder(
+    column: $table.chapterIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get startCharOffset => $composableBuilder(
+    column: $table.startCharOffset,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get endCharOffset => $composableBuilder(
+    column: $table.endCharOffset,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get excerpt =>
+      $composableBuilder(column: $table.excerpt, builder: (column) => column);
+
+  GeneratedColumn<int> get colorIndex => $composableBuilder(
+    column: $table.colorIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get note =>
+      $composableBuilder(column: $table.note, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$NotesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $NotesTable,
+          Note,
+          $$NotesTableFilterComposer,
+          $$NotesTableOrderingComposer,
+          $$NotesTableAnnotationComposer,
+          $$NotesTableCreateCompanionBuilder,
+          $$NotesTableUpdateCompanionBuilder,
+          (Note, BaseReferences<_$AppDatabase, $NotesTable, Note>),
+          Note,
+          PrefetchHooks Function()
+        > {
+  $$NotesTableTableManager(_$AppDatabase db, $NotesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NotesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NotesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NotesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> bookPath = const Value.absent(),
+                Value<int> chapterIndex = const Value.absent(),
+                Value<int> startCharOffset = const Value.absent(),
+                Value<int> endCharOffset = const Value.absent(),
+                Value<String> excerpt = const Value.absent(),
+                Value<int> colorIndex = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => NotesCompanion(
+                id: id,
+                bookPath: bookPath,
+                chapterIndex: chapterIndex,
+                startCharOffset: startCharOffset,
+                endCharOffset: endCharOffset,
+                excerpt: excerpt,
+                colorIndex: colorIndex,
+                note: note,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String bookPath,
+                required int chapterIndex,
+                required int startCharOffset,
+                required int endCharOffset,
+                required String excerpt,
+                Value<int> colorIndex = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => NotesCompanion.insert(
+                id: id,
+                bookPath: bookPath,
+                chapterIndex: chapterIndex,
+                startCharOffset: startCharOffset,
+                endCharOffset: endCharOffset,
+                excerpt: excerpt,
+                colorIndex: colorIndex,
+                note: note,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$NotesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $NotesTable,
+      Note,
+      $$NotesTableFilterComposer,
+      $$NotesTableOrderingComposer,
+      $$NotesTableAnnotationComposer,
+      $$NotesTableCreateCompanionBuilder,
+      $$NotesTableUpdateCompanionBuilder,
+      (Note, BaseReferences<_$AppDatabase, $NotesTable, Note>),
+      Note,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2216,4 +3123,6 @@ class $AppDatabaseManager {
       $$BookmarksTableTableManager(_db, _db.bookmarks);
   $$AppSettingsTableTableManager get appSettings =>
       $$AppSettingsTableTableManager(_db, _db.appSettings);
+  $$NotesTableTableManager get notes =>
+      $$NotesTableTableManager(_db, _db.notes);
 }
