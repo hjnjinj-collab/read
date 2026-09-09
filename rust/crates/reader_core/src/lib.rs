@@ -10,7 +10,7 @@ pub mod session;
 
 pub use content_preprocessor::{
     ChineseConvertType, ContentPreprocessor, ContentProcessError, ProcessOptions, ReplaceRule,
-    RuleType,
+    RuleType, SegmentRule, SegmentAction, SegmentRuleKind,
 };
 pub use task_scheduler::ChapterTaskScheduler;
 pub use chapter_utils::{ChapterInfo, extract_chapter_number, get_pure_chapter_name};

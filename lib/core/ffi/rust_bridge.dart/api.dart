@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `apply_replace_rules_to_blocks_inner`, `apply_replace_rules_to_blocks`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `effective_justify`, `effective_paragraph_spacing`, `effective_punct_compress`, `ensure_epub_cleaned_cache`, `find_all_ci`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `invalidate_preprocessed_cache`, `is_expired`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `remove_duplicate_title_blocks`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `structured_cache_key`, `structured_layout_config`, `trigger_preload_async`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FfiLoadingProgress`, `PreloadRuntime`, `StructuredCacheEntry`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `hash`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `hash`
 
 /// Load font from file path（软失败：找不到文件/读失败时只 log，不抛错）
 ///
@@ -318,6 +318,7 @@ Future<PageInfo> getPageProcessed({
   required bool reSegment,
   required int chineseConvert,
   required List<FfiReplaceRule> replaceRules,
+  required List<FfiSegmentRule> segmentRules,
   BigInt? anchorCharOffset,
   required double pageFillThreshold,
   required BigInt paraFormatHash,
@@ -338,6 +339,7 @@ Future<PageInfo> getPageProcessed({
   reSegment: reSegment,
   chineseConvert: chineseConvert,
   replaceRules: replaceRules,
+  segmentRules: segmentRules,
   anchorCharOffset: anchorCharOffset,
   pageFillThreshold: pageFillThreshold,
   paraFormatHash: paraFormatHash,
@@ -360,6 +362,7 @@ Future<BigInt> getPageCountProcessed({
   required bool reSegment,
   required int chineseConvert,
   required List<FfiReplaceRule> replaceRules,
+  required List<FfiSegmentRule> segmentRules,
   required double pageFillThreshold,
   required BigInt paraFormatHash,
 }) => RustLib.instance.api.crateApiGetPageCountProcessed(
@@ -378,6 +381,7 @@ Future<BigInt> getPageCountProcessed({
   reSegment: reSegment,
   chineseConvert: chineseConvert,
   replaceRules: replaceRules,
+  segmentRules: segmentRules,
   pageFillThreshold: pageFillThreshold,
   paraFormatHash: paraFormatHash,
 );
@@ -545,6 +549,7 @@ Future<List<SearchHit>> searchInBook({
   required bool reSegment,
   required int chineseConvert,
   required List<FfiReplaceRule> replaceRules,
+  required List<FfiSegmentRule> segmentRules,
   required BigInt maxHits,
 }) => RustLib.instance.api.crateApiSearchInBook(
   bookId: bookId,
@@ -553,6 +558,7 @@ Future<List<SearchHit>> searchInBook({
   reSegment: reSegment,
   chineseConvert: chineseConvert,
   replaceRules: replaceRules,
+  segmentRules: segmentRules,
   maxHits: maxHits,
 );
 
@@ -1018,6 +1024,41 @@ class FfiReplaceRule {
           replacement == other.replacement &&
           ruleType == other.ruleType &&
           enabled == other.enabled;
+}
+
+/// A35-L2: FFI 传入的分段规则（Dart → Rust）
+class FfiSegmentRule {
+  final String id;
+  final String pattern;
+  final int action;
+  final bool enabled;
+  final bool isBuiltin;
+  final bool isRegex;
+
+  const FfiSegmentRule({
+    required this.id,
+    required this.pattern,
+    required this.action,
+    required this.enabled,
+    required this.isBuiltin,
+    required this.isRegex,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ pattern.hashCode ^ action.hashCode ^ enabled.hashCode ^ isBuiltin.hashCode ^ isRegex.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiSegmentRule &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          pattern == other.pattern &&
+          action == other.action &&
+          enabled == other.enabled &&
+          isBuiltin == other.isBuiltin &&
+          isRegex == other.isRegex;
 }
 
 /// M10-B：单条测量结果（font_name + font_size + text + width_px）

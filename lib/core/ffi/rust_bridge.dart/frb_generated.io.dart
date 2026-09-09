@@ -74,6 +74,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiReplaceRule dco_decode_ffi_replace_rule(dynamic raw);
 
   @protected
+  FfiSegmentRule dco_decode_ffi_segment_rule(dynamic raw);
+
+  @protected
   FfiTextWidth dco_decode_ffi_text_width(dynamic raw);
 
   @protected
@@ -84,6 +87,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FfiReplaceRule> dco_decode_list_ffi_replace_rule(dynamic raw);
+
+  @protected
+  List<FfiSegmentRule> dco_decode_list_ffi_segment_rule(dynamic raw);
 
   @protected
   List<FfiTextWidth> dco_decode_list_ffi_text_width(dynamic raw);
@@ -206,6 +212,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiReplaceRule sse_decode_ffi_replace_rule(SseDeserializer deserializer);
 
   @protected
+  FfiSegmentRule sse_decode_ffi_segment_rule(SseDeserializer deserializer);
+
+  @protected
   FfiTextWidth sse_decode_ffi_text_width(SseDeserializer deserializer);
 
   @protected
@@ -216,6 +225,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FfiReplaceRule> sse_decode_list_ffi_replace_rule(SseDeserializer deserializer);
+
+  @protected
+  List<FfiSegmentRule> sse_decode_list_ffi_segment_rule(SseDeserializer deserializer);
 
   @protected
   List<FfiTextWidth> sse_decode_list_ffi_text_width(SseDeserializer deserializer);
@@ -341,6 +353,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_ffi_replace_rule(FfiReplaceRule self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_segment_rule(FfiSegmentRule self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_text_width(FfiTextWidth self, SseSerializer serializer);
 
   @protected
@@ -351,6 +366,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_ffi_replace_rule(List<FfiReplaceRule> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_segment_rule(List<FfiSegmentRule> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_text_width(List<FfiTextWidth> self, SseSerializer serializer);

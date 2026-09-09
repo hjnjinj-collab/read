@@ -1820,6 +1820,8 @@ fn wire__crate__api__get_page_count_processed_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
@@ -1842,6 +1844,7 @@ fn wire__crate__api__get_page_count_processed_impl(
                             api_re_segment,
                             api_chinese_convert,
                             api_replace_rules,
+                            api_segment_rules,
                             api_page_fill_threshold,
                             api_para_format_hash,
                         )?;
@@ -1961,6 +1964,8 @@ fn wire__crate__api__get_page_processed_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             let api_anchor_char_offset = <Option<usize>>::sse_decode(&mut deserializer);
             let api_page_fill_threshold = <f32>::sse_decode(&mut deserializer);
             let api_para_format_hash = <u64>::sse_decode(&mut deserializer);
@@ -1985,6 +1990,7 @@ fn wire__crate__api__get_page_processed_impl(
                             api_re_segment,
                             api_chinese_convert,
                             api_replace_rules,
+                            api_segment_rules,
                             api_anchor_char_offset,
                             api_page_fill_threshold,
                             api_para_format_hash,
@@ -2926,6 +2932,8 @@ fn wire__crate__api__search_in_book_impl(
             let api_chinese_convert = <u8>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             let api_max_hits = <usize>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
@@ -2938,6 +2946,7 @@ fn wire__crate__api__search_in_book_impl(
                             api_re_segment,
                             api_chinese_convert,
                             api_replace_rules,
+                            api_segment_rules,
                             api_max_hits,
                         )?;
                         Ok(output_ok)
@@ -3352,6 +3361,26 @@ impl SseDecode for crate::api::FfiReplaceRule {
     }
 }
 
+impl SseDecode for crate::api::FfiSegmentRule {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_pattern = <String>::sse_decode(deserializer);
+        let mut var_action = <u8>::sse_decode(deserializer);
+        let mut var_enabled = <bool>::sse_decode(deserializer);
+        let mut var_isBuiltin = <bool>::sse_decode(deserializer);
+        let mut var_isRegex = <bool>::sse_decode(deserializer);
+        return crate::api::FfiSegmentRule {
+            id: var_id,
+            pattern: var_pattern,
+            action: var_action,
+            enabled: var_enabled,
+            is_builtin: var_isBuiltin,
+            is_regex: var_isRegex,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FfiTextWidth {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3399,6 +3428,18 @@ impl SseDecode for Vec<crate::api::FfiReplaceRule> {
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(<crate::api::FfiReplaceRule>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FfiSegmentRule> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FfiSegmentRule>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -4013,6 +4054,26 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FfiReplaceRule> for crate::ap
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FfiSegmentRule {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.pattern.into_into_dart().into_dart(),
+            self.action.into_into_dart().into_dart(),
+            self.enabled.into_into_dart().into_dart(),
+            self.is_builtin.into_into_dart().into_dart(),
+            self.is_regex.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::FfiSegmentRule {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FfiSegmentRule> for crate::api::FfiSegmentRule {
+    fn into_into_dart(self) -> crate::api::FfiSegmentRule {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FfiTextWidth {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4255,6 +4316,18 @@ impl SseEncode for crate::api::FfiReplaceRule {
     }
 }
 
+impl SseEncode for crate::api::FfiSegmentRule {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.pattern, serializer);
+        <u8>::sse_encode(self.action, serializer);
+        <bool>::sse_encode(self.enabled, serializer);
+        <bool>::sse_encode(self.is_builtin, serializer);
+        <bool>::sse_encode(self.is_regex, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FfiTextWidth {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4291,6 +4364,16 @@ impl SseEncode for Vec<crate::api::FfiReplaceRule> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::FfiReplaceRule>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FfiSegmentRule> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FfiSegmentRule>::sse_encode(item, serializer);
         }
     }
 }

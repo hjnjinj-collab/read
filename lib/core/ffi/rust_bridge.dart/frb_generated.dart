@@ -282,6 +282,7 @@ abstract class RustLibApi extends BaseApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     required double pageFillThreshold,
     required BigInt paraFormatHash,
   });
@@ -323,6 +324,7 @@ abstract class RustLibApi extends BaseApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     BigInt? anchorCharOffset,
     required double pageFillThreshold,
     required BigInt paraFormatHash,
@@ -441,6 +443,7 @@ abstract class RustLibApi extends BaseApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     required BigInt maxHits,
   });
 
@@ -1754,6 +1757,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     required double pageFillThreshold,
     required BigInt paraFormatHash,
   }) {
@@ -1776,6 +1780,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(reSegment, serializer);
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_u_64(paraFormatHash, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 45, port: port_);
@@ -1798,6 +1803,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           reSegment,
           chineseConvert,
           replaceRules,
+          segmentRules,
           pageFillThreshold,
           paraFormatHash,
         ],
@@ -1824,6 +1830,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "reSegment",
       "chineseConvert",
       "replaceRules",
+      "segmentRules",
       "pageFillThreshold",
       "paraFormatHash",
     ],
@@ -1939,6 +1946,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     BigInt? anchorCharOffset,
     required double pageFillThreshold,
     required BigInt paraFormatHash,
@@ -1963,6 +1971,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(reSegment, serializer);
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           sse_encode_opt_box_autoadd_usize(anchorCharOffset, serializer);
           sse_encode_f_32(pageFillThreshold, serializer);
           sse_encode_u_64(paraFormatHash, serializer);
@@ -1987,6 +1996,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           reSegment,
           chineseConvert,
           replaceRules,
+          segmentRules,
           anchorCharOffset,
           pageFillThreshold,
           paraFormatHash,
@@ -2015,6 +2025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "reSegment",
       "chineseConvert",
       "replaceRules",
+      "segmentRules",
       "anchorCharOffset",
       "pageFillThreshold",
       "paraFormatHash",
@@ -2692,6 +2703,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool reSegment,
     required int chineseConvert,
     required List<FfiReplaceRule> replaceRules,
+    required List<FfiSegmentRule> segmentRules,
     required BigInt maxHits,
   }) {
     return handler.executeNormal(
@@ -2704,12 +2716,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(reSegment, serializer);
           sse_encode_u_8(chineseConvert, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           sse_encode_usize(maxHits, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 70, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_list_search_hit, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiSearchInBookConstMeta,
-        argValues: [bookId, query, removeDuplicateTitle, reSegment, chineseConvert, replaceRules, maxHits],
+        argValues: [
+          bookId,
+          query,
+          removeDuplicateTitle,
+          reSegment,
+          chineseConvert,
+          replaceRules,
+          segmentRules,
+          maxHits,
+        ],
         apiImpl: this,
       ),
     );
@@ -2717,7 +2739,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSearchInBookConstMeta => const TaskConstMeta(
     debugName: "search_in_book",
-    argNames: ["bookId", "query", "removeDuplicateTitle", "reSegment", "chineseConvert", "replaceRules", "maxHits"],
+    argNames: [
+      "bookId",
+      "query",
+      "removeDuplicateTitle",
+      "reSegment",
+      "chineseConvert",
+      "replaceRules",
+      "segmentRules",
+      "maxHits",
+    ],
   );
 
   @override
@@ -3047,6 +3078,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FfiSegmentRule dco_decode_ffi_segment_rule(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6) throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return FfiSegmentRule(
+      id: dco_decode_String(arr[0]),
+      pattern: dco_decode_String(arr[1]),
+      action: dco_decode_u_8(arr[2]),
+      enabled: dco_decode_bool(arr[3]),
+      isBuiltin: dco_decode_bool(arr[4]),
+      isRegex: dco_decode_bool(arr[5]),
+    );
+  }
+
+  @protected
   FfiTextWidth dco_decode_ffi_text_width(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3075,6 +3121,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<FfiReplaceRule> dco_decode_list_ffi_replace_rule(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_ffi_replace_rule).toList();
+  }
+
+  @protected
+  List<FfiSegmentRule> dco_decode_list_ffi_segment_rule(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_segment_rule).toList();
   }
 
   @protected
@@ -3475,6 +3527,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FfiSegmentRule sse_decode_ffi_segment_rule(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_pattern = sse_decode_String(deserializer);
+    var var_action = sse_decode_u_8(deserializer);
+    var var_enabled = sse_decode_bool(deserializer);
+    var var_isBuiltin = sse_decode_bool(deserializer);
+    var var_isRegex = sse_decode_bool(deserializer);
+    return FfiSegmentRule(
+      id: var_id,
+      pattern: var_pattern,
+      action: var_action,
+      enabled: var_enabled,
+      isBuiltin: var_isBuiltin,
+      isRegex: var_isRegex,
+    );
+  }
+
+  @protected
   FfiTextWidth sse_decode_ffi_text_width(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_fontName = sse_decode_String(deserializer);
@@ -3516,6 +3587,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <FfiReplaceRule>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_ffi_replace_rule(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiSegmentRule> sse_decode_list_ffi_segment_rule(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiSegmentRule>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_segment_rule(deserializer));
     }
     return ans_;
   }
@@ -3938,6 +4021,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_ffi_segment_rule(FfiSegmentRule self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.pattern, serializer);
+    sse_encode_u_8(self.action, serializer);
+    sse_encode_bool(self.enabled, serializer);
+    sse_encode_bool(self.isBuiltin, serializer);
+    sse_encode_bool(self.isRegex, serializer);
+  }
+
+  @protected
   void sse_encode_ffi_text_width(FfiTextWidth self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.fontName, serializer);
@@ -3970,6 +4064,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_ffi_replace_rule(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_segment_rule(List<FfiSegmentRule> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_segment_rule(item, serializer);
     }
   }
 

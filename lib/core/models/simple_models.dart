@@ -285,3 +285,50 @@ class ReplaceRuleItem {
     );
   }
 }
+
+/// A35-L2: 用户自定义分段规则（设置界面编辑，传入内容处理流水线）
+///
+/// 统一规则模型：内置规则 + 用户规则同模型。
+/// [id] 规则标识（内置："builtin:quote_unclosed" 等；用户：任意字符串）
+/// [pattern] 正则模式（kind=Regex 时使用；kind=Builtin 时忽略）
+/// [action] 动作类型：0=ForceBreakAfter, 1=ForceBreakBefore, 2=KeepIndependent, 3=MergeWithPrev
+/// [isBuiltin] 是否内置规则（UI 不可删除，仅可开关）
+/// [isRegex] 是否正则规则
+class SegmentRuleItem {
+  final String id;
+  final String pattern;
+  final int action; // 0=ForceBreakAfter, 1=ForceBreakBefore, 2=KeepIndependent, 3=MergeWithPrev
+  final bool enabled;
+  final bool isBuiltin;
+  final bool isRegex;
+
+  const SegmentRuleItem({
+    required this.id,
+    this.pattern = '',
+    required this.action,
+    required this.enabled,
+    this.isBuiltin = false,
+    this.isRegex = false,
+  });
+
+  /// 动作类型索引（用于 FFI 传递）
+  int get actionIndex => action;
+
+  SegmentRuleItem copyWith({
+    String? id,
+    String? pattern,
+    int? action,
+    bool? enabled,
+    bool? isBuiltin,
+    bool? isRegex,
+  }) {
+    return SegmentRuleItem(
+      id: id ?? this.id,
+      pattern: pattern ?? this.pattern,
+      action: action ?? this.action,
+      enabled: enabled ?? this.enabled,
+      isBuiltin: isBuiltin ?? this.isBuiltin,
+      isRegex: isRegex ?? this.isRegex,
+    );
+  }
+}

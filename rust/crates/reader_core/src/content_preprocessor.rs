@@ -67,6 +67,74 @@ impl ReplaceRule {
     }
 }
 
+/// A35-L2: 分段规则动作类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SegmentAction {
+    /// 匹配行后强制分段（该行收尾，下一行起新段）
+    ForceBreakAfter,
+    /// 匹配行前强制分段（上一行收尾，该行起新段）
+    ForceBreakBefore,
+    /// 匹配行独立成段（前后断开）
+    KeepIndependent,
+    /// 匹配行强制与上一行合并（吸附，压过默认断开项）
+    MergeWithPrev,
+}
+
+/// A35-L2: 分段规则来源
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SegmentRuleKind {
+    /// 内置谓词（Rust 原生实现，按 id 分派）
+    Builtin,
+    /// 用户自定义正则
+    Regex,
+}
+
+/// A35-L2: 统一分段规则模型（内置 + 用户同模型）
+#[derive(Debug, Clone)]
+pub struct SegmentRule {
+    /// 规则标识（内置："builtin:quote_unclosed" 等；用户：任意）
+    pub id: String,
+    /// 规则来源
+    pub kind: SegmentRuleKind,
+    /// 正则模式（kind=Regex 时使用；kind=Builtin 时忽略）
+    pub pattern: String,
+    /// 动作类型（Builtin 谓词的 action 由 id 语义决定，此处冗余存储）
+    pub action: SegmentAction,
+    /// 是否启用
+    pub enabled: bool,
+    /// 是否内置规则（UI 不可删除，仅可开关）
+    pub builtin: bool,
+}
+
+impl SegmentRule {
+    /// 用户正则规则构造
+    pub fn user_regex(id: impl Into<String>, pattern: impl Into<String>, action: SegmentAction) -> Self {
+        Self {
+            id: id.into(),
+            kind: SegmentRuleKind::Regex,
+            pattern: pattern.into(),
+            action,
+            enabled: true,
+            builtin: false,
+        }
+    }
+
+    /// 计算规则列表哈希（用于缓存键）
+    pub fn hash_rules(rules: &[SegmentRule]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for rule in rules {
+            rule.id.hash(&mut hasher);
+            (rule.action as u8).hash(&mut hasher);
+            rule.enabled.hash(&mut hasher);
+            if rule.kind == SegmentRuleKind::Regex {
+                rule.pattern.hash(&mut hasher);
+            }
+        }
+        hasher.finish()
+    }
+}
+
 /// Simplified/Traditional Chinese conversion direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChineseConvertType {
@@ -82,6 +150,8 @@ pub struct ProcessOptions {
     pub chapter_index: usize,
     pub remove_duplicate_title: bool,
     pub re_segment: bool,
+    /// A35-L2: 用户自定义分段规则（内置 + 用户同模型）
+    pub segment_rules: Vec<SegmentRule>,
     pub chinese_convert: Option<ChineseConvertType>,
     pub adapt_special_style: bool,
     pub apply_user_markings: bool,
@@ -95,6 +165,7 @@ impl Default for ProcessOptions {
             chapter_index: 0,
             remove_duplicate_title: true,
             re_segment: false,
+            segment_rules: Vec::new(),
             chinese_convert: None,
             adapt_special_style: true,
             apply_user_markings: false,
@@ -202,18 +273,12 @@ impl ContentPreprocessor {
 
         // Stage 1: Remove duplicate title
         if options.remove_duplicate_title && !options.title.is_empty() {
-            eprintln!("[TITLE_DEBUG] Stage 1: calling remove_duplicate_title, title='{}'", options.title);
             content = Self::remove_duplicate_title(&content, &options.title);
-            eprintln!("[TITLE_DEBUG] Stage 1: result content_len={}, first_80='{}'",
-                content.len(), content.chars().take(80).collect::<String>().replace('\n', "\\n"));
-        } else {
-            eprintln!("[TITLE_DEBUG] Stage 1: skip (enabled={}, title_empty={})",
-                options.remove_duplicate_title, options.title.is_empty());
         }
 
-        // Stage 2: Re-segment
-        if options.re_segment {
-            content = Self::re_segment(&content);
+        // Stage 2: Re-segment（A35-L2：合并式引擎 + 统一规则模型）
+        if options.re_segment || !options.segment_rules.is_empty() {
+            content = Self::re_segment(&content, &options.segment_rules);
         }
 
         // Stage 3: Protect HTML tags
@@ -273,12 +338,8 @@ impl ContentPreprocessor {
     /// EPUB 使用块级镜像版本 `remove_duplicate_title_blocks`（api.rs）。
     pub fn remove_duplicate_title(content: &str, title: &str) -> String {
         let trimmed_title = title.trim();
-        eprintln!("[TITLE_DEBUG] remove_duplicate_title: title='{}', content_len={}, first_80='{}'",
-            title, content.len(),
-            content.chars().take(80).collect::<String>().replace('\n', "\\n"));
 
         if trimmed_title.is_empty() {
-            eprintln!("[TITLE_DEBUG] title is empty, returning original");
             return content.to_string();
         }
 
@@ -324,105 +385,307 @@ impl ContentPreprocessor {
         }
 
         if title_kept {
-            eprintln!(
-                "[TITLE_DEBUG] result: title_kept=true, skipped_before={}, duplicates={}, result_lines={}",
-                skipped_before_title, duplicates_removed, result.len()
+            log::debug!(
+                "remove_duplicate_title: 保留首个标题，跳过 {} 个前置空行，删除 {} 个重复标题",
+                skipped_before_title, duplicates_removed
             );
-        } else {
-            eprintln!("[TITLE_DEBUG] result: title_kept=false (no match), result_lines={}", result.len());
         }
 
-        let final_result = result.join("\n");
-        eprintln!("[TITLE_DEBUG] final result: len={}, first_80='{}'",
-            final_result.len(),
-            final_result.chars().take(80).collect::<String>().replace('\n', "\\n"));
-        final_result
+        result.join("\n")
     }
 
-    /// Re-segment: ensure paragraphs are separated by single newlines.
-    /// 
-    /// L1 启发式规则增强：
-    /// - 对话检测：引号结尾后保留换行
-    /// - 场景切换：*** / --- 分隔符保留
-    /// - 诗词保护：短行（<20字符）不合并
-    fn re_segment(content: &str) -> String {
+    /// A35-L2: 合并式分段引擎（统一规则模型：内置谓词 + 用户正则）
+    ///
+    /// 设计原则：
+    /// - 合并类（引号吸附）> 断开类 > 其他合并类 > 默认断开
+    /// - 用户规则优先于内置谓词
+    /// - reSegment=true 时激活内置谓词；用户规则只要非空即激活
+    fn re_segment(content: &str, segment_rules: &[SegmentRule]) -> String {
         let lines: Vec<&str> = content.lines().collect();
         if lines.is_empty() {
             return String::new();
         }
 
-        let mut result = Vec::new();
+        // 预编译用户正则规则
+        let user_regex_rules: Vec<(SegmentRule, Regex)> = segment_rules
+            .iter()
+            .filter(|r| r.enabled && r.kind == SegmentRuleKind::Regex && !r.pattern.is_empty())
+            .filter_map(|r| {
+                match Regex::new(&r.pattern) {
+                    Ok(re) => Some((r.clone(), re)),
+                    Err(e) => {
+                        log::warn!("分段规则正则编译失败 '{}': {}", r.pattern, e);
+                        None
+                    }
+                }
+            })
+            .collect();
 
+        // 按 action 分组用户规则（用于决策优先级）
+        let user_merge_rules: Vec<_> = user_regex_rules.iter()
+            .filter(|(r, _)| r.action == SegmentAction::MergeWithPrev)
+            .collect();
+        let user_break_after_rules: Vec<_> = user_regex_rules.iter()
+            .filter(|(r, _)| r.action == SegmentAction::ForceBreakAfter)
+            .collect();
+        let user_break_before_rules: Vec<_> = user_regex_rules.iter()
+            .filter(|(r, _)| r.action == SegmentAction::ForceBreakBefore)
+            .collect();
+        let user_independent_rules: Vec<_> = user_regex_rules.iter()
+            .filter(|(r, _)| r.action == SegmentAction::KeepIndependent)
+            .collect();
+
+        // 检查内置谓词是否激活（reSegment 开关）
+        let builtin_active = segment_rules.iter().any(|r| r.builtin && r.enabled)
+            || !segment_rules.iter().any(|r| r.builtin); // 无内置规则时默认激活
+
+        let mut result: Vec<String> = Vec::new();
         let mut i = 0;
+
         while i < lines.len() {
             let line = lines[i].trim();
-            
-            // 空行：跳过（会被合并）
+
+            // 空行：跳过
             if line.is_empty() {
                 i += 1;
                 continue;
             }
 
-            // 场景切换分隔符：保留独立段落
-            if Self::is_scene_separator(line) {
-                result.push(line.to_string());
-                i += 1;
-                continue;
+            // 当前行（已 trim）
+            let current = line;
+
+            // 获取上一段最后一行（用于合并/断开决策）
+            let prev_line = result.last().map(|s| s.as_str());
+
+            // ========== 决策：当前行与上一段的关系 ==========
+            let mut should_break = false;   // 是否断开（新段）
+            let mut should_merge = false;   // 是否合并（接续上段）
+
+            // 1. 用户规则优先评估
+            if !user_merge_rules.is_empty() {
+                for (_, re) in &user_merge_rules {
+                    if re.is_match(current) {
+                        should_merge = true;
+                        break;
+                    }
+                }
+            }
+            if !user_break_after_rules.is_empty() {
+                if let Some(prev) = prev_line {
+                    for (_, re) in &user_break_after_rules {
+                        if re.is_match(prev) {
+                            should_break = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !user_break_before_rules.is_empty() {
+                for (_, re) in &user_break_before_rules {
+                    if re.is_match(current) {
+                        should_break = true;
+                        break;
+                    }
+                }
+            }
+            if !user_independent_rules.is_empty() {
+                for (_, re) in &user_independent_rules {
+                    if re.is_match(current) {
+                        should_break = true;
+                        should_merge = false; // 独立成段，不合并
+                        break;
+                    }
+                }
             }
 
-            // 诗词保护：短行独立成段
-            if Self::is_short_line(line) {
-                result.push(line.to_string());
-                i += 1;
-                continue;
+            // 2. 内置谓词（仅在未被用户规则决定时参与）
+            if !should_break && !should_merge && builtin_active {
+                // 引号未闭合合并（最高优先级内置谓词）
+                if let Some(prev) = prev_line {
+                    if Self::builtin_quote_unclosed(prev) {
+                        should_merge = true;
+                    }
+                }
+                // 行首闭合引号吸附
+                if !should_merge && Self::builtin_closing_quote_attach(current) {
+                    should_merge = true;
+                }
+                // 续行合并（非终结标点结尾）
+                if !should_merge {
+                    if let Some(prev) = prev_line {
+                        if Self::builtin_continuation_merge(prev) {
+                            should_merge = true;
+                        }
+                    }
+                }
+                // 场景分隔符独立
+                if !should_merge && Self::builtin_scene_separator(current) {
+                    should_break = true;
+                }
+                // 诗词短行独立
+                if !should_merge && Self::builtin_short_line_poem(current) {
+                    should_break = true;
+                }
+                // 对话结束分段（闭合引号结尾）
+                if !should_merge {
+                    if let Some(prev) = prev_line {
+                        if Self::builtin_dialogue_end(prev) {
+                            should_break = true;
+                        }
+                    }
+                }
+                // 强语气标点分段
+                if !should_merge {
+                    if let Some(prev) = prev_line {
+                        if Self::builtin_strong_tone(prev) {
+                            should_break = true;
+                        }
+                    }
+                }
+                // 开引号新起（上一行终结标点 + 当前行以开引号开头）
+                if !should_merge {
+                    if let Some(prev) = prev_line {
+                        if Self::builtin_opening_quote_break(prev, current) {
+                            should_break = true;
+                        }
+                    }
+                }
             }
 
-            // 对话检测：引号结尾独立成段
-            if Self::is_dialogue_end(line) {
-                result.push(line.to_string());
-                i += 1;
-                continue;
+            // 3. 决策执行
+            if should_merge {
+                // 合并：将当前行附加到上一段末尾（用空格连接，保持段落连续性）
+                if let Some(last) = result.last_mut() {
+                    last.push(' ');
+                    last.push_str(current);
+                } else {
+                    result.push(current.to_string());
+                }
+            } else if should_break {
+                // 断开：新段
+                result.push(current.to_string());
+            } else {
+                // 默认：新段（保守，不破坏原文结构）
+                result.push(current.to_string());
             }
 
-            // 普通行：添加到结果
-            result.push(line.to_string());
             i += 1;
         }
 
         result.join("\n")
     }
 
-    /// 判断是否为场景切换分隔符
-    fn is_scene_separator(line: &str) -> bool {
+    // ========== 内置谓词实现 ==========
+
+    /// 引号未闭合：上一行开引号计数 > 闭引号计数
+    fn builtin_quote_unclosed(line: &str) -> bool {
+        let mut open = 0u32;
+        let mut close = 0u32;
+        for ch in line.chars() {
+            match ch {
+                '\u{201C}' | '\u{300C}' | '\u{300E}' | '"' => open += 1,  // "「『"
+                '\u{201D}' | '\u{300D}' | '\u{300F}' | '"' => close += 1,  // "」』"
+                _ => {}
+            }
+        }
+        open > close
+    }
+
+    /// 行首闭合引号：当前行以闭合引号开头（引号不得行首悬置）
+    fn builtin_closing_quote_attach(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.starts_with('\u{201D}') || trimmed.starts_with('\u{300D}') ||  // "」
+        trimmed.starts_with('\u{300F}') || trimmed.starts_with('"')            // 』"
+    }
+
+    /// 续行合并：上一行以非终结标点结尾（逗号、分号、冒号、破折号、引号未闭合）
+    fn builtin_continuation_merge(line: &str) -> bool {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            return false;
+        }
+        // 非终结标点（续行）
+        trimmed.ends_with('，') || trimmed.ends_with('、') || trimmed.ends_with('；') ||
+        trimmed.ends_with('：') || trimmed.ends_with(',') || trimmed.ends_with(';') ||
+        trimmed.ends_with(':') ||
+        // 破折号（续行，除非后随闭合引号）
+        trimmed.ends_with('—') || trimmed.ends_with('–') || trimmed.ends_with('-')
+    }
+
+    /// 对话结束分段：上一行以闭合引号结尾（含引号前带语气标点）
+    fn builtin_dialogue_end(line: &str) -> bool {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            return false;
+        }
+        // 直接闭合引号结尾
+        trimmed.ends_with('\u{201D}') || trimmed.ends_with('\u{300D}') ||  // "」
+        trimmed.ends_with('\u{300F}') || trimmed.ends_with('"') ||          // 』"
+        // 语气标点 + 闭合引号
+        trimmed.ends_with("\u{201D}！") || trimmed.ends_with("\u{201D}？") ||
+        trimmed.ends_with("\u{201D}…") || trimmed.ends_with("\u{201D}。") ||
+        trimmed.ends_with("\"！") || trimmed.ends_with("\"？") ||
+        trimmed.ends_with("\"…") || trimmed.ends_with("\"。") ||
+        // 闭合引号后跟语气标点
+        trimmed.ends_with("！\u{201D}") || trimmed.ends_with("？\u{201D}") ||
+        trimmed.ends_with("…\u{201D}") || trimmed.ends_with("。\u{201D}") ||
+        trimmed.ends_with("！\"") || trimmed.ends_with("？\"") ||
+        trimmed.ends_with("…\"") || trimmed.ends_with("。\"")
+    }
+
+    /// 强语气标点分段：上一行以强语气标点结尾
+    fn builtin_strong_tone(line: &str) -> bool {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            return false;
+        }
+        // 强语气标点（终结）
+        trimmed.ends_with('！') || trimmed.ends_with('？') ||
+        trimmed.ends_with('…') || trimmed.ends_with('。') ||
+        trimmed.ends_with('!') || trimmed.ends_with('?') ||
+        trimmed.ends_with('.') ||
+        // 组合语气标点
+        trimmed.ends_with("！！") || trimmed.ends_with("？？") ||
+        trimmed.ends_with("！？") || trimmed.ends_with("？！") ||
+        trimmed.ends_with("！！！") || trimmed.ends_with("？？？")
+    }
+
+    /// 开引号新起：上一行终结标点 + 当前行以开引号开头
+    fn builtin_opening_quote_break(prev: &str, current: &str) -> bool {
+        let prev_trimmed = prev.trim_end();
+        let curr_trimmed = current.trim_start();
+        if prev_trimmed.is_empty() || curr_trimmed.is_empty() {
+            return false;
+        }
+        // 上一行以终结标点结尾
+        let prev_ends_terminal = Self::builtin_strong_tone(prev_trimmed) ||
+            prev_trimmed.ends_with('\u{201D}') || prev_trimmed.ends_with('\u{300D}') ||
+            prev_trimmed.ends_with('\u{300F}') || prev_trimmed.ends_with('"');
+        // 当前行以开引号开头
+        let curr_starts_quote = curr_trimmed.starts_with('\u{201C}') || curr_trimmed.starts_with('\u{300C}') ||
+            curr_trimmed.starts_with('\u{300E}') || curr_trimmed.starts_with('"');
+        prev_ends_terminal && curr_starts_quote
+    }
+
+    /// 场景切换分隔符：*** / ---（至少3个）
+    fn builtin_scene_separator(line: &str) -> bool {
         let trimmed = line.trim();
         if trimmed.len() < 3 {
             return false;
         }
-
-        // *** 或 ---（至少3个）
         let all_stars = trimmed.chars().all(|c| c == '*');
         let all_dashes = trimmed.chars().all(|c| c == '-' || c == '—');
-        
         all_stars || all_dashes
     }
 
-    /// 判断是否为短行（可能是诗词）
-    fn is_short_line(line: &str) -> bool {
-        line.chars().count() < 20
-    }
-
-    /// 判断是否为对话结尾
-    fn is_dialogue_end(line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+    /// 诗词短行保护：短行（<20字）且不以终结标点结尾
+    fn builtin_short_line_poem(line: &str) -> bool {
+        let char_count = line.chars().count();
+        if char_count >= 20 {
             return false;
         }
-
-        // 中文引号结尾
-        trimmed.ends_with('"') || trimmed.ends_with('"') || 
-        trimmed.ends_with('」') || trimmed.ends_with('』') ||
-        // 英文引号结尾
-        trimmed.ends_with('"') || trimmed.ends_with('\'')
+        // 短行且不以强语气标点结尾 → 可能是诗词
+        !Self::builtin_strong_tone(line)
     }
 
     /// Simplified -> Traditional Chinese conversion.
@@ -668,8 +931,21 @@ mod tests {
     #[tokio::test]
     async fn test_re_segment() {
         let content = "段落1\n\n\n\n段落2\r\n\r\n段落3";
-        let result = ContentPreprocessor::re_segment(content);
+        let result = ContentPreprocessor::re_segment(content, &[]);
+        // 空规则时默认断开（各行独立成段），空行被跳过
         assert_eq!(result, "段落1\n段落2\n段落3");
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_builtin_dialogue() {
+        // 对话结束 + 续行合并
+        let content = "他说：\u{201C}你好啊。\u{201D}\n我点了点头，\n然后转身离开。";
+        let result = ContentPreprocessor::re_segment(content, &[]);
+        // "\u{201C}你好啊。\u{201D}" 以闭合引号结尾 → 对话结束分段
+        // "我点了点头，" 以逗号结尾 → 续行合并
+        // "然后转身离开。" 以句号结尾 → 强语气分段
+        assert!(result.contains("你好啊。"));
+        assert!(result.contains("点了点头， 然后转身离开。"));
     }
 
     #[tokio::test]

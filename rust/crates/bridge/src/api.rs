@@ -119,6 +119,7 @@ struct TxtLayoutSnapshot {
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: Vec<FfiReplaceRule>,
+    segment_rules: Vec<FfiSegmentRule>,
     para_format_hash: u64,
 }
 
@@ -133,6 +134,7 @@ fn remember_txt_layout(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: &[FfiReplaceRule],
+    segment_rules: &[FfiSegmentRule],
     para_format_hash: u64,
 ) {
     *LAST_TXT_LAYOUT_SNAPSHOT.lock().unwrap() = Some((
@@ -143,6 +145,7 @@ fn remember_txt_layout(
             re_segment,
             chinese_convert,
             replace_rules: replace_rules.to_vec(),
+            segment_rules: segment_rules.to_vec(),
             para_format_hash,
         },
     ));
@@ -179,6 +182,7 @@ fn preload_txt_warm(book_id: &str, chapter_index: usize) -> anyhow::Result<bool>
         snap.re_segment,
         snap.chinese_convert,
         &snap.replace_rules,
+        &snap.segment_rules,
         snap.para_format_hash,
         /*allow_preload_trigger=*/ false,
     )?;
@@ -727,6 +731,35 @@ impl From<FfiReplaceRule> for ReplaceRule {
     }
 }
 
+/// A35-L2: FFI 传入的分段规则（Dart → Rust）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FfiSegmentRule {
+    pub id: String,
+    pub pattern: String,
+    pub action: u8,  // 0=ForceBreakAfter, 1=ForceBreakBefore, 2=KeepIndependent, 3=MergeWithPrev
+    pub enabled: bool,
+    pub is_builtin: bool,
+    pub is_regex: bool,
+}
+
+impl From<&FfiSegmentRule> for reader_core::SegmentRule {
+    fn from(r: &FfiSegmentRule) -> Self {
+        reader_core::SegmentRule {
+            id: r.id.clone(),
+            kind: if r.is_regex { reader_core::SegmentRuleKind::Regex } else { reader_core::SegmentRuleKind::Builtin },
+            pattern: r.pattern.clone(),
+            action: match r.action {
+                0 => reader_core::SegmentAction::ForceBreakAfter,
+                1 => reader_core::SegmentAction::ForceBreakBefore,
+                2 => reader_core::SegmentAction::KeepIndependent,
+                _ => reader_core::SegmentAction::MergeWithPrev,
+            },
+            enabled: r.enabled,
+            builtin: r.is_builtin,
+        }
+    }
+}
+
 /// 获取（或构建）与替换规则集绑定的预处理器
 ///
 /// 规则不变则复用实例（内部正则 LRU 持续生效）；规则变更才重建。
@@ -892,6 +925,7 @@ pub fn batch_locate_notes(
             /* re_segment= */ false,
             chinese_convert,
             &replace_rules,
+            &[],
             /* para_format_hash= */ 0,
         )?;
 
@@ -914,6 +948,7 @@ fn process_and_layout_chapter(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: &[FfiReplaceRule],
+    segment_rules: &[FfiSegmentRule],
     para_format_hash: u64,
 ) -> anyhow::Result<std::sync::Arc<Vec<Page>>> {
     process_and_layout_chapter_inner(
@@ -924,6 +959,7 @@ fn process_and_layout_chapter(
         re_segment,
         chinese_convert,
         replace_rules,
+        segment_rules,
         para_format_hash,
         /*allow_preload_trigger=*/ true,
     )
@@ -942,17 +978,21 @@ fn process_and_layout_chapter_inner(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: &[FfiReplaceRule],
+    segment_rules: &[FfiSegmentRule],
     para_format_hash: u64,
     allow_preload_trigger: bool,
 ) -> anyhow::Result<std::sync::Arc<Vec<Page>>> {
     let rules: Vec<ReplaceRule> = replace_rules.iter().cloned().map(Into::into).collect();
     let rules_hash = CacheKey::hash_replace_rules(&rules);
+    let seg_rules: Vec<reader_core::SegmentRule> = segment_rules.iter().map(|sr| sr.into()).collect();
+    let seg_hash = reader_core::SegmentRule::hash_rules(&seg_rules);
     let options_hash = CacheKey::hash_process_options(
         remove_duplicate_title,
         re_segment,
         chinese_convert,
         rules_hash,
         para_format_hash,
+        seg_hash,
     );
     let cache_key = CacheKey::with_options(book_id, chapter_index, config, options_hash);
 
@@ -973,6 +1013,7 @@ fn process_and_layout_chapter_inner(
             chinese_convert,
             rules_hash,
             /*para_format_hash=*/ 0,
+            seg_hash,
         ),
     };
     let processed = match shared_tokio_runtime().block_on(PREPROCESSED_CACHE.get(&pre_key)) {
@@ -999,6 +1040,19 @@ fn process_and_layout_chapter_inner(
                 chapter_index,
                 remove_duplicate_title,
                 re_segment,
+                segment_rules: segment_rules.iter().map(|sr| reader_core::SegmentRule {
+                    id: sr.id.clone(),
+                    kind: if sr.is_regex { reader_core::SegmentRuleKind::Regex } else { reader_core::SegmentRuleKind::Builtin },
+                    pattern: sr.pattern.clone(),
+                    action: match sr.action {
+                        0 => reader_core::SegmentAction::ForceBreakAfter,
+                        1 => reader_core::SegmentAction::ForceBreakBefore,
+                        2 => reader_core::SegmentAction::KeepIndependent,
+                        _ => reader_core::SegmentAction::MergeWithPrev,
+                    },
+                    enabled: sr.enabled,
+                    builtin: sr.is_builtin,
+                }).collect(),
                 chinese_convert: match chinese_convert {
                     1 => Some(ChineseConvertType::S2T),
                     2 => Some(ChineseConvertType::T2S),
@@ -1408,6 +1462,7 @@ pub fn get_chapter_content_processed(
         chapter_index,
         remove_duplicate_title,
         re_segment,
+        segment_rules: Vec::new(),
         chinese_convert: match chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -1589,6 +1644,7 @@ pub fn get_page_processed(
     re_segment: bool,
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
     replace_rules: Vec<FfiReplaceRule>,
+    segment_rules: Vec<FfiSegmentRule>,
     anchor_char_offset: Option<usize>,
     page_fill_threshold: f32,
     para_format_hash: u64,
@@ -1631,6 +1687,7 @@ pub fn get_page_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        &segment_rules,
         para_format_hash,
     )?;
     remember_txt_layout(
@@ -1640,6 +1697,7 @@ pub fn get_page_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        &segment_rules,
         para_format_hash,
     );
 
@@ -1685,6 +1743,7 @@ pub fn get_page_count_processed(
     re_segment: bool,
     chinese_convert: u8, // 0=none, 1=s2t, 2=t2s
     replace_rules: Vec<FfiReplaceRule>,
+    segment_rules: Vec<FfiSegmentRule>,
     page_fill_threshold: f32,
     para_format_hash: u64,
 ) -> anyhow::Result<usize> {
@@ -1718,6 +1777,7 @@ pub fn get_page_count_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        &segment_rules,
         para_format_hash,
     )?;
     remember_txt_layout(
@@ -1727,6 +1787,7 @@ pub fn get_page_count_processed(
         re_segment,
         chinese_convert,
         &replace_rules,
+        &segment_rules,
         para_format_hash,
     );
 
@@ -2800,6 +2861,7 @@ pub fn search_in_book(
     re_segment: bool,
     chinese_convert: u8,
     replace_rules: Vec<FfiReplaceRule>,
+    segment_rules: Vec<FfiSegmentRule>,
     max_hits: usize,
 ) -> anyhow::Result<Vec<SearchHit>> {
     let started = std::time::Instant::now();
@@ -2994,6 +3056,7 @@ fn search_txt_chapter(
         chapter_index,
         remove_duplicate_title,
         re_segment,
+        segment_rules: Vec::new(),
         chinese_convert: match chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -3400,6 +3463,7 @@ pub fn get_page_cached(
         false,
         0,
         &[],
+        &[],
         0,
     )?;
 
@@ -3452,6 +3516,7 @@ pub fn get_page_count_cached(
         false,
         false,
         0,
+        &[],
         &[],
         0,
     )?;
@@ -3852,6 +3917,7 @@ pub fn process_chapter_content(
         chapter_index,
         remove_duplicate_title: ffi_config.remove_duplicate_title,
         re_segment: ffi_config.re_segment,
+        segment_rules: Vec::new(),
         chinese_convert: match ffi_config.chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -4132,7 +4198,7 @@ mod tests {
                 0,
                 360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
                 "TestFont".to_string(),
-                false, false, 0, Vec::new(), None, 0.9, para_hash,
+                false, false, 0, Vec::new(), Vec::new(), None, 0.9, para_hash,
             )
             .expect("前台读取失败")
         };
@@ -4180,7 +4246,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9, 0,
+            false, false, 0, Vec::new(), Vec::new(), None, 0.9, 0,
         )
         .expect("ch0 前台读取失败");
 
@@ -4198,7 +4264,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9, 0,
+            false, false, 0, Vec::new(), Vec::new(), None, 0.9, 0,
         )
         .expect("ch1 前台读取失败");
         let hits_after = get_cache_statistics().unwrap().hits;
@@ -4237,7 +4303,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9, 0,
+            false, false, 0, Vec::new(), Vec::new(), None, 0.9, 0,
         )
         .expect("ch0 前台读取失败");
 
@@ -4252,7 +4318,7 @@ mod tests {
             0,
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(),
-            false, false, 0, Vec::new(), None, 0.9, 0,
+            false, false, 0, Vec::new(), Vec::new(), None, 0.9, 0,
         )
         .expect("ch0 快照重建失败");
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -4657,7 +4723,7 @@ mod tests {
         };
         for hit in &hits {
             let pages = process_and_layout_chapter(
-                &book_id, hit.chapter_index, &config, false, false, 0, &[], 0,
+                &book_id, hit.chapter_index, &config, false, false, 0, &[], &[], 0,
             )
             .expect("分页失败");
             let page_idx = locate_page_for_offset(&pages, hit.anchor_char_offset);

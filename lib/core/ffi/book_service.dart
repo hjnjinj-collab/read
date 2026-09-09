@@ -214,6 +214,7 @@ class BookService {
   /// Get specific page with content preprocessing (带内容预处理)
   ///
   /// [replaceRules] 用户自定义替换规则，随请求传入（即时生效）。
+  /// [segmentRules] A35-L2: 用户自定义分段规则，随请求传入（即时生效）。
   /// [anchorCharOffset] 进度锚点：提供时返回包含该章内字符偏移的页，
   /// 用于设置变更后停留在原阅读位置。
   Future<PageInfo> getPageProcessed(
@@ -233,6 +234,7 @@ class BookService {
     required bool reSegment,
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
+    List<SegmentRuleItem> segmentRules = const [],
     int? anchorCharOffset,
     double pageFillThreshold = 1.0,
     BigInt? paraFormatHash,
@@ -263,6 +265,18 @@ class BookService {
             ),
           )
           .toList(),
+      segmentRules: segmentRules
+          .map(
+            (r) => rust_api.FfiSegmentRule(
+              id: r.id,
+              pattern: r.pattern,
+              action: r.actionIndex,
+              enabled: r.enabled,
+              isBuiltin: r.isBuiltin,
+              isRegex: r.isRegex,
+            ),
+          )
+          .toList(),
       anchorCharOffset: anchorCharOffset == null
           ? null
           : BigInt.from(anchorCharOffset),
@@ -290,6 +304,7 @@ class BookService {
     required bool reSegment,
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
+    List<SegmentRuleItem> segmentRules = const [],
     double pageFillThreshold = 1.0,
     BigInt? paraFormatHash,
   }) async {
@@ -318,6 +333,18 @@ class BookService {
             ),
           )
           .toList(),
+      segmentRules: segmentRules
+          .map(
+            (r) => rust_api.FfiSegmentRule(
+              id: r.id,
+              pattern: r.pattern,
+              action: r.actionIndex,
+              enabled: r.enabled,
+              isBuiltin: r.isBuiltin,
+              isRegex: r.isRegex,
+            ),
+          )
+          .toList(),
       pageFillThreshold: pageFillThreshold,
       paraFormatHash: paraFormatHash ?? BigInt.zero,
     );
@@ -336,6 +363,7 @@ class BookService {
   ///
   /// [replaceRules] 与当前阅读设置同口径传入（TXT 预处理应用，EPUB 与
   /// 展示一致不应用）。
+  /// [segmentRules] A35-L2: 分段规则与展示同口径。
   Future<List<SearchHit>> searchInBook(
     String bookId,
     String query, {
@@ -343,6 +371,7 @@ class BookService {
     required bool reSegment,
     required int chineseConvert, // 0=none, 1=s2t, 2=t2s
     List<ReplaceRuleItem> replaceRules = const [],
+    List<SegmentRuleItem> segmentRules = const [],
     int maxHits = 200,
   }) async {
     final hits = await rust_api.searchInBook(
@@ -358,6 +387,18 @@ class BookService {
               replacement: r.replacement,
               ruleType: r.isRegex ? 1 : 0,
               enabled: r.enabled,
+            ),
+          )
+          .toList(),
+      segmentRules: segmentRules
+          .map(
+            (r) => rust_api.FfiSegmentRule(
+              id: r.id,
+              pattern: r.pattern,
+              action: r.actionIndex,
+              enabled: r.enabled,
+              isBuiltin: r.isBuiltin,
+              isRegex: r.isRegex,
             ),
           )
           .toList(),

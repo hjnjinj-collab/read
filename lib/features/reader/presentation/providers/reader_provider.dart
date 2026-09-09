@@ -45,6 +45,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _removeHtmlTags = persisted.removeHtmlTags;
     _removeAds = persisted.removeAds;
     _reSegment = persisted.reSegment; // A35-L1
+    _segmentRules = persisted.segmentRules; // A35-L2
     _boldEnabled = persisted.boldEnabled;
     _italicEnabled = persisted.italicEnabled;
     _showComments = persisted.showComments;
@@ -85,6 +86,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _removeDuplicateTitle = true;
   ChineseConvertType _chineseConvert = ChineseConvertType.none;
   List<ReplaceRuleItem> _replaceRules = [];
+
+  // A35-L2: 用户自定义分段规则（统一规则模型：内置 + 用户同模型）
+  List<SegmentRuleItem> _segmentRules = [];
 
   // Content cleaning settings
   bool _removeHtmlTags = true;
@@ -173,6 +177,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool get removeHtmlTags => _removeHtmlTags;
   bool get removeAds => _removeAds;
   bool get reSegment => _reSegment; // A35-L1: 智能分段开关
+  List<SegmentRuleItem> get segmentRules => List.unmodifiable(_segmentRules); // A35-L2: 分段规则
   bool get boldEnabled => _boldEnabled;
   bool get italicEnabled => _italicEnabled;
   bool get showComments => _showComments;
@@ -335,6 +340,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'removeHtmlTags': _removeHtmlTags,
         'removeAds': _removeAds,
         'reSegment': _reSegment, // A35-L1: 智能分段
+        'segmentRules': [
+          for (final r in _segmentRules)
+            {
+              'id': r.id,
+              'pattern': r.pattern,
+              'action': r.action,
+              'enabled': r.enabled,
+              'isBuiltin': r.isBuiltin,
+              'isRegex': r.isRegex,
+            }
+        ], // A35-L2: 分段规则
         'boldEnabled': _boldEnabled,
         'italicEnabled': _italicEnabled,
         'showComments': _showComments,
@@ -686,6 +702,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：EPUB 去重标题同口径
           replaceRules: _replaceRules, // A30b：EPUB 净化规则同口径下发
+          segmentRules: _segmentRules, // A35-L2：分段规则同口径下发
         );
       } else {
         // 转换简繁设置为数字代码
@@ -713,6 +730,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           reSegment: _reSegment, // A35-L1：智能分段增强
           chineseConvert: chineseConvertCode,
           replaceRules: _replaceRules,
+          segmentRules: _segmentRules, // A35-L2：分段规则
           anchorCharOffset: anchorCharOffset,
           pageFillThreshold: _pageFillThreshold,
           paraFormatHash: _paraFormatHash,
@@ -1303,6 +1321,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：邻居页与前台同参
         replaceRules: _replaceRules, // A30b：邻居页排版与前台同参（含规则）
+        segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
       );
     } else {
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1327,6 +1346,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         reSegment: _reSegment,
         chineseConvert: chineseConvertCode,
         replaceRules: _replaceRules,
+        segmentRules: _segmentRules, // A35-L2：分段规则
         pageFillThreshold: _pageFillThreshold,
         paraFormatHash: _paraFormatHash,
       );
@@ -1367,6 +1387,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：预取与前台完全同参
         replaceRules: _replaceRules, // A30b：预取与前台完全同参（含规则）
+        segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
       ),
     );
   }
@@ -1443,6 +1464,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       reSegment: false,
       chineseConvert: convertCode,
       replaceRules: _replaceRules,
+      segmentRules: _segmentRules, // A35-L2：分段规则与展示同口径
     );
   }
 
@@ -1568,6 +1590,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：页数与页内容同参
         replaceRules: _replaceRules, // A30b：页数与页内容同参（含规则）
+        segmentRules: _segmentRules, // A35-L2：分段规则与页内容同参
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1590,6 +1613,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       reSegment: false, // M9.3：旧重排已被 ParagraphFormatter 取代，恒关
       chineseConvert: chineseConvertCode,
       replaceRules: _replaceRules,
+      segmentRules: _segmentRules, // A35-L2：分段规则
       pageFillThreshold: _pageFillThreshold,
       paraFormatHash: _paraFormatHash,
     );
@@ -1945,6 +1969,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：图片预热取页同参
           replaceRules: _replaceRules, // A30b：图片预热取页与前台同参
+          segmentRules: _segmentRules, // A35-L2：分段规则与前台同参
         );
       } else {
         return;  // TXT 暂不支持预测预热

@@ -73,12 +73,14 @@ impl CacheKey {
     ///
     /// 任何影响页面文本的选项变更都必须反映在此哈希中。
     /// M9：para_format_hash 纳入哈希，段落格式化设置变更即换键。
+    /// A35-L2：seg_hash 纳入哈希，分段规则变更即换键。
     pub fn hash_process_options(
         remove_duplicate_title: bool,
         re_segment: bool,
         chinese_convert: u8,
         replace_rules_hash: u64,
         para_format_hash: u64,
+        seg_hash: u64,
     ) -> u64 {
         let mut hasher = DefaultHasher::new();
         remove_duplicate_title.hash(&mut hasher);
@@ -86,6 +88,7 @@ impl CacheKey {
         chinese_convert.hash(&mut hasher);
         replace_rules_hash.hash(&mut hasher);
         para_format_hash.hash(&mut hasher);
+        seg_hash.hash(&mut hasher);
         hasher.finish()
     }
 

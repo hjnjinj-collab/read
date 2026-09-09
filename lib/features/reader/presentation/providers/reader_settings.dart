@@ -75,6 +75,7 @@ class ReaderSettings {
   final bool removeHtmlTags;
   final bool removeAds;
   final bool reSegment; // A35-L1: 智能分段增强
+  final List<SegmentRuleItem> segmentRules; // A35-L2: 分段规则
   final bool boldEnabled;
   final bool italicEnabled;
   final bool showComments;
@@ -118,6 +119,7 @@ class ReaderSettings {
     required this.removeHtmlTags,
     required this.removeAds,
     required this.reSegment, // A35-L1
+    required this.segmentRules, // A35-L2
     required this.boldEnabled,
     required this.italicEnabled,
     required this.showComments,
@@ -150,6 +152,7 @@ class ReaderSettings {
         removeHtmlTags: true,
         removeAds: true,
         reSegment: false, // A35-L1: 默认关闭，用户按需开启
+        segmentRules: const [], // A35-L2: 默认空规则列表
         boldEnabled: true,
         italicEnabled: true,
         showComments: true,
@@ -188,6 +191,7 @@ class ReaderSettings {
         removeHtmlTags: _b(j, 'removeHtmlTags', true),
         removeAds: _b(j, 'removeAds', true),
         reSegment: _b(j, 'reSegment', false), // A35-L1
+        segmentRules: _segmentRules(j['segmentRules']), // A35-L2
         boldEnabled: _b(j, 'boldEnabled', true),
         italicEnabled: _b(j, 'italicEnabled', true),
         showComments: _b(j, 'showComments', true),
@@ -248,6 +252,26 @@ class ReaderSettings {
         replacement: replacement,
         isRegex: item['isRegex'] is bool ? item['isRegex'] as bool : false,
         enabled: item['enabled'] is bool ? item['enabled'] as bool : true,
+      ));
+    }
+    return out;
+  }
+
+  /// A35-L2: 分段规则安全解析
+  static List<SegmentRuleItem> _segmentRules(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <SegmentRuleItem>[];
+    for (final item in raw) {
+      if (item is! Map<String, dynamic>) continue;
+      final id = item['id'];
+      if (id is! String) continue;
+      out.add(SegmentRuleItem(
+        id: id,
+        pattern: item['pattern'] is String ? item['pattern'] as String : '',
+        action: item['action'] is int ? item['action'] as int : 0,
+        enabled: item['enabled'] is bool ? item['enabled'] as bool : true,
+        isBuiltin: item['isBuiltin'] is bool ? item['isBuiltin'] as bool : false,
+        isRegex: item['isRegex'] is bool ? item['isRegex'] as bool : false,
       ));
     }
     return out;
