@@ -272,32 +272,54 @@ impl ContentPreprocessor {
         }
 
         let lines: Vec<&str> = content.lines().collect();
-        let mut skip_until_line = 0;
+        let mut result = Vec::new();
+        let mut title_kept = false;
+        let mut skipped_before_title = 0;
+        let mut duplicates_removed = 0;
 
-        // 逐行扫描，查找所有重复的标题行
+        // Phase 1: 扫描开头的空行和标题行
+        let mut scan_end = 0;
         for (i, line) in lines.iter().enumerate() {
-            // 去除行首尾的空白字符（包括全角空格 \u{3000}）
             let line_trimmed = line.trim_start_matches(|c: char| {
                 c.is_whitespace() || c == '\u{3000}'
             }).trim_end();
 
             if line_trimmed == trimmed_title {
-                // 找到匹配的标题行，标记跳过到此行（包含此行）
-                skip_until_line = i + 1;
-            } else if !line_trimmed.is_empty() {
-                // 遇到非空的非标题行，停止扫描
+                // 标题行：保留第一个，跳过后续重复
+                if !title_kept {
+                    result.push(*line);
+                    title_kept = true;
+                } else {
+                    duplicates_removed += 1;
+                }
+                scan_end = i + 1;
+            } else if line_trimmed.is_empty() {
+                // 空行：如果还没保留标题，记录要跳过的前置空行数
+                if !title_kept {
+                    skipped_before_title += 1;
+                } else {
+                    // 标题后的空行也跳过（通常是标题间距）
+                    scan_end = i + 1;
+                }
+            } else {
+                // 非空非标题行：停止扫描
                 break;
             }
         }
 
-        if skip_until_line > 0 {
-            log::debug!("remove_duplicate_title: 删除 {} 行重复标题及前置空行", skip_until_line);
-            // 跳过所有标题行及其前面的空行，返回剩余内容
-            let remaining_lines = &lines[skip_until_line..];
-            remaining_lines.join("\n")
-        } else {
-            content.to_string()
+        // Phase 2: 添加剩余内容（无论是否找到标题，都添加扫描结束后的剩余部分）
+        if scan_end < lines.len() {
+            result.extend_from_slice(&lines[scan_end..]);
         }
+
+        if title_kept {
+            log::debug!(
+                "remove_duplicate_title: 保留首个标题，跳过 {} 个前置空行，删除 {} 个重复标题",
+                skipped_before_title, duplicates_removed
+            );
+        }
+
+        result.join("\n")
     }
 
     /// Re-segment: ensure paragraphs are separated by single newlines.
@@ -604,16 +626,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_duplicate_title() {
+        // 单个标题：保留（不去重）
         let content = "第一章 测试\n这是内容";
+        let result = ContentPreprocessor::remove_duplicate_title(content, "第一章 测试");
+        assert_eq!(result, "第一章 测试\n这是内容");
+    }
+
+    #[tokio::test]
+    async fn test_remove_duplicate_title_no_match() {
+        // 无匹配标题：返回原内容
+        let content = "这是内容";
         let result = ContentPreprocessor::remove_duplicate_title(content, "第一章 测试");
         assert_eq!(result, "这是内容");
     }
 
     #[tokio::test]
-    async fn test_remove_duplicate_title_no_match() {
-        let content = "这是内容";
+    async fn test_remove_duplicate_title_repeated() {
+        // 重复标题：保留第一个，删除后续重复
+        let content = "第一章 测试\n第一章 测试\n这是内容";
         let result = ContentPreprocessor::remove_duplicate_title(content, "第一章 测试");
-        assert_eq!(result, "这是内容");
+        assert_eq!(result, "第一章 测试\n这是内容");
     }
 
     #[tokio::test]
