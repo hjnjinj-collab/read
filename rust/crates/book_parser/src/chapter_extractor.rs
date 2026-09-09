@@ -213,8 +213,8 @@ impl ChapterExtractor {
         let mut chapters: Vec<ChapterInfo> = Vec::new();
 
         for (idx, js_chapter) in js_chapters.iter().enumerate() {
-            // 章节内容的起始位置：标题行的下一行行首（不含标题）
-            let start_offset = line_start(js_chapter.line_number + 1);
+            // 章节内容的起始位置：标题行行首（包含标题）
+            let start_offset = line_start(js_chapter.line_number);
 
             // 章节内容的结束位置：下一个章节标题行的行首
             let end_offset = if idx + 1 < js_chapters.len() {
