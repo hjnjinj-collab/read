@@ -202,7 +202,13 @@ impl ContentPreprocessor {
 
         // Stage 1: Remove duplicate title
         if options.remove_duplicate_title && !options.title.is_empty() {
+            eprintln!("[TITLE_DEBUG] Stage 1: calling remove_duplicate_title, title='{}'", options.title);
             content = Self::remove_duplicate_title(&content, &options.title);
+            eprintln!("[TITLE_DEBUG] Stage 1: result content_len={}, first_80='{}'",
+                content.len(), content.chars().take(80).collect::<String>().replace('\n', "\\n"));
+        } else {
+            eprintln!("[TITLE_DEBUG] Stage 1: skip (enabled={}, title_empty={})",
+                options.remove_duplicate_title, options.title.is_empty());
         }
 
         // Stage 2: Re-segment
@@ -267,7 +273,12 @@ impl ContentPreprocessor {
     /// EPUB 使用块级镜像版本 `remove_duplicate_title_blocks`（api.rs）。
     pub fn remove_duplicate_title(content: &str, title: &str) -> String {
         let trimmed_title = title.trim();
+        eprintln!("[TITLE_DEBUG] remove_duplicate_title: title='{}', content_len={}, first_80='{}'",
+            title, content.len(),
+            content.chars().take(80).collect::<String>().replace('\n', "\\n"));
+
         if trimmed_title.is_empty() {
+            eprintln!("[TITLE_DEBUG] title is empty, returning original");
             return content.to_string();
         }
 
@@ -313,13 +324,19 @@ impl ContentPreprocessor {
         }
 
         if title_kept {
-            log::debug!(
-                "remove_duplicate_title: 保留首个标题，跳过 {} 个前置空行，删除 {} 个重复标题",
-                skipped_before_title, duplicates_removed
+            eprintln!(
+                "[TITLE_DEBUG] result: title_kept=true, skipped_before={}, duplicates={}, result_lines={}",
+                skipped_before_title, duplicates_removed, result.len()
             );
+        } else {
+            eprintln!("[TITLE_DEBUG] result: title_kept=false (no match), result_lines={}", result.len());
         }
 
-        result.join("\n")
+        let final_result = result.join("\n");
+        eprintln!("[TITLE_DEBUG] final result: len={}, first_80='{}'",
+            final_result.len(),
+            final_result.chars().take(80).collect::<String>().replace('\n', "\\n"));
+        final_result
     }
 
     /// Re-segment: ensure paragraphs are separated by single newlines.
