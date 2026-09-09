@@ -45,7 +45,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _removeHtmlTags = persisted.removeHtmlTags;
     _removeAds = persisted.removeAds;
     _reSegment = persisted.reSegment; // A35-L1
-    _segmentRules = persisted.segmentRules; // A35-L2
+    // A35-L2: 分段规则为空时种子化内置规则（内置规则默认集见 SegmentRuleItem.builtins）
+    _segmentRules = persisted.segmentRules.isEmpty
+        ? List.of(SegmentRuleItem.builtins)
+        : persisted.segmentRules;
     _boldEnabled = persisted.boldEnabled;
     _italicEnabled = persisted.italicEnabled;
     _showComments = persisted.showComments;
@@ -452,6 +455,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required bool removeHtmlTags,
     required bool removeAds,
     required bool reSegment, // A35-L1
+    required List<SegmentRuleItem> segmentRules, // A35-L2: 分段规则
     required bool boldEnabled,
     required bool italicEnabled,
     required double pageFillThreshold,
@@ -468,23 +472,25 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 设置开始变化即使旧页面请求失效，避免在等待 Rust 同步期间回写旧帧。
     ++_requestGeneration;
     _invalidateFrames(reason: 'settings'); // 旧指纹 FrameSet 与待决手势作废
-    
+
     // 检测净化选项是否变更（影响 PreprocessedCache）
     final bool needsCleaningUpdate = (
       _removeHtmlTags != removeHtmlTags ||
       _removeAds != removeAds ||
       _reSegment != reSegment || // A35-L1
+      !_segmentRulesEquals(_segmentRules, segmentRules) || // A35-L2: 分段规则变更
       _chineseConvert != chineseConvert ||
       _replaceRules.length != replaceRules.length ||
       !_listEquals(_replaceRules, replaceRules)
     );
-    
+
     _removeDuplicateTitle = removeDuplicateTitle;
     _chineseConvert = chineseConvert;
     _replaceRules = replaceRules;
     _removeHtmlTags = removeHtmlTags;
     _removeAds = removeAds;
     _reSegment = reSegment; // A35-L1
+    _segmentRules = segmentRules; // A35-L2
     _boldEnabled = boldEnabled;
     _italicEnabled = italicEnabled;
     _pageFillThreshold = pageFillThreshold;
@@ -558,9 +564,23 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _listEquals(List<ReplaceRuleItem> a, List<ReplaceRuleItem> b) {
     if (a.length != b.length) return false;
     for (int i = 0; i < a.length; i++) {
-      if (a[i].pattern != b[i].pattern || 
+      if (a[i].pattern != b[i].pattern ||
           a[i].replacement != b[i].replacement ||
           a[i].isRegex != b[i].isRegex) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// A35-L2 辅助方法：比较两个 SegmentRuleItem 列表是否相等
+  bool _segmentRulesEquals(List<SegmentRuleItem> a, List<SegmentRuleItem> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].pattern != b[i].pattern ||
+          a[i].action != b[i].action ||
+          a[i].enabled != b[i].enabled) {
         return false;
       }
     }

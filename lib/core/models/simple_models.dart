@@ -314,6 +314,77 @@ class SegmentRuleItem {
   /// 动作类型索引（用于 FFI 传递）
   int get actionIndex => action;
 
+  // ── 动作类型常量（与 Rust SegmentAction 对齐）──
+  static const int actionForceBreakAfter = 0;
+  static const int actionForceBreakBefore = 1;
+  static const int actionKeepIndependent = 2;
+  static const int actionMergeWithPrev = 3;
+
+  /// 动作显示名
+  static String actionLabel(int action) {
+    switch (action) {
+      case actionForceBreakAfter:
+        return '行后分段';
+      case actionForceBreakBefore:
+        return '行前分段';
+      case actionKeepIndependent:
+        return '独立成段';
+      case actionMergeWithPrev:
+        return '强制合并';
+      default:
+        return '未知';
+    }
+  }
+
+  /// 内置规则显示名（id → 中文名）
+  static String builtinLabel(String id) {
+    switch (id) {
+      case 'builtin:quote_unclosed':
+        return '引号吸附';
+      case 'builtin:chapter_title':
+        return '章节标题独立';
+      case 'builtin:scene_separator':
+        return '场景分隔符独立';
+      case 'builtin:short_line_poem':
+        return '诗词短行独立';
+      default:
+        return id;
+    }
+  }
+
+  /// 内置规则默认集（Rust 侧缺省兜底同表；quote 吸附为算法核心）
+  /// 语义：
+  /// - quote_unclosed：引号未闭合时永不切分，跨行对话自动合并（吸附）
+  /// - chapter_title：第X章/回/卷 等标题行独立成段
+  /// - scene_separator：*** / --- 分隔行独立成段
+  /// - short_line_poem：短行（<20字）独立成段（诗词书用，默认关）
+  static const List<SegmentRuleItem> builtins = [
+    SegmentRuleItem(
+      id: 'builtin:quote_unclosed',
+      action: actionMergeWithPrev,
+      enabled: true,
+      isBuiltin: true,
+    ),
+    SegmentRuleItem(
+      id: 'builtin:chapter_title',
+      action: actionKeepIndependent,
+      enabled: true,
+      isBuiltin: true,
+    ),
+    SegmentRuleItem(
+      id: 'builtin:scene_separator',
+      action: actionKeepIndependent,
+      enabled: true,
+      isBuiltin: true,
+    ),
+    SegmentRuleItem(
+      id: 'builtin:short_line_poem',
+      action: actionKeepIndependent,
+      enabled: false,
+      isBuiltin: true,
+    ),
+  ];
+
   SegmentRuleItem copyWith({
     String? id,
     String? pattern,

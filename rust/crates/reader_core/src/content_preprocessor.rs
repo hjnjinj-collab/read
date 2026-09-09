@@ -394,298 +394,227 @@ impl ContentPreprocessor {
         result.join("\n")
     }
 
-    /// A35-L2: 合并式分段引擎（统一规则模型：内置谓词 + 用户正则）
+    /// A35-L2 v3: 累积式分段引擎（用户钦定算法）
     ///
-    /// 设计原则：
-    /// - 合并类（引号吸附）> 断开类 > 其他合并类 > 默认断开
-    /// - 用户规则优先于内置谓词
-    /// - reSegment=true 时激活内置谓词；用户规则只要非空即激活
+    /// 核心语义（2026-09-09 用户定义）：
+    /// - **50 字开关**：段落累积字符数 ≤ 50 时永不切分（软换行自然合并）；
+    /// - **强语气标点段尾**：超过 50 字后，遇到句末终结标点（。！？…）即断开；
+    /// - **引号吸附**：引号未闭合时永不切分（跨行对话合并）；`。”` 等闭标
+    ///   吸附到段尾（切口不落在终结标点与其闭标之间）；
+    /// - **非终结标点不作段尾**：逗号/顿号/分号/冒号/破折号永不触发切分；
+    /// - **重新计数**：切分后新段从 0 重新统计，独立判断是否再次分段。
+    ///
+    /// 硬段落边界（无条件 flush）：空行、章节标题行、场景分隔符、
+    /// 用户规则 KeepIndependent / ForceBreakBefore。
+    ///
+    /// 与 ParagraphFormatter 的关系：引擎激活（reSegment 开或用户规则非空）
+    /// 时，bridge 侧将 formatter 的 re_paragraph_mode 覆盖为 None（保留缩进），
+    /// 避免双系统打架（split_ranges 的窗口回退切分是 v2 误切根因）。
     fn re_segment(content: &str, segment_rules: &[SegmentRule]) -> String {
         let lines: Vec<&str> = content.lines().collect();
         if lines.is_empty() {
             return String::new();
         }
 
-        // 预编译用户正则规则
-        let user_regex_rules: Vec<(SegmentRule, Regex)> = segment_rules
-            .iter()
-            .filter(|r| r.enabled && r.kind == SegmentRuleKind::Regex && !r.pattern.is_empty())
-            .filter_map(|r| {
-                match Regex::new(&r.pattern) {
-                    Ok(re) => Some((r.clone(), re)),
-                    Err(e) => {
-                        log::warn!("分段规则正则编译失败 '{}': {}", r.pattern, e);
-                        None
-                    }
+        // 内置规则开关查询（Dart 未传时按默认值兜底，兼容旧持久化数据）
+        let rule_enabled = |id: &str, default: bool| -> bool {
+            segment_rules
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| r.enabled)
+                .unwrap_or(default)
+        };
+        let quote_unclosed_on = rule_enabled("builtin:quote_unclosed", true);
+        let chapter_title_on = rule_enabled("builtin:chapter_title", true);
+        let scene_sep_on = rule_enabled("builtin:scene_separator", true);
+        let short_poem_on = rule_enabled("builtin:short_line_poem", false);
+
+        // 预编译用户正则规则并按动作分组（行级硬边界/合并压制）
+        let mut user_merge_rules: Vec<Regex> = Vec::new();
+        let mut user_break_after_rules: Vec<Regex> = Vec::new();
+        let mut user_break_before_rules: Vec<Regex> = Vec::new();
+        let mut user_independent_rules: Vec<Regex> = Vec::new();
+        for r in segment_rules {
+            if !r.enabled || r.kind != SegmentRuleKind::Regex || r.pattern.is_empty() {
+                continue;
+            }
+            match Regex::new(&r.pattern) {
+                Ok(re) => match r.action {
+                    SegmentAction::MergeWithPrev => user_merge_rules.push(re),
+                    SegmentAction::ForceBreakAfter => user_break_after_rules.push(re),
+                    SegmentAction::ForceBreakBefore => user_break_before_rules.push(re),
+                    SegmentAction::KeepIndependent => user_independent_rules.push(re),
+                },
+                Err(e) => log::warn!("分段规则正则编译失败 '{}': {}", r.pattern, e),
+            }
+        }
+        let user_indep_hit = |t: &str| user_independent_rules.iter().any(|re| re.is_match(t));
+        let user_break_before_hit = |t: &str| user_break_before_rules.iter().any(|re| re.is_match(t));
+        let user_break_after_hit = |t: &str| user_break_after_rules.iter().any(|re| re.is_match(t));
+        let user_merge_hit = |t: &str| user_merge_rules.iter().any(|re| re.is_match(t));
+
+        let mut out: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut count: usize = 0; // 当前段累积字符数（切分后归零重新计数）
+        let mut quote_depth: i32 = 0; // 当前段引号深度（开-闭；仅跟踪成对 CJK 引号）
+
+        macro_rules! flush {
+            () => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    count = 0;
+                    quote_depth = 0;
                 }
-            })
-            .collect();
+            };
+        }
 
-        // 按 action 分组用户规则（用于决策优先级）
-        let user_merge_rules: Vec<_> = user_regex_rules.iter()
-            .filter(|(r, _)| r.action == SegmentAction::MergeWithPrev)
-            .collect();
-        let user_break_after_rules: Vec<_> = user_regex_rules.iter()
-            .filter(|(r, _)| r.action == SegmentAction::ForceBreakAfter)
-            .collect();
-        let user_break_before_rules: Vec<_> = user_regex_rules.iter()
-            .filter(|(r, _)| r.action == SegmentAction::ForceBreakBefore)
-            .collect();
-        let user_independent_rules: Vec<_> = user_regex_rules.iter()
-            .filter(|(r, _)| r.action == SegmentAction::KeepIndependent)
-            .collect();
+        for line in lines {
+            let t = line.trim();
 
-        // 检查内置谓词是否激活（reSegment 开关）
-        let builtin_active = segment_rules.iter().any(|r| r.builtin && r.enabled)
-            || !segment_rules.iter().any(|r| r.builtin); // 无内置规则时默认激活
-
-        let mut result: Vec<String> = Vec::new();
-        let mut i = 0;
-
-        while i < lines.len() {
-            let line = lines[i].trim();
-
-            // 空行：跳过
-            if line.is_empty() {
-                i += 1;
+            // 空行：原始段落边界（无条件 flush）
+            if t.is_empty() {
+                flush!();
                 continue;
             }
 
-            // 当前行（已 trim）
-            let current = line;
+            // 用户行级规则：独立成段 / 行前分段
+            let indep = user_indep_hit(t);
+            if indep || user_break_before_hit(t) {
+                flush!();
+            }
+            if indep {
+                out.push(t.to_string());
+                continue;
+            }
 
-            // 获取上一段最后一行（用于合并/断开决策）
-            let prev_line = result.last().map(|s| s.as_str());
+            // 内置硬边界：章节标题 / 场景分隔符
+            if (chapter_title_on && Self::is_chapter_marker_line(t))
+                || (scene_sep_on && Self::is_scene_separator(t))
+            {
+                flush!();
+                out.push(t.to_string());
+                continue;
+            }
 
-            // ========== 决策：当前行与上一段的关系 ==========
-            let mut should_break = false;   // 是否断开（新段）
-            let mut should_merge = false;   // 是否合并（接续上段）
+            // 诗词短行独立（默认关；诗词类书籍手动开启）
+            if short_poem_on && t.chars().count() < 20 {
+                flush!();
+                out.push(t.to_string());
+                continue;
+            }
 
-            // 1. 用户规则优先评估
-            if !user_merge_rules.is_empty() {
-                for (_, re) in &user_merge_rules {
-                    if re.is_match(current) {
-                        should_merge = true;
-                        break;
-                    }
+            // 闭标禁则：新行以闭合引号/括号开头且当前缓冲非空 → 吸附到上一段
+            // （不得落段首；前一行行尾终结标点已触发切分的罕见排版修正）
+            if !cur.is_empty() && Self::is_closing_glue(t.chars().next().unwrap()) {
+                if let Some(prev) = out.last_mut() {
+                    prev.push_str(t);
+                    // 吸附行整体并入，不计入新段（本行不再参与切分）
+                    continue;
                 }
             }
-            if !user_break_after_rules.is_empty() {
-                if let Some(prev) = prev_line {
-                    for (_, re) in &user_break_after_rules {
-                        if re.is_match(prev) {
-                            should_break = true;
-                            break;
+
+            let user_merge = user_merge_hit(t);
+
+            // 累积式逐字符处理（跨行合并的核心：行尾不断开即自然续入下一段）
+            let chars: Vec<char> = t.chars().collect();
+            let mut k = 0usize;
+            while k < chars.len() {
+                let ch = chars[k];
+                cur.push(ch);
+                count += 1;
+                match ch {
+                    '\u{201C}' | '\u{300C}' | '\u{300E}' => quote_depth += 1, // “ 「 『
+                    '\u{201D}' | '\u{300D}' | '\u{300F}' => quote_depth -= 1, // ” 」 』
+                    _ => {}
+                }
+                k += 1;
+
+                // 50 字开关：之下永不切分
+                if count <= Self::SMART_SEG_THRESHOLD {
+                    continue;
+                }
+                // 引号吸附：未闭合永不切分
+                if quote_unclosed_on && quote_depth > 0 {
+                    continue;
+                }
+                // 用户 MergeWithPrev：该行内压制所有切分点
+                if user_merge {
+                    continue;
+                }
+
+                // 终结标点切分点：吞并紧随的闭标/续终结标点 run 后切
+                //（`。”` 不拆开、`！！` 整体、`……` 原子）
+                if Self::is_terminal_punct(ch) {
+                    let mut j = k;
+                    while j < chars.len()
+                        && (Self::is_closing_glue(chars[j]) || Self::is_terminal_punct(chars[j]))
+                    {
+                        j += 1;
+                    }
+                    while k < j {
+                        let g = chars[k];
+                        cur.push(g);
+                        count += 1;
+                        match g {
+                            '\u{201C}' | '\u{300C}' | '\u{300E}' => quote_depth += 1,
+                            '\u{201D}' | '\u{300D}' | '\u{300F}' => quote_depth -= 1,
+                            _ => {}
                         }
+                        k += 1;
                     }
+                    flush!();
                 }
-            }
-            if !user_break_before_rules.is_empty() {
-                for (_, re) in &user_break_before_rules {
-                    if re.is_match(current) {
-                        should_break = true;
-                        break;
-                    }
-                }
-            }
-            if !user_independent_rules.is_empty() {
-                for (_, re) in &user_independent_rules {
-                    if re.is_match(current) {
-                        should_break = true;
-                        should_merge = false; // 独立成段，不合并
-                        break;
-                    }
-                }
+                // 注意：孤立闭合引号（前无终结标点，如 “知行合一”的功夫）不是切分点
             }
 
-            // 2. 内置谓词（仅在未被用户规则决定时参与）
-            if !should_break && !should_merge && builtin_active {
-                // 引号未闭合合并（最高优先级内置谓词）
-                if let Some(prev) = prev_line {
-                    if Self::builtin_quote_unclosed(prev) {
-                        should_merge = true;
-                    }
-                }
-                // 行首闭合引号吸附
-                if !should_merge && Self::builtin_closing_quote_attach(current) {
-                    should_merge = true;
-                }
-                // 续行合并（非终结标点结尾）
-                if !should_merge {
-                    if let Some(prev) = prev_line {
-                        if Self::builtin_continuation_merge(prev) {
-                            should_merge = true;
-                        }
-                    }
-                }
-                // 场景分隔符独立
-                if !should_merge && Self::builtin_scene_separator(current) {
-                    should_break = true;
-                }
-                // 诗词短行独立
-                if !should_merge && Self::builtin_short_line_poem(current) {
-                    should_break = true;
-                }
-                // 对话结束分段（闭合引号结尾）
-                if !should_merge {
-                    if let Some(prev) = prev_line {
-                        if Self::builtin_dialogue_end(prev) {
-                            should_break = true;
-                        }
-                    }
-                }
-                // 强语气标点分段
-                if !should_merge {
-                    if let Some(prev) = prev_line {
-                        if Self::builtin_strong_tone(prev) {
-                            should_break = true;
-                        }
-                    }
-                }
-                // 开引号新起（上一行终结标点 + 当前行以开引号开头）
-                if !should_merge {
-                    if let Some(prev) = prev_line {
-                        if Self::builtin_opening_quote_break(prev, current) {
-                            should_break = true;
-                        }
-                    }
-                }
-            }
-
-            // 3. 决策执行
-            if should_merge {
-                // 合并：将当前行附加到上一段末尾（用空格连接，保持段落连续性）
-                if let Some(last) = result.last_mut() {
-                    last.push(' ');
-                    last.push_str(current);
-                } else {
-                    result.push(current.to_string());
-                }
-            } else if should_break {
-                // 断开：新段
-                result.push(current.to_string());
-            } else {
-                // 默认：新段（保守，不破坏原文结构）
-                result.push(current.to_string());
-            }
-
-            i += 1;
-        }
-
-        result.join("\n")
-    }
-
-    // ========== 内置谓词实现 ==========
-
-    /// 引号未闭合：上一行开引号计数 > 闭引号计数
-    fn builtin_quote_unclosed(line: &str) -> bool {
-        let mut open = 0u32;
-        let mut close = 0u32;
-        for ch in line.chars() {
-            match ch {
-                '\u{201C}' | '\u{300C}' | '\u{300E}' | '"' => open += 1,  // "「『"
-                '\u{201D}' | '\u{300D}' | '\u{300F}' | '"' => close += 1,  // "」』"
-                _ => {}
+            // 用户行级规则：行后强制分段
+            if user_break_after_hit(t) {
+                flush!();
             }
         }
-        open > close
+        flush!();
+
+        out.join("\n")
     }
 
-    /// 行首闭合引号：当前行以闭合引号开头（引号不得行首悬置）
-    fn builtin_closing_quote_attach(line: &str) -> bool {
-        let trimmed = line.trim_start();
-        trimmed.starts_with('\u{201D}') || trimmed.starts_with('\u{300D}') ||  // "」
-        trimmed.starts_with('\u{300F}') || trimmed.starts_with('"')            // 』"
+    /// A35-L2: 智能分段阈值（字）——分段开关：累积超过此字数后，
+    /// 终结标点才成为切分候选；之下所有软换行合并为一段。
+    pub const SMART_SEG_THRESHOLD: usize = 50;
+
+    /// 终结标点（强语气段尾）：。！？…（省略号原子性由调用方 run 吞并保证；
+    /// 刻意不含分号/冒号/逗号/顿号/破折号——非终结标点不作段尾）
+    fn is_terminal_punct(c: char) -> bool {
+        matches!(c, '。' | '！' | '？' | '…')
     }
 
-    /// 续行合并：上一行以非终结标点结尾（逗号、分号、冒号、破折号、引号未闭合）
-    fn builtin_continuation_merge(line: &str) -> bool {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            return false;
-        }
-        // 非终结标点（续行）
-        trimmed.ends_with('，') || trimmed.ends_with('、') || trimmed.ends_with('；') ||
-        trimmed.ends_with('：') || trimmed.ends_with(',') || trimmed.ends_with(';') ||
-        trimmed.ends_with(':') ||
-        // 破折号（续行，除非后随闭合引号）
-        trimmed.ends_with('—') || trimmed.ends_with('–') || trimmed.ends_with('-')
+    /// 闭标吸附集：终结标点后紧随这些字符时不切，吞并到段尾
+    ///（”不得落段首；！” ？） 等组合整体收尾）
+    fn is_closing_glue(c: char) -> bool {
+        matches!(
+            c,
+            '\u{201D}' | '\u{2019}' | '」' | '』' | '）' | '】' | '》' | '〉' | '〕'
+        )
     }
 
-    /// 对话结束分段：上一行以闭合引号结尾（含引号前带语气标点）
-    fn builtin_dialogue_end(line: &str) -> bool {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            return false;
-        }
-        // 直接闭合引号结尾
-        trimmed.ends_with('\u{201D}') || trimmed.ends_with('\u{300D}') ||  // "」
-        trimmed.ends_with('\u{300F}') || trimmed.ends_with('"') ||          // 』"
-        // 语气标点 + 闭合引号
-        trimmed.ends_with("\u{201D}！") || trimmed.ends_with("\u{201D}？") ||
-        trimmed.ends_with("\u{201D}…") || trimmed.ends_with("\u{201D}。") ||
-        trimmed.ends_with("\"！") || trimmed.ends_with("\"？") ||
-        trimmed.ends_with("\"…") || trimmed.ends_with("\"。") ||
-        // 闭合引号后跟语气标点
-        trimmed.ends_with("！\u{201D}") || trimmed.ends_with("？\u{201D}") ||
-        trimmed.ends_with("…\u{201D}") || trimmed.ends_with("。\u{201D}") ||
-        trimmed.ends_with("！\"") || trimmed.ends_with("？\"") ||
-        trimmed.ends_with("…\"") || trimmed.ends_with("。\"")
-    }
-
-    /// 强语气标点分段：上一行以强语气标点结尾
-    fn builtin_strong_tone(line: &str) -> bool {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            return false;
-        }
-        // 强语气标点（终结）
-        trimmed.ends_with('！') || trimmed.ends_with('？') ||
-        trimmed.ends_with('…') || trimmed.ends_with('。') ||
-        trimmed.ends_with('!') || trimmed.ends_with('?') ||
-        trimmed.ends_with('.') ||
-        // 组合语气标点
-        trimmed.ends_with("！！") || trimmed.ends_with("？？") ||
-        trimmed.ends_with("！？") || trimmed.ends_with("？！") ||
-        trimmed.ends_with("！！！") || trimmed.ends_with("？？？")
-    }
-
-    /// 开引号新起：上一行终结标点 + 当前行以开引号开头
-    fn builtin_opening_quote_break(prev: &str, current: &str) -> bool {
-        let prev_trimmed = prev.trim_end();
-        let curr_trimmed = current.trim_start();
-        if prev_trimmed.is_empty() || curr_trimmed.is_empty() {
-            return false;
-        }
-        // 上一行以终结标点结尾
-        let prev_ends_terminal = Self::builtin_strong_tone(prev_trimmed) ||
-            prev_trimmed.ends_with('\u{201D}') || prev_trimmed.ends_with('\u{300D}') ||
-            prev_trimmed.ends_with('\u{300F}') || prev_trimmed.ends_with('"');
-        // 当前行以开引号开头
-        let curr_starts_quote = curr_trimmed.starts_with('\u{201C}') || curr_trimmed.starts_with('\u{300C}') ||
-            curr_trimmed.starts_with('\u{300E}') || curr_trimmed.starts_with('"');
-        prev_ends_terminal && curr_starts_quote
+    /// 章节标题行：第X章/回/卷/节/集/部/篇（独立成段硬边界）
+    fn is_chapter_marker_line(line: &str) -> bool {
+        use std::sync::OnceLock;
+        static CHAPTER_RE: OnceLock<Regex> = OnceLock::new();
+        let re = CHAPTER_RE.get_or_init(|| {
+            Regex::new(r"^第[0-9零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+\s*[章回卷节集部篇]").expect("章节标题正则编译必胜")
+        });
+        re.is_match(line)
     }
 
     /// 场景切换分隔符：*** / ---（至少3个）
-    fn builtin_scene_separator(line: &str) -> bool {
+    fn is_scene_separator(line: &str) -> bool {
         let trimmed = line.trim();
-        if trimmed.len() < 3 {
+        if trimmed.chars().count() < 3 {
             return false;
         }
         let all_stars = trimmed.chars().all(|c| c == '*');
         let all_dashes = trimmed.chars().all(|c| c == '-' || c == '—');
         all_stars || all_dashes
-    }
-
-    /// 诗词短行保护：短行（<20字）且不以终结标点结尾
-    fn builtin_short_line_poem(line: &str) -> bool {
-        let char_count = line.chars().count();
-        if char_count >= 20 {
-            return false;
-        }
-        // 短行且不以强语气标点结尾 → 可能是诗词
-        !Self::builtin_strong_tone(line)
     }
 
     /// Simplified -> Traditional Chinese conversion.
@@ -938,14 +867,104 @@ mod tests {
 
     #[tokio::test]
     async fn test_re_segment_builtin_dialogue() {
-        // 对话结束 + 续行合并
+        // v3 累积式引擎：短于 50 字的软换行全部合并（无空格，中文直连）
         let content = "他说：\u{201C}你好啊。\u{201D}\n我点了点头，\n然后转身离开。";
         let result = ContentPreprocessor::re_segment(content, &[]);
-        // "\u{201C}你好啊。\u{201D}" 以闭合引号结尾 → 对话结束分段
-        // "我点了点头，" 以逗号结尾 → 续行合并
-        // "然后转身离开。" 以句号结尾 → 强语气分段
-        assert!(result.contains("你好啊。"));
-        assert!(result.contains("点了点头， 然后转身离开。"));
+        assert_eq!(result, "他说：\u{201C}你好啊。\u{201D}我点了点头，然后转身离开。");
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_cumulative_threshold() {
+        // 50 字开关：累积超过 50 字后，终结标点成为切分点，新段重新计数
+        let l1 = format!("{}。", "甲".repeat(29)); // 30 字
+        let l2 = format!("{}。", "乙".repeat(29)); // 30 字（累积到 60 时在 。 切）
+        let l3 = format!("{}。", "丙".repeat(29)); // 30 字（新段重新计数）
+        let content = format!("{}\n{}\n{}", l1, l2, l3);
+        let result = ContentPreprocessor::re_segment(&content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert_eq!(paras.len(), 2, "60 字处在第二个 。 切分，第三句重新计为新段");
+        assert_eq!(paras[0], format!("{}。{}。", "甲".repeat(29), "乙".repeat(29)));
+        assert_eq!(paras[1], format!("{}。", "丙".repeat(29)));
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_comma_never_breaks() {
+        // 非终结标点（顿号/逗号）永不作为段尾——v2 误切 "蜈蚣、" 场景回归
+        let content = format!("{}、\n{}，\n{}。", "驱".repeat(20), "赶".repeat(20), "蜈".repeat(20));
+        let result = ContentPreprocessor::re_segment(&content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert_eq!(paras.len(), 1, "无终结标点前（60 字内含顿号逗号）不切分");
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_quote_unclosed_glue() {
+        // 引号吸附：未闭合引号内即使超过 50 字遇终结标点也不切；
+        // ” 吸附到段尾（v2 误切 "祭器”" 场景回归）
+        let content = format!(
+            "小镇的瓷器极负盛名，本朝开国以来，就承担起\u{201C}{}。\u{201D}{}\n{}。",
+            "奉".repeat(30),
+            "的重任，有朝廷官员常年驻扎此地，监理官窑事务。",
+            "无依无靠的陈平安，很早就成了烧瓷的窑匠。"
+        );
+        let result = ContentPreprocessor::re_segment(&content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert!(
+            !paras.iter().any(|p| p.ends_with("就承担起")),
+            "引号未闭合时不得在句中切分"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_closing_glue_atomic() {
+        // 闭标吸附：。” 整体收尾，切口不落在 。 与 ” 之间；
+        // 50 字之下首个 。 不切（开关未触发）
+        let content = format!("{}。{}。”{}。", "甲".repeat(45), "乙".repeat(10), "丙".repeat(10));
+        let result = ContentPreprocessor::re_segment(&content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert_eq!(paras.len(), 2);
+        // 首段：45 甲 + 。 (46字) + 10 乙 + 。” → 58 字，在 ” 后切（未在 。 处切）
+        assert_eq!(paras[0], format!("{}。{}。”", "甲".repeat(45), "乙".repeat(10)));
+        assert_eq!(paras[1], format!("{}。", "丙".repeat(10)));
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_ellipsis_atomic() {
+        // 省略号原子性：切口不得落在 …… 之间
+        let content = format!("{}……{}。", "甲".repeat(50), "乙".repeat(10));
+        let result = ContentPreprocessor::re_segment(&content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert!(
+            paras.iter().all(|p| !p.starts_with('…')),
+            "省略号不得拆开落段首"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_hard_boundaries() {
+        // 硬边界：空行 / 章节标题 / 场景分隔符
+        let content = "第一段内容。\n\n第二章 测试\n正文开始。\n***\n后续内容。";
+        let result = ContentPreprocessor::re_segment(content, &[]);
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert!(paras.contains(&"第二章 测试"));
+        assert!(paras.contains(&"***"));
+    }
+
+    #[tokio::test]
+    async fn test_re_segment_user_rules() {
+        // 用户规则：KeepIndependent 独立成段
+        let rules = vec![SegmentRule::user_regex("u1", "^——.*$", SegmentAction::KeepIndependent)];
+        let content = "前文内容。\n——分割线——\n后文内容。";
+        let result = ContentPreprocessor::re_segment(content, &rules);
+        assert!(result.split('\n').any(|l| l == "——分割线——"));
+
+        // MergeWithPrev：压制该行内所有切分点
+        let rules = vec![SegmentRule::user_regex("u2", "^特殊行", SegmentAction::MergeWithPrev)];
+        let long_head = "甲".repeat(55);
+        let content = format!("{}。\n特殊行{}", long_head, "乙".repeat(10));
+        let result = ContentPreprocessor::re_segment(&content, &rules);
+        // 长句 55 字处 。 已切分，特殊行自身无切分点，正常并入新段
+        let paras: Vec<&str> = result.split('\n').collect();
+        assert!(paras.iter().any(|p| p.starts_with("特殊行")));
     }
 
     #[tokio::test]

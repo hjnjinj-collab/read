@@ -25,6 +25,11 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _removeAds = true;
   bool _reSegment = false; // A35-L1: 智能分段增强
 
+  // A35-L2: 分段规则（内置 + 用户同模型）
+  final List<SegmentRuleItem> _segmentRules = [];
+  final TextEditingController _segPatternController = TextEditingController();
+  int _segRuleAction = SegmentRuleItem.actionForceBreakAfter; // 新规则动作下拉
+
   // 字形样式开关
   bool _boldEnabled = true;
   bool _italicEnabled = true;
@@ -80,6 +85,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _removeHtmlTags = n.removeHtmlTags;
     _removeAds = n.removeAds;
     _reSegment = n.reSegment; // A35-L1
+    _segmentRules.addAll(n.segmentRules); // A35-L2
     _boldEnabled = n.boldEnabled;
     _italicEnabled = n.italicEnabled;
     _fontSize = n.fontSize;
@@ -103,6 +109,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   void dispose() {
     _patternController.dispose();
     _replacementController.dispose();
+    _segPatternController.dispose();
     super.dispose();
   }
 
@@ -160,6 +167,68 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _replacementController.clear();
   }
 
+  // ── A35-L2: 分段规则管理 ──
+
+  /// 添加用户分段规则（正则 + 动作下拉）
+  void _addSegmentRule() {
+    final pattern = _segPatternController.text.trim();
+    if (pattern.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入分段规则正则')),
+      );
+      return;
+    }
+    // 正则语法预校验
+    try {
+      RegExp(pattern);
+    } on FormatException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('正则语法错误: ${e.message}')),
+      );
+      return;
+    }
+    setState(() {
+      _segmentRules.add(SegmentRuleItem(
+        id: 'user:${DateTime.now().millisecondsSinceEpoch}',
+        pattern: pattern,
+        action: _segRuleAction,
+        enabled: true,
+        isRegex: true,
+      ));
+      _segPatternController.clear();
+    });
+  }
+
+  void _removeSegmentRule(int index) {
+    setState(() => _segmentRules.removeAt(index));
+  }
+
+  void _toggleSegmentRule(int index) {
+    setState(() {
+      _segmentRules[index] =
+          _segmentRules[index].copyWith(enabled: !_segmentRules[index].enabled);
+    });
+  }
+
+  /// 收集输入框中尚未添加的分段规则（防静默丢失）
+  void _collectPendingSegmentRule() {
+    final pattern = _segPatternController.text.trim();
+    if (pattern.isEmpty) return;
+    try {
+      RegExp(pattern);
+    } on FormatException {
+      return;
+    }
+    _segmentRules.add(SegmentRuleItem(
+      id: 'user:${DateTime.now().millisecondsSinceEpoch}',
+      pattern: pattern,
+      action: _segRuleAction,
+      enabled: true,
+      isRegex: true,
+    ));
+    _segPatternController.clear();
+  }
+
   /// 坍塌动画参数变更：即时生效（写 notifier → 防抖落库），不经「应用设置」
   /// ——动画样式是即时可感知的视觉参数，整体提交模式反而打断调参手感
   void _updateCollapse({double? blockSize, double? slideDistance, int? shadowColor}) {
@@ -179,7 +248,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     // 先收编输入框里未添加的规则，再统一应用：
     // 更新选项 → 失效缓存 → 带锚点重载当前页（即时生效，保持进度）
     _collectPendingRule();
-    
+    _collectPendingSegmentRule(); // A35-L2
+
     // 2026-09-02 优化：显示 loading 进度提示
     if (!mounted) return;
     showDialog(
@@ -189,7 +259,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         child: CircularProgressIndicator(),
       ),
     );
-    
+
     try {
       await ref.read(readerProvider.notifier).applyContentProcessingSettings(
         removeDuplicateTitle: _removeDuplicateTitle,
@@ -198,6 +268,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         removeHtmlTags: _removeHtmlTags,
         removeAds: _removeAds,
         reSegment: _reSegment, // A35-L1
+        segmentRules: List.of(_segmentRules), // A35-L2
         boldEnabled: _boldEnabled,
         italicEnabled: _italicEnabled,
         pageFillThreshold: _pageFillThreshold,
@@ -408,12 +479,13 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                 ),
                 _buildSwitchTile(
                   title: '智能分段',
-                  subtitle: '启发式规则增强：对话检测、场景切换、诗词保护',
+                  subtitle: '合并软换行：超过 50 字后在句末标点处分段，引号自动吸附',
                   value: _reSegment,
                   onChanged: (value) {
                     setState(() => _reSegment = value);
                   },
                 ),
+                ..._buildSegmentRulesSection(), // A35-L2: 分段规则管理
 
                 const SizedBox(height: 24),
 
@@ -759,6 +831,11 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
 
                 const SizedBox(height: 24),
 
+                // A35-L2: 分段规则区块（智能分段开启时生效）
+                ..._buildSegmentRulesSection(),
+
+                const SizedBox(height: 24),
+
                 // Replace rules section
                 _buildSectionHeader('替换规则'),
                 const SizedBox(height: 8),
@@ -888,14 +965,176 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     );
   }
 
+  /// A35-L2: 分段规则管理区块
+  ///
+  /// 内置规则（不可删，仅开关）+ 用户正则规则（完整增删改）。
+  /// 规则随「应用设置」统一提交（applyContentProcessingSettings）。
+  List<Widget> _buildSegmentRulesSection() {
+    final builtins = _segmentRules.where((r) => r.isBuiltin).toList();
+    final users = _segmentRules.where((r) => !r.isBuiltin).toList();
+
+    return [
+      _buildSectionHeader('分段规则'),
+      const SizedBox(height: 4),
+      const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 4),
+        child: Text(
+          '智能分段开启时生效：软换行合并为段落，超过 50 字后在句末标点（。！？…）处切分，引号未闭合自动吸附',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ),
+      const SizedBox(height: 8),
+
+      // 内置规则列表（开关）
+      ...builtins.asMap().entries.map((entry) {
+        final globalIndex = _segmentRules.indexOf(entry.value);
+        final rule = entry.value;
+        return SwitchListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(
+            SegmentRuleItem.builtinLabel(rule.id),
+            style: TextStyle(
+              fontSize: 14,
+              color: rule.enabled ? Colors.black87 : Colors.grey,
+            ),
+          ),
+          subtitle: const Text(
+            '内置规则',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          value: rule.enabled,
+          onChanged: (_) => _toggleSegmentRule(globalIndex),
+        );
+      }),
+
+      const SizedBox(height: 12),
+
+      // 用户规则添加输入
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          border: Border.all(color: Colors.grey[300]!),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '添加自定义分段规则（正则，按行匹配）',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _segPatternController,
+              decoration: const InputDecoration(
+                labelText: '正则表达式',
+                hintText: r'例如：^——.*$（分割线独立成段）',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              value: _segRuleAction,
+              decoration: const InputDecoration(
+                labelText: '动作',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: SegmentRuleItem.actionForceBreakAfter,
+                  child: Text('行后分段（匹配行后强制断开）'),
+                ),
+                DropdownMenuItem(
+                  value: SegmentRuleItem.actionForceBreakBefore,
+                  child: Text('行前分段（匹配行前强制断开）'),
+                ),
+                DropdownMenuItem(
+                  value: SegmentRuleItem.actionKeepIndependent,
+                  child: Text('独立成段（匹配行单独成段）'),
+                ),
+                DropdownMenuItem(
+                  value: SegmentRuleItem.actionMergeWithPrev,
+                  child: Text('强制合并（该行永不切分）'),
+                ),
+              ],
+              onChanged: (v) => setState(() => _segRuleAction = v ?? 0),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: _addSegmentRule,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('添加规则'),
+                style: ElevatedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      const SizedBox(height: 12),
+
+      // 用户规则列表
+      if (users.isEmpty)
+        Container(
+          padding: const EdgeInsets.all(16),
+          alignment: Alignment.center,
+          child: Text(
+            '暂无自定义分段规则',
+            style: TextStyle(color: Colors.grey[600], fontSize: 13),
+          ),
+        )
+      else
+        ...users.map((rule) {
+          final globalIndex = _segmentRules.indexOf(rule);
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              dense: true,
+              leading: Checkbox(
+                value: rule.enabled,
+                onChanged: (_) => _toggleSegmentRule(globalIndex),
+              ),
+              title: Text(
+                rule.pattern,
+                style: TextStyle(
+                  fontSize: 13,
+                  decoration:
+                      rule.enabled ? null : TextDecoration.lineThrough,
+                  color: rule.enabled ? null : Colors.grey,
+                ),
+              ),
+              subtitle: Text(
+                SegmentRuleItem.actionLabel(rule.action),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                onPressed: () => _removeSegmentRule(globalIndex),
+              ),
+            ),
+          );
+        }),
+    ];
+  }
+
   Widget _buildSectionHeader(String title) {
     return Text(
       title,
       style: const TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w600,
-        color: Colors.black87,
-      ),
+        color: Colors.black87,      ),
     );
   }
 

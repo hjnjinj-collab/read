@@ -1072,7 +1072,15 @@ fn process_and_layout_chapter_inner(
     };
 
     // M9 P4：段落格式化（缩进 + 重新分段），在预处理后、布局前
-    let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    // A35-L2：智能分段引擎激活（reSegment 开或用户分段规则非空）时，
+    // 接管重新分段+超长段切分语义（50字开关+终结标点+引号吸附），
+    // formatter 覆盖为仅缩进——否则 split_ranges 的窗口回退切分会在
+    // 顿号/闭引号处误切（v2 真机误切根因），双系统打架。
+    // 缓存安全：options_hash 已含 re_segment 与 seg_hash，切换即换键重算。
+    let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    if re_segment || !seg_rules.is_empty() {
+        para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
+    }
     let processed = if para_settings.needs_formatting() {
         let formatter = reader_core::ParagraphFormatter::new(para_settings);
         formatter.format(&processed)
@@ -2900,6 +2908,9 @@ pub fn search_in_book(
     // 用户替换规则：TXT 在预处理内应用；A30b 起 EPUB 结构化路径块级应用
     // （与展示同口径），两格式搜索与展示同源
     let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
+    // A35-L2：分段规则与展示同口径（TXT 路径预处理 + formatter 覆盖）
+    let seg_rules: Vec<reader_core::SegmentRule> =
+        segment_rules.iter().map(|sr| sr.into()).collect();
 
     let mut hits: Vec<SearchHit> = Vec::new();
     for chapter_index in 0..total_chapters {
@@ -2924,11 +2935,11 @@ pub fn search_in_book(
                 re_segment,
                 chinese_convert,
                 &rules,
+                &segment_rules,
                 &needles,
                 &mut hits,
                 max_hits,
-            ),
-        };
+            ),        };
         if let Err(e) = result {
             log::warn!("search_in_book 章节搜索失败 chapter={}: {}", chapter_index, e);
         }
@@ -3034,6 +3045,7 @@ fn search_txt_chapter(
     re_segment: bool,
     chinese_convert: u8,
     rules: &[ReplaceRule],
+    segment_rules: &[FfiSegmentRule],
     needles: &[Vec<char>],
     hits: &mut Vec<SearchHit>,
     max_hits: usize,
@@ -3050,13 +3062,14 @@ fn search_txt_chapter(
             .map(|ch| ch.title.clone())
             .unwrap_or_default()
     };
+    let seg_rules: Vec<reader_core::SegmentRule> = segment_rules.iter().map(|sr| sr.into()).collect();
     let options = ProcessOptions {
         book_name: String::new(),
         title: chapter_title,
         chapter_index,
         remove_duplicate_title,
         re_segment,
-        segment_rules: Vec::new(),
+        segment_rules: seg_rules.clone(),
         chinese_convert: match chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -3068,7 +3081,11 @@ fn search_txt_chapter(
     let preprocessor = get_preprocessor_for_rules(rules);
     let processed = shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
     // 段落格式化（缩进字符注入/重新分段改变文本与偏移——锚点口径必须含此步）
-    let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    // A35-L2：与展示同口径——引擎激活时 formatter 覆盖为仅缩进
+    let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    if re_segment || !seg_rules.is_empty() {
+        para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
+    }
     let processed = if para_settings.needs_formatting() {
         reader_core::ParagraphFormatter::new(para_settings).format(&processed)
     } else {
@@ -4694,6 +4711,7 @@ mod tests {
             false,
             0,
             Vec::new(),
+            Vec::new(),
             100,
         )
         .expect("搜索失败");
@@ -4804,6 +4822,7 @@ mod tests {
             false,
             false,
             0,
+            Vec::new(),
             Vec::new(),
             100,
         )
