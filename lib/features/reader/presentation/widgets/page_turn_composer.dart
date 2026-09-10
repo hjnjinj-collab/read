@@ -1795,28 +1795,19 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       if (mismatch) {
         return const SizedBox.expand();
       }
-      // A31-bugfix: notesTick 驱动重绘——笔记增删改后 ValueListenableBuilder
-      // 重建 → 新 notes 传入 PagePainter → shouldRepaint 命中 → 高亮更新
+      // A31-v3: notes 进 ReadingState，Riverpod 自动响应重建
       return RepaintBoundary(
-        child: ValueListenableBuilder<int>(
-          valueListenable: notesTick,
-          builder: (context, _, __) {
-            // A31-bugfix-v2 诊断日志
-            debugPrint(
-                '[A31-diag] composer builder fired: ${notifier.currentChapterNotes.length} notes for page ${pageInfo.chapterIndex}/${pageInfo.pageIndex}');
-            return ReaderPageWidget(
-              key: ValueKey(
-                '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
-              ),
-              pageInfo: pageInfo,
-              applyBold: notifier.boldEnabled,
-              applyItalic: notifier.italicEnabled,
-              applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
-              baseFontSize: notifier.fontSize,
-              baseLineHeight: notifier.lineHeight,
-              notes: notifier.currentChapterNotes,
-            );
-          },
+        child: ReaderPageWidget(
+          key: ValueKey(
+            '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
+          ),
+          pageInfo: pageInfo,
+          applyBold: notifier.boldEnabled,
+          applyItalic: notifier.italicEnabled,
+          applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+          baseFontSize: notifier.fontSize,
+          baseLineHeight: notifier.lineHeight,
+          notes: notifier.currentChapterNotes,
         ),
       );
     });

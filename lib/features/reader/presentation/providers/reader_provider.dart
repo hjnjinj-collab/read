@@ -94,8 +94,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // A35-L2: 用户自定义分段规则（统一规则模型：内置 + 用户同模型）
   List<SegmentRuleItem> _segmentRules = [];
 
-  // A31: 当前章节笔记缓存（章节切换时刷新）
-  List<Note> _currentChapterNotes = [];
+  // A31-v3: 章节笔记缓存的章节索引（用于判断是否需要重查）
   int? _cachedNotesChapterIndex;
 
   // A31: 文本选区状态（长按选择 + 拖拽扩展）
@@ -1479,26 +1478,22 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return _db.notesOf(filePath);
   }
 
-  /// 当前章节的笔记（用于渲染高亮；带缓存）
-  List<Note> get currentChapterNotes => List.unmodifiable(_currentChapterNotes);
+  /// A31-v3: 当前章节的笔记（从 state 读取，Riverpod 响应式）
+  List<Note> get currentChapterNotes => state.currentChapterNotes;
 
-  /// 刷新当前章节笔记缓存（章节切换时调用；force=true 时强制重新查询）
+  /// A31-v3: 刷新当前章节笔记缓存 → 写入 state（自动触发 UI 重建）
   Future<void> _refreshCurrentChapterNotes({bool force = false}) async {
     final filePath = state.filePath;
     final chapterIndex = state.currentChapterIndex;
     if (filePath == null) {
-      _currentChapterNotes = [];
+      state = state.copyWith(currentChapterNotes: const []);
       _cachedNotesChapterIndex = null;
-      notesTick.value++;
       return;
     }
     if (!force && _cachedNotesChapterIndex == chapterIndex) return; // 已缓存
-    _currentChapterNotes = await _db.notesOfChapter(filePath, chapterIndex);
+    final notes = await _db.notesOfChapter(filePath, chapterIndex);
     _cachedNotesChapterIndex = chapterIndex;
-    notesTick.value++;
-    // A31-bugfix-v2 诊断日志
-    debugPrint(
-        '[A31-diag] notesTick=${notesTick.value} ch=$chapterIndex notes=${_currentChapterNotes.length}');
+    state = state.copyWith(currentChapterNotes: notes);
   }
 
   /// 添加笔记/划线（区间与已有笔记重叠时返回已有笔记 id，不新增）
@@ -1513,9 +1508,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
     final filePath = state.filePath;
     if (filePath == null) return -1;
 
-    // A31-bugfix: 区间查重——与已有笔记重叠则不新增
+    // A31-v3: 区间查重——与已有笔记重叠则不新增
     if (chapterIndex == state.currentChapterIndex) {
-      for (final n in _currentChapterNotes) {
+      for (final n in state.currentChapterNotes) {
         if (startCharOffset < n.endCharOffset &&
             endCharOffset > n.startCharOffset) {
           return n.id; // 重叠，返回已有笔记 id
@@ -1553,7 +1548,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// A31-bugfix: 查找包含指定字符偏移的已有笔记（null=无笔记覆盖）
   Note? noteAtCharOffset(int charOffset) {
-    for (final n in _currentChapterNotes) {
+    for (final n in state.currentChapterNotes) {
       if (charOffset >= n.startCharOffset && charOffset < n.endCharOffset) {
         return n;
       }
@@ -2262,6 +2257,8 @@ class ReadingState {
   final PageInfo? currentPage;
   final bool isLoading;
   final String? error;
+  /// A31-v3: 当前章节笔记（Riverpod 响应式，变更自动触发重建）
+  final List<Note> currentChapterNotes;
 
   const ReadingState({
     this.bookId,
@@ -2273,6 +2270,7 @@ class ReadingState {
     this.currentPage,
     this.isLoading = false,
     this.error,
+    this.currentChapterNotes = const [],
   });
 
   ReadingState copyWith({
@@ -2285,6 +2283,7 @@ class ReadingState {
     PageInfo? currentPage,
     bool? isLoading,
     String? error,
+    List<Note>? currentChapterNotes,
   }) {
     return ReadingState(
       bookId: bookId ?? this.bookId,
@@ -2301,10 +2300,6 @@ class ReadingState {
 }
 
 // Provider
-/// A31-bugfix: 笔记变更全局重绘 tick（仿 imageReadyTick 模式）
-/// addNote/updateNoteText/deleteNote 后自增，驱动 PagePainter 重绘
-final notesTick = ValueNotifier<int>(0);
-
 final bookServiceProvider = Provider((ref) => BookService());
 
 final readerProvider = NotifierProvider<ReaderNotifier, ReadingState>(() {

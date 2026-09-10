@@ -45,9 +45,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   int _dragLastTimestampMs = 0;
   double _releaseVelocityX = 0;
 
-  // A31: 长按选区检测
+  // A31-v3: 长按选区 + 手势仲裁
   Timer? _longPressTimer;
   bool _longPressTriggered = false;
+  /// PointerDown 时间戳（ms）——用于快速移动提前判定
+  int _pointerDownMs = 0;
+  /// 选区扩展节流（60fps = 16ms）
+  int _lastSelectionUpdateMs = 0;
 
   /// P4: 翻页合成器的 key，用于调用其方法
   final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
@@ -178,6 +182,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _dragLastTimestampMs = event.timeStamp.inMilliseconds;
     _releaseVelocityX = 0;
     _longPressTriggered = false;
+    _pointerDownMs = event.timeStamp.inMilliseconds;
 
     final notifier = ref.read(readerProvider.notifier);
     final page = notifier.state.currentPage;
@@ -243,9 +248,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     final notifier = ref.read(readerProvider.notifier);
 
-    // A31-bugfix: 选区已激活 → 拖拽扩展选区，不翻页
-    // （无论本次长按还是已有选区，拖拽都用于扩展）
+    // A31-v3: 选区已激活 → 拖拽扩展选区（节流 16ms），不翻页
     if (notifier.hasSelection) {
+      // 60fps 节流：避免高频 updateSelection 导致卡顿
+      if (now - _lastSelectionUpdateMs < 16) return;
+      _lastSelectionUpdateMs = now;
       final page = notifier.state.currentPage;
       if (page != null) {
         final hitOffset = notifier.hitTestCharOffset(local, page);
@@ -256,10 +263,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       return; // 选区模式下不触发翻页
     }
 
-    // 首次移动时确定方向并通知 composer 开始拖拽
+    // A31-v3: 快速移动提前判定（0-150ms 内移动 >10px → 翻页优先）
+    // 业界标准：快速拖拽优先于长按——立即取消 Timer 防止误触选区
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
     final distance = dx.abs();
+    final elapsed = now - _pointerDownMs;
+
+    if (elapsed < 150 && distance > 10.0) {
+      _longPressTimer?.cancel(); // 快速移动 → 取消长按
+    }
 
     // 超过启动阈值才开始动画（避免微抖误触发）
     // M9.5-J：挂起中不再重调 startDrag（之前 100ms × N 重复 register）
