@@ -661,6 +661,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // A31: 初始化当前章节笔记缓存
       await _refreshCurrentChapterNotes();
+      // A31-v6: 首次加载时 notes 为空（refresh 在 load 之后），
+      // refresh 完成后重新 enrich 当前页注入高亮
+      if (state.currentChapterNotes.isNotEmpty && state.currentPage != null) {
+        state = state.copyWith(
+          currentPage: _enrichPageWithNotes(
+            state.currentPage!,
+            state.currentChapterNotes,
+          ),
+        );
+      }
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }

@@ -323,9 +323,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     final notifier = ref.read(readerProvider.notifier);
 
-    // A31-v5: 长按选区模式下抬起 → 清理拖拽缓存
+    // A31-v5: 长按选区模式下抬起 → 退出笔记模式（保留选区供工具条操作）
     if (_longPressTriggered) {
       _longPressTriggered = false;
+      _isNoteMode = false; // P4 修复：拖拽结束后退出独占模式
       return;
     }
 
