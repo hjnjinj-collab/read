@@ -297,6 +297,9 @@ class PageSegInfo {
   /// 段级色覆盖（None=继承行级默认色）
   final String? color;
 
+  /// A31-v6: 段级背景色（#rrggbb；笔记高亮用；None=无背景）
+  final String? backgroundColor;
+
   /// 段级字号倍率覆盖（None=继承行级）
   final double? fontScale;
 
@@ -312,6 +315,7 @@ class PageSegInfo {
     required this.start,
     required this.end,
     this.color,
+    this.backgroundColor,
     this.fontScale,
     required this.bold,
     required this.italic,
@@ -324,6 +328,7 @@ class PageSegInfo {
       start.hashCode ^
       end.hashCode ^
       color.hashCode ^
+      backgroundColor.hashCode ^
       fontScale.hashCode ^
       bold.hashCode ^
       italic.hashCode ^
@@ -338,6 +343,7 @@ class PageSegInfo {
           start == other.start &&
           end == other.end &&
           color == other.color &&
+          backgroundColor == other.backgroundColor &&
           fontScale == other.fontScale &&
           bold == other.bold &&
           italic == other.italic &&

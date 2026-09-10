@@ -110,6 +110,8 @@ pub struct PageSegInfo {
     pub end: usize,
     /// 段级色覆盖（None=继承行级默认色）
     pub color: Option<String>,
+    /// A31-v6: 段级背景色（#rrggbb；笔记高亮用；None=无背景）
+    pub background_color: Option<String>,
     /// 段级字号倍率覆盖（None=继承行级）
     pub font_scale: Option<f32>,
     /// 字形样式（绘制端按用户开关决定是否应用；下划线恒应用）
@@ -145,6 +147,7 @@ impl From<Page> for PageInfo {
                                 start: s.start,
                                 end: s.end,
                                 color: s.color,
+                                background_color: s.background_color,
                                 font_scale: s.font_scale,
                                 bold: s.bold,
                                 italic: s.italic,

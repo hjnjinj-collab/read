@@ -124,6 +124,9 @@ pub struct LineSeg {
     pub end: usize,
     #[serde(default)]
     pub color: Option<String>,
+    /// A31-v6: 段级背景色（#rrggbb；笔记高亮用；None=无背景）
+    #[serde(default)]
+    pub background_color: Option<String>,
     #[serde(default)]
     pub font_scale: Option<f32>,
     #[serde(default)]
@@ -1475,6 +1478,7 @@ impl LayoutEngine {
                     start: s - line.char_start,
                     end: e - line.char_start,
                     color: r.color.clone(),
+                    background_color: None,
                     font_scale: r.font_scale,
                     bold: r.bold,
                     italic: r.italic,

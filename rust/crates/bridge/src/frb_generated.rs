@@ -3654,6 +3654,7 @@ impl SseDecode for crate::PageSegInfo {
         let mut var_start = <usize>::sse_decode(deserializer);
         let mut var_end = <usize>::sse_decode(deserializer);
         let mut var_color = <Option<String>>::sse_decode(deserializer);
+        let mut var_backgroundColor = <Option<String>>::sse_decode(deserializer);
         let mut var_fontScale = <Option<f32>>::sse_decode(deserializer);
         let mut var_bold = <bool>::sse_decode(deserializer);
         let mut var_italic = <bool>::sse_decode(deserializer);
@@ -3663,6 +3664,7 @@ impl SseDecode for crate::PageSegInfo {
             start: var_start,
             end: var_end,
             color: var_color,
+            background_color: var_backgroundColor,
             font_scale: var_fontScale,
             bold: var_bold,
             italic: var_italic,
@@ -4153,6 +4155,7 @@ impl flutter_rust_bridge::IntoDart for crate::PageSegInfo {
             self.start.into_into_dart().into_dart(),
             self.end.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
+            self.background_color.into_into_dart().into_dart(),
             self.font_scale.into_into_dart().into_dart(),
             self.bold.into_into_dart().into_dart(),
             self.italic.into_into_dart().into_dart(),
@@ -4545,6 +4548,7 @@ impl SseEncode for crate::PageSegInfo {
         <usize>::sse_encode(self.start, serializer);
         <usize>::sse_encode(self.end, serializer);
         <Option<String>>::sse_encode(self.color, serializer);
+        <Option<String>>::sse_encode(self.background_color, serializer);
         <Option<f32>>::sse_encode(self.font_scale, serializer);
         <bool>::sse_encode(self.bold, serializer);
         <bool>::sse_encode(self.italic, serializer);
