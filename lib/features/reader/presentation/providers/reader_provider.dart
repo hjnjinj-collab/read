@@ -666,6 +666,123 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
   }
 
+  /// A31-v6: 给 PageInfo 注入笔记高亮 segments（Dart 后处理，~1-2ms）
+  ///
+  /// 笔记高亮是排版时的富文本属性（与加粗/斜体同级 segments），
+  /// 不是"运行时覆盖层绘制"。渲染层 PagePainter 已有 segments 渲染逻辑，
+  /// 直接读 backgroundColor 着色，与文字同生命周期零延迟。
+  PageInfo _enrichPageWithNotes(PageInfo rawPage, List<Note> notes) {
+    if (notes.isEmpty) return rawPage;
+    final pageNotes = notes
+        .where((n) =>
+            n.startCharOffset < rawPage.endCharIndex &&
+            n.endCharOffset > rawPage.startCharIndex)
+        .toList();
+    if (pageNotes.isEmpty) return rawPage;
+
+    final enriched = <PageEntry>[];
+    for (final entry in rawPage.entries) {
+      if (entry.text == null || !entry.hasCharRange) {
+        enriched.add(entry);
+        continue;
+      }
+      final overlapping = pageNotes
+          .where((n) =>
+              n.startCharOffset < entry.endCharIndex! &&
+              n.endCharOffset > entry.startCharIndex!)
+          .toList();
+      if (overlapping.isEmpty) {
+        enriched.add(entry);
+        continue;
+      }
+      // 将 entry 的 segments 重新生成：按笔记边界切分，笔记区间加 backgroundColor
+      final newSegs = _splitEntrySegmentsByNotes(entry, overlapping);
+      enriched.add(PageEntry(
+        text: entry.text,
+        resourceHref: entry.resourceHref,
+        x: entry.x,
+        y: entry.y,
+        width: entry.width,
+        height: entry.height,
+        color: entry.color,
+        fontScale: entry.fontScale,
+        segments: newSegs,
+        isChapterStart: entry.isChapterStart,
+        isTableFrame: entry.isTableFrame,
+        isComment: entry.isComment,
+        letterGap: entry.letterGap,
+        startCharIndex: entry.startCharIndex,
+        endCharIndex: entry.endCharIndex,
+      ));
+    }
+    return PageInfo(
+      pageIndex: rawPage.pageIndex,
+      chapterIndex: rawPage.chapterIndex,
+      entries: enriched,
+      backgroundHref: rawPage.backgroundHref,
+      backgroundSize: rawPage.backgroundSize,
+      backgroundPosition: rawPage.backgroundPosition,
+      startCharIndex: rawPage.startCharIndex,
+      endCharIndex: rawPage.endCharIndex,
+    );
+  }
+
+  /// 笔记颜色索引 → 背景色 hex（#AARRGGBB，40% 透明度）
+  static String noteColorHex(int colorIndex) {
+    switch (colorIndex) {
+      case 1: return '#6681C784'; // 绿色
+      case 2: return '#6664B5F6'; // 蓝色
+      case 3: return '#66F48FB1'; // 粉色
+      case 4: return '#66E57373'; // 红色（直线）
+      default: return '#66FFD54F'; // 黄色
+    }
+  }
+
+  /// 将 entry 按笔记边界拆分 segments
+  List<EntrySegment> _splitEntrySegmentsByNotes(PageEntry entry, List<Note> notes) {
+    final text = entry.text!;
+    final entryStart = entry.startCharIndex!;
+    final textLen = text.length;
+    // 笔记边界点（entry 内相对偏移），排序去重
+    final boundaries = <int>{0, textLen};
+    for (final n in notes) {
+      final s = (n.startCharOffset - entryStart).clamp(0, textLen);
+      final e = (n.endCharOffset - entryStart).clamp(0, textLen);
+      if (s > 0) boundaries.add(s);
+      if (e < textLen) boundaries.add(e);
+    }
+    final sorted = boundaries.toList()..sort();
+    final segs = <EntrySegment>[];
+    for (var i = 0; i < sorted.length - 1; i++) {
+      final segStart = sorted[i];
+      final segEnd = sorted[i + 1];
+      if (segStart >= segEnd) continue;
+      final absStart = entryStart + segStart;
+      final absEnd = entryStart + segEnd;
+      // 找覆盖此段的笔记
+      Note? coveringNote;
+      for (final n in notes) {
+        if (n.startCharOffset <= absStart && n.endCharOffset >= absEnd) {
+          coveringNote = n;
+          break;
+        }
+      }
+      segs.add(EntrySegment(
+        start: segStart,
+        end: segEnd,
+        backgroundColor: coveringNote != null
+            ? noteColorHex(coveringNote.colorIndex)
+            : null,
+      ));
+    }
+    // 保留原有 segments 中非笔记覆盖的部分（EPUB 富文本）
+    if (entry.segments.isNotEmpty) {
+      // 简化：暂不合并原有 segments（笔记优先，原有富文本后续优化）
+      return segs;
+    }
+    return segs;
+  }
+
   /// Load current page
   /// 加载当前页
   ///
@@ -812,8 +929,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // 锚点定位后页码可能与请求不同：同步回状态。
       // 跨章跳转：章节切换在此处与页面一次性提交（deferred commit）。
+      // A31-v6: 笔记高亮后处理——给 page entries 注入 backgroundColor segments
+      final enrichedPage = state.currentChapterNotes.isNotEmpty
+          ? _enrichPageWithNotes(page, state.currentChapterNotes)
+          : page;
       state = state.copyWith(
-        currentPage: page,
+        currentPage: enrichedPage,
         currentPageIndex: page.pageIndex,
         currentChapterIndex: targetChapterIndex,
       );

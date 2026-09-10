@@ -134,6 +134,10 @@ class EntrySegment {
   final int start;
   final int end;
   final String? color;
+
+  /// A31-v6: 段级背景色（#AARRGGBB；笔记高亮用；null=无背景）
+  final String? backgroundColor;
+
   final double? fontScale;
 
   /// 字形样式（绘制端按用户开关决定粗/斜是否应用；下划线恒应用）
@@ -148,6 +152,7 @@ class EntrySegment {
     required this.start,
     required this.end,
     this.color,
+    this.backgroundColor,
     this.fontScale,
     this.bold = false,
     this.italic = false,

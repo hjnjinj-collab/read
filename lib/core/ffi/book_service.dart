@@ -459,6 +459,7 @@ class BookService {
                       start: s.start.toInt(),
                       end: s.end.toInt(),
                       color: s.color,
+                      backgroundColor: s.backgroundColor,
                       fontScale: s.fontScale,
                       bold: s.bold,
                       italic: s.italic,

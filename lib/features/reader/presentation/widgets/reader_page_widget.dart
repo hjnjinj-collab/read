@@ -364,6 +364,8 @@ class PageContentRenderer {
                 text: text.substring(s, e),
                 style: TextStyle(
                   color: _parseHexColor(seg.color) ?? baseColor,
+                  // A31-v6: 笔记高亮背景色（#AARRGGBB）
+                  backgroundColor: _parseHexColor(seg.backgroundColor),
                   fontSize: baseFontSize * (seg.fontScale ?? baseScale),
                   height: baseLineHeight,
                   fontFamily: ReaderFont.family,
