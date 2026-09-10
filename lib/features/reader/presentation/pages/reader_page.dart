@@ -10,6 +10,7 @@ import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
 import '../widgets/reader_menu.dart';
 import '../widgets/reader_page_widget.dart';
+import '../widgets/selection_highlight_painter.dart';
 import '../widgets/text_selection_overlay.dart';
 
 class ReaderPage extends ConsumerStatefulWidget {
@@ -584,7 +585,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               ),
             ),
 
-            // A31: 文本选区 Overlay（长按激活后显示高亮+工具条+手柄）
+            // A31-v4: 选区高亮独立覆盖层（只重绘高亮矩形，不触发整页重绘）
+            if (state.currentPage != null && !state.isLoading && state.error == null)
+              SelectionHighlightLayer(page: state.currentPage!),
+
+            // A31: 文本选区 Overlay（长按激活后显示工具条+手柄）
             if (state.currentPage != null && !state.isLoading && state.error == null)
               Positioned.fill(
                 child: ReaderSelectionOverlay(

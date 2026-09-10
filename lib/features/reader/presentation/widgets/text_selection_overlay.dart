@@ -111,14 +111,8 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
 
     return Stack(
       children: [
-        // 选区高亮矩形（半透明蓝）
-        Positioned.fill(
-          child: IgnorePointer(
-            child: CustomPaint(
-              painter: _SelectionHighlightPainter(rects),
-            ),
-          ),
-        ),
+        // A31-v4: 高亮矩形由 SelectionHighlightLayer 独立绘制（在 reader_page Stack 中），
+        // 这里只保留工具条和手柄，避免每次 selectionTick 变化都触发整页重绘
         // 拖拽手柄
         ..._buildHandles(rects, notifier),
         // 浮动工具条
