@@ -3252,16 +3252,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageSegInfo dco_decode_page_seg_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8) throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9) throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return PageSegInfo(
       start: dco_decode_usize(arr[0]),
       end: dco_decode_usize(arr[1]),
       color: dco_decode_opt_String(arr[2]),
-      fontScale: dco_decode_opt_box_autoadd_f_32(arr[3]),
-      bold: dco_decode_bool(arr[4]),
-      italic: dco_decode_bool(arr[5]),
-      underline: dco_decode_bool(arr[6]),
-      letterSpacing: dco_decode_opt_box_autoadd_f_32(arr[7]),
+      backgroundColor: dco_decode_opt_String(arr[3]),
+      fontScale: dco_decode_opt_box_autoadd_f_32(arr[4]),
+      bold: dco_decode_bool(arr[5]),
+      italic: dco_decode_bool(arr[6]),
+      underline: dco_decode_bool(arr[7]),
+      letterSpacing: dco_decode_opt_box_autoadd_f_32(arr[8]),
     );
   }
 
@@ -3807,6 +3808,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_start = sse_decode_usize(deserializer);
     var var_end = sse_decode_usize(deserializer);
     var var_color = sse_decode_opt_String(deserializer);
+    var var_backgroundColor = sse_decode_opt_String(deserializer);
     var var_fontScale = sse_decode_opt_box_autoadd_f_32(deserializer);
     var var_bold = sse_decode_bool(deserializer);
     var var_italic = sse_decode_bool(deserializer);
@@ -3816,6 +3818,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       start: var_start,
       end: var_end,
       color: var_color,
+      backgroundColor: var_backgroundColor,
       fontScale: var_fontScale,
       bold: var_bold,
       italic: var_italic,
@@ -4237,6 +4240,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_usize(self.start, serializer);
     sse_encode_usize(self.end, serializer);
     sse_encode_opt_String(self.color, serializer);
+    sse_encode_opt_String(self.backgroundColor, serializer);
     sse_encode_opt_box_autoadd_f_32(self.fontScale, serializer);
     sse_encode_bool(self.bold, serializer);
     sse_encode_bool(self.italic, serializer);
