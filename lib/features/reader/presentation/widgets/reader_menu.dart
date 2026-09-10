@@ -252,6 +252,16 @@ class ReaderMenu extends ConsumerWidget {
                     },
                   ),
                   _MenuButton(
+                    icon: Icons.highlight,
+                    label: '笔记',
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => const NoteListDialog(),
+                      );
+                    },
+                  ),
+                  _MenuButton(
                     icon: Icons.settings,
                     label: 'Settings',
                     onTap: () {
@@ -434,6 +444,170 @@ class _BookmarkListDialogState extends ConsumerState<BookmarkListDialog> {
         ),
       ],
     );
+  }
+}
+
+/// A31: 笔记列表对话框：查看、跳转、删除、编辑备注
+class NoteListDialog extends ConsumerStatefulWidget {
+  const NoteListDialog({super.key});
+
+  @override
+  ConsumerState<NoteListDialog> createState() => _NoteListDialogState();
+}
+
+class _NoteListDialogState extends ConsumerState<NoteListDialog> {
+  late Future<List<Note>> _future;
+
+  static const _colorLabels = ['黄色', '绿色', '蓝色', '粉色', '直线'];
+  static const _colorDots = [
+    Color(0xFFFFD54F),
+    Color(0xFF81C784),
+    Color(0xFF64B5F6),
+    Color(0xFFF48FB1),
+    Color(0xFFE53935),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    setState(() {
+      _future = ref.read(readerProvider.notifier).notesForCurrentBook();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('笔记'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 360,
+        child: FutureBuilder<List<Note>>(
+          future: _future,
+          builder: (context, snap) {
+            final items = snap.data ?? const [];
+            if (items.isEmpty) {
+              return const Center(child: Text('暂无笔记\n长按文字可添加'));
+            }
+            return ListView.separated(
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final n = items[i];
+                final colorDot = _colorDots[n.colorIndex.clamp(0, 4)];
+                return ListTile(
+                  dense: true,
+                  leading: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: colorDot,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  title: Text(
+                    n.excerpt,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    [
+                      '第 ${n.chapterIndex + 1} 章',
+                      if (n.note != null && n.note!.isNotEmpty) '备注: ${n.note}',
+                    ].join(' · '),
+                    style: const TextStyle(fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, size: 18),
+                        tooltip: '编辑备注',
+                        onPressed: () => _editNote(n),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        onPressed: () async {
+                          await ref.read(readerProvider.notifier).deleteNote(n.id);
+                          _reload();
+                        },
+                      ),
+                    ],
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    ref.read(readerProvider.notifier).jumpToNote(n);
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editNote(Note note) async {
+    final controller = TextEditingController(text: note.note ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑备注'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.yellow.shade50,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                note.excerpt.length > 50
+                    ? '${note.excerpt.substring(0, 50)}…'
+                    : note.excerpt,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: '输入备注…',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    await ref.read(readerProvider.notifier).updateNoteText(note.id, result);
+    _reload();
   }
 }
 

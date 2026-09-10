@@ -1808,6 +1808,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
           baseFontSize: notifier.fontSize,
           baseLineHeight: notifier.lineHeight,
+          notes: notifier.currentChapterNotes,
         ),
       );
     });

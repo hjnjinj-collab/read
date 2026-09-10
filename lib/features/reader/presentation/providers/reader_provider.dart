@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/database/app_settings_service.dart';
@@ -96,6 +97,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // A31: 当前章节笔记缓存（章节切换时刷新）
   List<Note> _currentChapterNotes = [];
   int? _cachedNotesChapterIndex;
+
+  // A31: 文本选区状态（长按选择 + 拖拽扩展）
+  int? _selectionStart;
+  int? _selectionEnd;
+  final ValueNotifier<int> _selectionTick = ValueNotifier(0);
 
   // Content cleaning settings
   bool _removeHtmlTags = true;
@@ -1538,6 +1544,134 @@ class ReaderNotifier extends Notifier<ReadingState> {
       anchorCharOffset: note.startCharOffset,
       targetChapterIndex: note.chapterIndex,
     );
+  }
+
+  // ===== A31: 文本选区 =====
+
+  /// 当前选区（null=无选区）
+  int? get selectionStart => _selectionStart;
+  int? get selectionEnd => _selectionEnd;
+  bool get hasSelection => _selectionStart != null && _selectionEnd != null;
+
+  /// 选区重绘 tick（长按/拖拽/清除时自增，驱动 overlay 重绘）
+  ValueNotifier<int> get selectionTick => _selectionTick;
+
+  /// 选区文本（从当前页 entries 提取）
+  String get selectionText {
+    if (!hasSelection) return '';
+    final page = state.currentPage;
+    if (page == null) return '';
+    final buffer = StringBuffer();
+    for (final entry in page.entries) {
+      final text = entry.text;
+      if (text == null || !entry.hasCharRange) continue;
+      final overlapStart = _selectionStart!.clamp(
+        entry.startCharIndex!,
+        entry.endCharIndex!,
+      );
+      final overlapEnd = _selectionEnd!.clamp(
+        entry.startCharIndex!,
+        entry.endCharIndex!,
+      );
+      if (overlapStart < overlapEnd) {
+        final localStart = overlapStart - entry.startCharIndex!;
+        final localEnd = overlapEnd - entry.startCharIndex!;
+        buffer.write(text.substring(
+          localStart.clamp(0, text.length),
+          localEnd.clamp(0, text.length),
+        ));
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// 开始选区（长按命中时调用）
+  void beginSelection(int charOffset) {
+    _selectionStart = charOffset;
+    _selectionEnd = charOffset + 1;
+    _selectionTick.value++;
+  }
+
+  /// 扩展选区（拖拽时调用）
+  void updateSelection(int charOffset) {
+    if (_selectionStart == null) return;
+    // start 保持不变，end 随手指移动
+    _selectionEnd = charOffset.clamp(
+      _selectionStart! + 1,
+      state.currentPage?.endCharIndex ?? charOffset + 1,
+    );
+    _selectionTick.value++;
+  }
+
+  /// 清除选区
+  void clearSelection() {
+    if (_selectionStart == null) return;
+    _selectionStart = null;
+    _selectionEnd = null;
+    _selectionTick.value++;
+  }
+
+  /// 字符命中测试：屏幕坐标 → 章内字符偏移
+  ///
+  /// 返回 null = 命中位置无文字（空白/图片/表格框）
+  int? hitTestCharOffset(Offset localPos, PageInfo page) {
+    for (final entry in page.entries) {
+      if (entry.text == null || !entry.hasCharRange) continue;
+      // 命中 entry 包围盒
+      if (localPos.dx < entry.x ||
+          localPos.dx > entry.x + entry.width ||
+          localPos.dy < entry.y ||
+          localPos.dy > entry.y + entry.height) {
+        continue;
+      }
+      // 构建与绘制同参数的 TextPainter 做精确命中
+      final baseStyle = TextStyle(
+        fontSize: 18.0 * (entry.fontScale ?? 1.0),
+        height: 1.5,
+        fontFamily: ReaderFont.family,
+        letterSpacing: entry.letterGap,
+      );
+      final textPainter = TextPainter(
+        text: TextSpan(text: entry.text!, style: baseStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: double.infinity);
+      final position = textPainter.getPositionForOffset(
+        Offset(localPos.dx - entry.x, localPos.dy - entry.y),
+      );
+      textPainter.dispose();
+      // 偏移转章内绝对偏移
+      return entry.startCharIndex! + position.offset;
+    }
+    return null;
+  }
+
+  /// 将选区所在词扩展到词边界（中文按标点/空白分词）
+  ///
+  /// 返回 (start, end) 章内偏移
+  (int, int) expandToWordBoundary(int charOffset, PageInfo page) {
+    for (final entry in page.entries) {
+      final text = entry.text;
+      if (text == null || !entry.hasCharRange) continue;
+      if (charOffset < entry.startCharIndex! ||
+          charOffset >= entry.endCharIndex!) {
+        continue;
+      }
+      final localOffset = charOffset - entry.startCharIndex!;
+      // 词边界字符集（不扩展）
+      const wordBreakers = ' \t\n，。！？、；：""\'\'（）【】《》…—·';
+      // 向左扩展
+      var start = localOffset;
+      while (start > 0 && !wordBreakers.contains(text[start - 1])) {
+        start--;
+      }
+      // 向右扩展（至少包含一个字符）
+      var end = localOffset + 1;
+      while (end < text.length && !wordBreakers.contains(text[end])) {
+        end++;
+      }
+      return (entry.startCharIndex! + start, entry.startCharIndex! + end);
+    }
+    return (charOffset, charOffset + 1);
   }
 
   /// 跳转到书签位置（章节 + 字符锚点，与进度恢复同一机制）。

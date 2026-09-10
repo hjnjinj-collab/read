@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/simple_models.dart';
@@ -7,6 +9,7 @@ import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
 import '../widgets/reader_menu.dart';
 import '../widgets/reader_page_widget.dart';
+import '../widgets/text_selection_overlay.dart';
 
 class ReaderPage extends ConsumerStatefulWidget {
   final String filePath;
@@ -41,6 +44,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   int _dragLastTimestampMs = 0;
   double _releaseVelocityX = 0;
 
+  // A31: 长按选区检测
+  Timer? _longPressTimer;
+  bool _longPressTriggered = false;
+
   /// P4: 翻页合成器的 key，用于调用其方法
   final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
 
@@ -60,6 +67,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   @override
   void dispose() {
+    _longPressTimer?.cancel();
     ref.read(readerProvider.notifier).closeBook();
     super.dispose();
   }
@@ -81,6 +89,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _dragLastY = event.localPosition.dy;
     _dragLastTimestampMs = event.timeStamp.inMilliseconds;
     _releaseVelocityX = 0;
+    _longPressTriggered = false;
+
+    // A31: 启动长按计时器（500ms 后触发选区）
+    final notifier = ref.read(readerProvider.notifier);
+    final page = notifier.state.currentPage;
+    if (page != null && !notifier.hasSelection) {
+      _longPressTimer?.cancel();
+      _longPressTimer = Timer(const Duration(milliseconds: 500), () {
+        if (!_isDragging) return; // 手指已抬起
+        final hitOffset = notifier.hitTestCharOffset(
+          Offset(_dragStartX, _dragStartY),
+          page,
+        );
+        if (hitOffset != null) {
+          _longPressTriggered = true;
+          final (wordStart, _) = notifier.expandToWordBoundary(hitOffset, page);
+          notifier.beginSelection(wordStart);
+        }
+      });
+    }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -95,6 +123,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _dragLastX = local.dx;
     _dragLastY = local.dy;
     _dragLastTimestampMs = now;
+
+    final notifier = ref.read(readerProvider.notifier);
+
+    // A31: 如果长按已触发选区，拖拽更新选区 end
+    if (_longPressTriggered && notifier.hasSelection) {
+      final page = notifier.state.currentPage;
+      if (page != null) {
+        final hitOffset = notifier.hitTestCharOffset(local, page);
+        if (hitOffset != null) {
+          notifier.updateSelection(hitOffset);
+        }
+      }
+      return; // 选区模式下不触发翻页
+    }
+
+    // 如果已有选区（非本次长按），点选区外取消
+    if (notifier.hasSelection && !_longPressTriggered) {
+      notifier.clearSelection();
+      return;
+    }
 
     // 首次移动时确定方向并通知 composer 开始拖拽
     final dx = _dragLastX - _dragStartX;
@@ -118,13 +166,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     // 持续更新进度 + 实时触点
     if (_composerKey.currentState?.isIdle == false) {
-      final notifier = ref.read(readerProvider.notifier);
       final rawProgress = (distance / notifier.screenWidth).clamp(0.0, 1.0);
-      
-      // 2026-09-03 第二阶段优化：渐进式阻尼
-      // 越接近边缘（progress 越大），阻力越大
       final dampedProgress = _applyProgressiveDamping(rawProgress);
-      
       _composerKey.currentState?.updateDrag(
         dampedProgress,
         Offset(_dragLastX, _dragLastY),
@@ -133,10 +176,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   void _onPointerUp(PointerUpEvent event) {
+    _longPressTimer?.cancel();
     if (!_isDragging) return;
     _isDragging = false;
 
+    // A31: 长按选区模式下抬起不触发翻页
+    if (_longPressTriggered) {
+      _longPressTriggered = false;
+      return;
+    }
+
     final notifier = ref.read(readerProvider.notifier);
+
+    // A31: 已有选区时，抬起点击选区外取消选区
+    if (notifier.hasSelection) {
+      notifier.clearSelection();
+      return;
+    }
+
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
 
@@ -396,6 +453,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                     : const Center(child: Text('No content')),
               ),
             ),
+
+            // A31: 文本选区 Overlay（长按激活后显示高亮+工具条+手柄）
+            if (state.currentPage != null && !state.isLoading && state.error == null)
+              Positioned.fill(
+                child: ReaderSelectionOverlay(
+                  page: state.currentPage!,
+                ),
+              ),
 
             // Top status bar
             Positioned(
