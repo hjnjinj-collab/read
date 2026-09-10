@@ -177,8 +177,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   // 全部使用 event.localPosition：与 CurlPainter 绘制坐标系一致
 
   void _onPointerDown(PointerDownEvent event) {
-    // A31-v6 P4: 笔记模式完全屏蔽翻页手势
-    if (_isNoteMode) {
+    // A31-v6 P4: 笔记模式完全屏蔽翻页手势——但仅在**拖拽选区期间**。
+    // 选区已结束（工具条显示）时，新手势正常处理（关闭菜单、新开选区等）
+    if (_isNoteMode && _longPressTriggered) {
       _isDragging = true;
       _dragStartX = event.localPosition.dx;
       _dragStartY = event.localPosition.dy;
@@ -186,6 +187,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       _dragLastY = event.localPosition.dy;
       return;
     }
+    _isNoteMode = false; // 确保任何新手势都重置笔记模式
     _isDragging = true;
     _dragStartX = event.localPosition.dx;
     _dragStartY = event.localPosition.dy;
