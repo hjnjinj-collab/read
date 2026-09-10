@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../../../../core/database/app_database.dart' show Note;
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/reader_font.dart';
@@ -24,9 +23,6 @@ class ReaderPageWidget extends StatefulWidget {
   final double baseFontSize;
   final double baseLineHeight;
 
-  /// A31: 当前章节的笔记列表（用于绘制高亮矩形）
-  final List<Note> notes;
-
   const ReaderPageWidget({
     Key? key,
     required this.pageInfo,
@@ -35,7 +31,6 @@ class ReaderPageWidget extends StatefulWidget {
     this.applyTitleBold = false,
     this.baseFontSize = 18.0,
     this.baseLineHeight = 1.5,
-    this.notes = const [],
   }) : super(key: key);
 
   @override
@@ -74,7 +69,6 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
         applyTitleBold: widget.applyTitleBold,
         baseFontSize: widget.baseFontSize,
         baseLineHeight: widget.baseLineHeight,
-        notes: widget.notes,
       ),
       size: Size.infinite,
     );
@@ -82,6 +76,9 @@ class _ReaderPageWidgetState extends State<ReaderPageWidget> {
 }
 
 /// 页面绘制器：先画整页背景（EPUB 装饰页），再按 entries 绘制文本/图片
+///
+/// A31 布局层单轨：笔记高亮已写入 `entry.segments.backgroundColor/underline`，
+/// 绘制端只读 segments，不再按 notes 列表画运行时矩形。
 class PagePainter extends CustomPainter {
   final PageInfo pageInfo;
   final VoidCallback onImageNeeded;
@@ -90,9 +87,6 @@ class PagePainter extends CustomPainter {
   final bool applyTitleBold;
   final double baseFontSize;
   final double baseLineHeight;
-
-  /// A31: 当前章节的笔记列表（用于绘制高亮矩形）
-  final List<Note> notes;
 
   /// 构造期捕获的主题版本号（2026-09-04 P1：切主题后 widget 重建 →
   /// 新 painter 携带新 revision → shouldRepaint 命中重绘）
@@ -109,7 +103,6 @@ class PagePainter extends CustomPainter {
     this.applyTitleBold = false,
     this.baseFontSize = 18.0,
     this.baseLineHeight = 1.5,
-    this.notes = const [],
   }) : super(repaint: repaint);
 
   @override
@@ -137,7 +130,6 @@ class PagePainter extends CustomPainter {
       applyTitleBold: applyTitleBold,
       baseFontSize: baseFontSize,
       baseLineHeight: baseLineHeight,
-      notes: notes,
     );
     // M12 修复：paint 后同步 flush（阻塞式），确保下一页 layout 时能命中 cache
     // ignore: unawaited_futures
@@ -153,7 +145,6 @@ class PagePainter extends CustomPainter {
         oldDelegate.applyTitleBold != applyTitleBold ||
         oldDelegate.baseFontSize != baseFontSize ||
         oldDelegate.baseLineHeight != baseLineHeight ||
-        oldDelegate.notes != notes ||
         // 2026-09-04 P1 暗黑主题：静态主题切换感知（构造期捕获版本号比对）
         oldDelegate.themeRevision != themeRevision;
     return repaint;
@@ -250,7 +241,6 @@ class PageContentRenderer {
     bool applyTitleBold = false,
     double baseFontSize = 18.0,
     double baseLineHeight = 1.5,
-    List<Note> notes = const [],
   }) {
     // P0- 防回归/根因定位：绘制层首次进入时输出 entry.x + canvas 当前
     // 变换矩阵 + 调用栈。若 entry.x=20 但视觉贴左边，必有 canvas 平移
@@ -278,11 +268,8 @@ class PageContentRenderer {
       }
     }
 
-    // A31: 笔记高亮矩形（绘制在文字下方，按 colorIndex 色板）
-    if (notes.isNotEmpty) {
-      _paintNoteHighlights(canvas, pageInfo, notes,
-          baseFontSize: baseFontSize, baseLineHeight: baseLineHeight);
-    }
+    // A31 布局层单轨：笔记高亮由 segments.backgroundColor/underline 随文字绘制，
+    // 不再在此按 notes 列表叠画矩形（避免双画与 TextPainter 重复 measure）。
 
     for (final entry in pageInfo.entries) {
       final href = entry.resourceHref;
@@ -432,105 +419,26 @@ class PageContentRenderer {
     }
   }
 
-  /// `#rgb`/`#rrggbb` 十六进制色解析（非法形态返回 null 回落主题色）
+  /// `#rgb`/`#rrggbb`/`#aarrggbb` 十六进制色解析（非法形态返回 null 回落主题色）
+  ///
+  /// 笔记背景色使用 `#AARRGGBB`（含 alpha），与 `noteColorHex` 同源。
   static Color? _parseHexColor(String? hex) {
     if (hex == null) return null;
     var h = hex.replaceFirst('#', '');
     if (h.length == 3) {
       h = h.split('').map((c) => c + c).join();
     }
-    if (h.length != 6) return null;
-    final v = int.tryParse('ff$h', radix: 16);
+    if (h.length == 6) {
+      h = 'ff$h';
+    } else if (h.length != 8) {
+      return null;
+    }
+    final v = int.tryParse(h, radix: 16);
     return v == null ? null : Color(v);
   }
 
-  /// A31: 绘制笔记高亮矩形（按 colorIndex 色板，垫在文字下方）
-  ///
-  /// 色板：0=黄色/1=绿色/2=蓝色/3=粉色/4=直线（下划线）
-  static void _paintNoteHighlights(
-    Canvas canvas,
-    PageInfo pageInfo,
-    List<Note> notes, {
-    required double baseFontSize,
-    required double baseLineHeight,
-  }) {
-    const highlightColors = [
-      Color(0x66FFD54F), // 黄色
-      Color(0x6681C784), // 绿色
-      Color(0x6664B5F6), // 蓝色
-      Color(0x66F48FB1), // 粉色
-    ];
-
-    for (final note in notes) {
-      final colorIndex = note.colorIndex.clamp(0, 4);
-      final isUnderline = colorIndex == 4;
-      final color = isUnderline
-          ? const Color(0xFFE53935) // 直线用红色
-          : highlightColors[colorIndex];
-
-      for (final entry in pageInfo.entries) {
-        final text = entry.text;
-        if (text == null || !entry.hasCharRange) continue;
-        final overlapStart = note.startCharOffset.clamp(
-          entry.startCharIndex!,
-          entry.endCharIndex!,
-        );
-        final overlapEnd = note.endCharOffset.clamp(
-          entry.startCharIndex!,
-          entry.endCharIndex!,
-        );
-        if (overlapStart >= overlapEnd) continue;
-
-        // 构建 TextPainter 获取选区 boxes
-        final baseStyle = TextStyle(
-          fontSize: baseFontSize * (entry.fontScale ?? 1.0),
-          height: baseLineHeight,
-          fontFamily: ReaderFont.family,
-          letterSpacing: entry.letterGap,
-        );
-        final textPainter = TextPainter(
-          text: TextSpan(text: text, style: baseStyle),
-          textDirection: TextDirection.ltr,
-        )..layout(minWidth: 0, maxWidth: double.infinity);
-
-        final localStart = overlapStart - entry.startCharIndex!;
-        final localEnd = overlapEnd - entry.startCharIndex!;
-        // Flutter TextPainter.getBoxesForSelection 返回选区矩形列表
-        final boxes = textPainter.getBoxesForSelection(
-          TextSelection(
-            baseOffset: localStart.clamp(0, text.length),
-            extentOffset: localEnd.clamp(0, text.length),
-          ),
-        );
-        textPainter.dispose();
-
-        for (final box in boxes) {
-          final rect = Rect.fromLTRB(
-            entry.x + box.left,
-            entry.y + box.top,
-            entry.x + box.right,
-            entry.y + box.bottom,
-          );
-          if (isUnderline) {
-            // 直线模式：底部横线
-            canvas.drawLine(
-              Offset(rect.left, rect.bottom - 2),
-              Offset(rect.right, rect.bottom - 2),
-              Paint()
-                ..color = color
-                ..strokeWidth = 2.0,
-            );
-          } else {
-            // 高亮矩形
-            canvas.drawRect(
-              rect,
-              Paint()..color = color,
-            );
-          }
-        }
-      }
-    }
-  }
+  /// 测试可见入口（与 [_parseHexColor] 同实现）
+  static Color? parseHexColorForTest(String? hex) => _parseHexColor(hex);
 
   /// 几何诊断静态节流（同一 pageId 仅首次输出）
   static final Set<int> _tracedGeometryPageIds = <int>{};

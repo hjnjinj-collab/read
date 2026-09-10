@@ -157,32 +157,41 @@ class ReaderMenu extends ConsumerWidget {
                     const SizedBox(width: 12),
                     const Text('翻页方式:', style: TextStyle(fontSize: 14)),
                     const SizedBox(width: 12),
-                    _PageTurnModeChip(
-                      label: '卷曲',
-                      mode: PageTurnMode.simulation,
-                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
-                      onSelected: onPageTurnModeChanged!,
-                    ),
-                    const SizedBox(width: 8),
-                    _PageTurnModeChip(
-                      label: '水波纹',
-                      mode: PageTurnMode.ripple,
-                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
-                      onSelected: onPageTurnModeChanged!,
-                    ),
-                    const SizedBox(width: 8),
-                    _PageTurnModeChip(
-                      label: '坍塌',
-                      mode: PageTurnMode.collapse,
-                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
-                      onSelected: onPageTurnModeChanged!,
-                    ),
-                    const SizedBox(width: 8),
-                    _PageTurnModeChip(
-                      label: '滚动',
-                      mode: PageTurnMode.verticalScroll,
-                      currentMode: pageTurnMode ?? PageTurnMode.simulation,
-                      onSelected: onPageTurnModeChanged!,
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _PageTurnModeChip(
+                              label: '卷曲',
+                              mode: PageTurnMode.simulation,
+                              currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                              onSelected: onPageTurnModeChanged!,
+                            ),
+                            const SizedBox(width: 8),
+                            _PageTurnModeChip(
+                              label: '水波纹',
+                              mode: PageTurnMode.ripple,
+                              currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                              onSelected: onPageTurnModeChanged!,
+                            ),
+                            const SizedBox(width: 8),
+                            _PageTurnModeChip(
+                              label: '坍塌',
+                              mode: PageTurnMode.collapse,
+                              currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                              onSelected: onPageTurnModeChanged!,
+                            ),
+                            const SizedBox(width: 8),
+                            _PageTurnModeChip(
+                              label: '滚动',
+                              mode: PageTurnMode.verticalScroll,
+                              currentMode: pageTurnMode ?? PageTurnMode.simulation,
+                              onSelected: onPageTurnModeChanged!,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),

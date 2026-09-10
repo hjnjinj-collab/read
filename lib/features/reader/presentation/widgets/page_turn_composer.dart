@@ -1795,7 +1795,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       if (mismatch) {
         return const SizedBox.expand();
       }
-      // A31-v3: notes 进 ReadingState，Riverpod 自动响应重建
+      // A31 布局层单轨：笔记已写入 pageInfo.segments，此处不再传 notes
       return RepaintBoundary(
         child: ReaderPageWidget(
           key: ValueKey(
@@ -1807,7 +1807,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
           baseFontSize: notifier.fontSize,
           baseLineHeight: notifier.lineHeight,
-          notes: notifier.currentChapterNotes,
         ),
       );
     });

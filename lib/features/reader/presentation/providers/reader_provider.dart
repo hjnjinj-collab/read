@@ -97,6 +97,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // A31-v3: 章节笔记缓存的章节索引（用于判断是否需要重查）
   int? _cachedNotesChapterIndex;
 
+  /// 未注入笔记的原始页（布局层单轨：state.currentPage 恒为 enrich 后结果；
+  /// 笔记变更时从本字段重新 enrich，避免在已注入 segments 上二次叠加）
+  PageInfo? _rawCurrentPage;
+
+  /// 身份 → FFI 原始页缓存（邻居/预载用）。翻页 adopt 后可恢复 raw 供 re-enrich。
+  final Map<String, PageInfo> _rawPageCache = <String, PageInfo>{};
+
   // A31: 文本选区状态（长按选择 + 拖拽扩展）
   int? _selectionStart;
   int? _selectionEnd;
@@ -600,7 +607,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Future<void> openBook(String filePath, String bookName) async {
     ++_requestGeneration;
     _invalidateFrames(reason: 'open-book');
-    state = state.copyWith(isLoading: true, error: null);
+    _rawCurrentPage = null;
+    _rawPageCache.clear();
+    _cachedNotesChapterIndex = null;
+    clearSelection();
+    state = state.copyWith(
+      isLoading: true,
+      error: null,
+      currentChapterNotes: const [],
+    );
     // 发布 loading 占位（无 frame；会话已推进，旧集合全部作废）
     _renderStore.publishEmpty(isLoading: true, message: '正在打开书籍…');
 
@@ -659,138 +674,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
         await _loadCurrentPage();
       }
 
-      // A31: 初始化当前章节笔记缓存
-      await _refreshCurrentChapterNotes();
-      // A31-v6: 首次加载时 notes 为空（refresh 在 load 之后），
-      // refresh 完成后重新 enrich 当前页注入高亮
-      if (state.currentChapterNotes.isNotEmpty && state.currentPage != null) {
-        state = state.copyWith(
-          currentPage: _enrichPageWithNotes(
-            state.currentPage!,
-            state.currentChapterNotes,
-          ),
-        );
-      }
+      // A31 布局层单轨：加载页后刷本章笔记（内部会从 _rawCurrentPage re-enrich）
+      await _refreshCurrentChapterNotes(force: true);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
-  }
-
-  /// A31-v6: 给 PageInfo 注入笔记高亮 segments（Dart 后处理，~1-2ms）
-  ///
-  /// 笔记高亮是排版时的富文本属性（与加粗/斜体同级 segments），
-  /// 不是"运行时覆盖层绘制"。渲染层 PagePainter 已有 segments 渲染逻辑，
-  /// 直接读 backgroundColor 着色，与文字同生命周期零延迟。
-  PageInfo _enrichPageWithNotes(PageInfo rawPage, List<Note> notes) {
-    if (notes.isEmpty) return rawPage;
-    final pageNotes = notes
-        .where((n) =>
-            n.startCharOffset < rawPage.endCharIndex &&
-            n.endCharOffset > rawPage.startCharIndex)
-        .toList();
-    if (pageNotes.isEmpty) return rawPage;
-
-    final enriched = <PageEntry>[];
-    for (final entry in rawPage.entries) {
-      if (entry.text == null || !entry.hasCharRange) {
-        enriched.add(entry);
-        continue;
-      }
-      final overlapping = pageNotes
-          .where((n) =>
-              n.startCharOffset < entry.endCharIndex! &&
-              n.endCharOffset > entry.startCharIndex!)
-          .toList();
-      if (overlapping.isEmpty) {
-        enriched.add(entry);
-        continue;
-      }
-      // 将 entry 的 segments 重新生成：按笔记边界切分，笔记区间加 backgroundColor
-      final newSegs = _splitEntrySegmentsByNotes(entry, overlapping);
-      enriched.add(PageEntry(
-        text: entry.text,
-        resourceHref: entry.resourceHref,
-        x: entry.x,
-        y: entry.y,
-        width: entry.width,
-        height: entry.height,
-        color: entry.color,
-        fontScale: entry.fontScale,
-        segments: newSegs,
-        isChapterStart: entry.isChapterStart,
-        isTableFrame: entry.isTableFrame,
-        isComment: entry.isComment,
-        letterGap: entry.letterGap,
-        startCharIndex: entry.startCharIndex,
-        endCharIndex: entry.endCharIndex,
-      ));
-    }
-    return PageInfo(
-      pageIndex: rawPage.pageIndex,
-      chapterIndex: rawPage.chapterIndex,
-      entries: enriched,
-      backgroundHref: rawPage.backgroundHref,
-      backgroundSize: rawPage.backgroundSize,
-      backgroundPosition: rawPage.backgroundPosition,
-      startCharIndex: rawPage.startCharIndex,
-      endCharIndex: rawPage.endCharIndex,
-    );
-  }
-
-  /// 笔记颜色索引 → 背景色 hex（#AARRGGBB，40% 透明度）
-  static String noteColorHex(int colorIndex) {
-    switch (colorIndex) {
-      case 1: return '#6681C784'; // 绿色
-      case 2: return '#6664B5F6'; // 蓝色
-      case 3: return '#66F48FB1'; // 粉色
-      case 4: return '#66E57373'; // 红色（直线）
-      default: return '#66FFD54F'; // 黄色
-    }
-  }
-
-  /// 将 entry 按笔记边界拆分 segments
-  List<EntrySegment> _splitEntrySegmentsByNotes(PageEntry entry, List<Note> notes) {
-    final text = entry.text!;
-    final entryStart = entry.startCharIndex!;
-    final textLen = text.length;
-    // 笔记边界点（entry 内相对偏移），排序去重
-    final boundaries = <int>{0, textLen};
-    for (final n in notes) {
-      final s = (n.startCharOffset - entryStart).clamp(0, textLen);
-      final e = (n.endCharOffset - entryStart).clamp(0, textLen);
-      if (s > 0) boundaries.add(s);
-      if (e < textLen) boundaries.add(e);
-    }
-    final sorted = boundaries.toList()..sort();
-    final segs = <EntrySegment>[];
-    for (var i = 0; i < sorted.length - 1; i++) {
-      final segStart = sorted[i];
-      final segEnd = sorted[i + 1];
-      if (segStart >= segEnd) continue;
-      final absStart = entryStart + segStart;
-      final absEnd = entryStart + segEnd;
-      // 找覆盖此段的笔记
-      Note? coveringNote;
-      for (final n in notes) {
-        if (n.startCharOffset <= absStart && n.endCharOffset >= absEnd) {
-          coveringNote = n;
-          break;
-        }
-      }
-      segs.add(EntrySegment(
-        start: segStart,
-        end: segEnd,
-        backgroundColor: coveringNote != null
-            ? noteColorHex(coveringNote.colorIndex)
-            : null,
-      ));
-    }
-    // 保留原有 segments 中非笔记覆盖的部分（EPUB 富文本）
-    if (entry.segments.isNotEmpty) {
-      // 简化：暂不合并原有 segments（笔记优先，原有富文本后续优化）
-      return segs;
-    }
-    return segs;
   }
 
   /// Load current page
@@ -939,15 +827,31 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // 锚点定位后页码可能与请求不同：同步回状态。
       // 跨章跳转：章节切换在此处与页面一次性提交（deferred commit）。
-      // A31-v6: 笔记高亮后处理——给 page entries 注入 backgroundColor segments
-      final enrichedPage = state.currentChapterNotes.isNotEmpty
-          ? _enrichPageWithNotes(page, state.currentChapterNotes)
-          : page;
-      state = state.copyWith(
-        currentPage: enrichedPage,
-        currentPageIndex: page.pageIndex,
-        currentChapterIndex: targetChapterIndex,
-      );
+      // A31 布局层单轨：先提交原始页，再按当前章笔记 enrich。
+      _rawCurrentPage = page;
+      _rememberRawPage(page);
+      // 换页清选区，避免上一页选区残留挡住本页长按/手势
+      clearSelection();
+      final chapterChanged =
+          targetChapterIndex != null && targetChapterIndex != originChapterIndex;
+      if (chapterChanged) {
+        // 换章：先落原始页（避免闪旧章笔记），再刷本章笔记并 enrich 提交
+        state = state.copyWith(
+          currentPage: page,
+          currentPageIndex: page.pageIndex,
+          currentChapterIndex: targetChapterIndex,
+        );
+        await _refreshCurrentChapterNotes(force: true);
+      } else {
+        final enrichedPage = state.currentChapterNotes.isNotEmpty
+            ? enrichPageWithNotes(page, state.currentChapterNotes)
+            : page;
+        state = state.copyWith(
+          currentPage: enrichedPage,
+          currentPageIndex: page.pageIndex,
+          currentChapterIndex: targetChapterIndex,
+        );
+      }
       readerTrace('page.load.commit', {
         'generation': generation,
         'pageId': readerPageId(page),
@@ -955,18 +859,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'range': '${page.startCharIndex}-${page.endCharIndex}',
       });
 
-      // A31: 章节切换时刷新笔记缓存（fire-and-forget，不阻塞页面显示）
-      if (targetChapterIndex != null && targetChapterIndex != originChapterIndex) {
-        _refreshCurrentChapterNotes();
-      }
-
       // 阶段1优化：立即预热当前页图片（fire-and-forget）
       // 在邻居页加载前启动，用户首屏图片零延迟
       _prewarmCurrentPageImages(page);
 
       // P1 接线层：发布三页结构态到 render store（fire-and-forget，
       // 当前页已就绪可渲染，邻居页加载不阻塞 UI）
-      _prepareAndPublishFrameSet(page);
+      // 必须传 state.currentPage（enrich 后）：传 raw 会让 _isStale 的
+      // identical 失配 → 永久 stale → frame set 滞后 → 翻页门控 identity mismatch
+      final pageForFrame = state.currentPage ?? page;
+      _prepareAndPublishFrameSet(pageForFrame);
 
       // EPUB 翻章预取（M6）：当前章已渲染，后台预计算下一章分页入缓存，
       // 翻章零延迟。fire-and-forget：失败/被前台让路均静默不影响阅读
@@ -1148,7 +1050,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
   }
 
-  /// 批次新鲜度校验：任一会话/位置/实例变化即视为陈旧
+  /// 批次新鲜度校验：会话/书/位置变化即陈旧。
+  ///
+  /// 页面实例用**身份**（章/页/锚点）比对，不用 identical：笔记 enrich
+  /// 会在同一身份上换新 PageEntry 实例，identical 会误判陈旧并卡死翻页门控。
   bool _isStale(
     int generation,
     int epoch,
@@ -1157,12 +1062,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
     int pageIndex,
     PageInfo currentPage,
   ) {
-    return generation != _requestGeneration ||
+    if (generation != _requestGeneration ||
         epoch != _sessionEpoch ||
         state.bookId != bookId ||
         state.currentChapterIndex != chapterIndex ||
-        state.currentPageIndex != pageIndex ||
-        !identical(state.currentPage, currentPage);
+        state.currentPageIndex != pageIndex) {
+      return true;
+    }
+    final live = state.currentPage;
+    if (live == null) return true;
+    return live.chapterIndex != currentPage.chapterIndex ||
+        live.pageIndex != currentPage.pageIndex ||
+        live.startCharIndex != currentPage.startCharIndex;
   }
 
   /// 构建页面帧（资源态先置 loading，预热后由 [_frameWithResources] 聚合）
@@ -1228,13 +1139,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 陈旧/失效场景的兜底发布：用 state.currentPage 现值构建 degraded
   /// FrameSet（邻居槽 pending、资源态 pending → 手势等待新批次）。
-  /// 仅在「store 无 frame 或已标脏，且没有更新的批次在途」时发布，
+  /// 仅在「store 无 frame、已标脏，或当前身份已落后于 state」时发布，
   /// 避免覆盖即将落地的新鲜批次。
   void _publishDegradedFromState() {
     if (_prepareInFlight > 1) return;
-    if (_renderStore.frameSet != null && !_renderStore.dirty) return;
+    final currentSet = _renderStore.frameSet;
     final current = state.currentPage;
     if (current == null) return;
+    if (currentSet != null && !_renderStore.dirty) {
+      // 身份仍对齐 → 不必 degraded 覆盖
+      if (currentSet.current.identity.matchesPage(current)) return;
+    }
     _publishPinned(FrameSet(
       setRevision: _renderStore.nextSetRevision(),
       current: PageFrame(
@@ -1408,8 +1323,42 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
   }
 
+  static String _pageCacheKey(int chapterIndex, int pageIndex) =>
+      '$chapterIndex/$pageIndex';
+
+  void _rememberRawPage(PageInfo raw) {
+    _rawPageCache[_pageCacheKey(raw.chapterIndex, raw.pageIndex)] = raw;
+    // 有界：只保留本章前后窗口，避免长读膨胀
+    if (_rawPageCache.length > 24) {
+      final keys = _rawPageCache.keys.toList();
+      for (var i = 0; i < 8; i++) {
+        _rawPageCache.remove(keys[i]);
+      }
+    }
+  }
+
+  /// 取章节笔记（当前章走内存缓存；邻居跨章查库）
+  Future<List<Note>> _notesForChapter(int chapterIndex) async {
+    if (chapterIndex == state.currentChapterIndex) {
+      return state.currentChapterNotes;
+    }
+    final filePath = state.filePath;
+    if (filePath == null) return const [];
+    return _db.notesOfChapter(filePath, chapterIndex);
+  }
+
+  /// FFI 原始页 → 带笔记 segments 的渲染页（邻居帧/当前页统一入口）
+  Future<PageInfo> _enrichRawPage(PageInfo raw) async {
+    _rememberRawPage(raw);
+    final notes = await _notesForChapter(raw.chapterIndex);
+    if (notes.isEmpty) return raw;
+    return enrichPageWithNotes(raw, notes);
+  }
+
   /// 加载邻居槽位：越界→outOfRange；FFI 异常→failed（永不静默 null）。
   /// 缺失原因必须明确，手势门控与降级发布的语义依赖槽位态。
+  ///
+  /// 邻居帧在入槽前完成笔记 enrich：动画 reveal / adopt 落地都带高亮。
   Future<FrameSlot> _loadNeighborSlot(int chapterIndex, int pageIndex) async {
     try {
       if (pageIndex < 0) {
@@ -1418,7 +1367,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         final prevChapter = chapterIndex - 1;
         final count = await _pageCountOf(prevChapter);
         if (count <= 0) return const FrameSlot.outOfRange();
-        final page = await _loadSinglePage(prevChapter, count - 1);
+        final raw = await _loadSinglePage(prevChapter, count - 1);
+        final page = await _enrichRawPage(raw);
         return FrameSlot.ready(
           _buildFrame(
             page,
@@ -1434,7 +1384,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         if (chapterIndex >= state.chapters.length - 1) {
           return const FrameSlot.outOfRange();
         }
-        final page = await _loadSinglePage(chapterIndex + 1, 0);
+        final raw = await _loadSinglePage(chapterIndex + 1, 0);
+        final page = await _enrichRawPage(raw);
         return FrameSlot.ready(
           _buildFrame(
             page,
@@ -1444,7 +1395,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         );
       }
 
-      final page = await _loadSinglePage(chapterIndex, pageIndex);
+      final raw = await _loadSinglePage(chapterIndex, pageIndex);
+      final page = await _enrichRawPage(raw);
       return FrameSlot.ready(
         _buildFrame(
           page,
@@ -1612,19 +1564,57 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// A31-v3: 当前章节的笔记（从 state 读取，Riverpod 响应式）
   List<Note> get currentChapterNotes => state.currentChapterNotes;
 
-  /// A31-v3: 刷新当前章节笔记缓存 → 写入 state（自动触发 UI 重建）
+  /// A31-v3: 刷新当前章节笔记缓存 → 写入 state，并从原始页重新 enrich
   Future<void> _refreshCurrentChapterNotes({bool force = false}) async {
     final filePath = state.filePath;
     final chapterIndex = state.currentChapterIndex;
     if (filePath == null) {
-      state = state.copyWith(currentChapterNotes: const []);
+      _rawCurrentPage = null;
       _cachedNotesChapterIndex = null;
+      state = state.copyWith(currentChapterNotes: const []);
       return;
     }
-    if (!force && _cachedNotesChapterIndex == chapterIndex) return; // 已缓存
+    if (!force && _cachedNotesChapterIndex == chapterIndex) return;
     final notes = await _db.notesOfChapter(filePath, chapterIndex);
     _cachedNotesChapterIndex = chapterIndex;
-    state = state.copyWith(currentChapterNotes: notes);
+    final raw = _rawCurrentPage;
+    final page = (raw != null && raw.chapterIndex == chapterIndex)
+        ? enrichPageWithNotes(raw, notes)
+        : state.currentPage;
+    state = state.copyWith(
+      currentChapterNotes: notes,
+      currentPage: page,
+    );
+    // 同步 frame set 的 current.page：否则动画/门控仍持旧实例，
+    // 翻页 identity 虽对齐但 segments 无笔记，且 settle 后闪旧帧
+    if (page != null) {
+      _syncFrameSetCurrentPage(page);
+    }
+  }
+
+  /// 把 FrameSet.current 的 page 换成同身份的新实例（笔记 re-enrich）。
+  /// 身份不同则不动（加载链会重新 prepare）。
+  void _syncFrameSetCurrentPage(PageInfo page) {
+    final set = _renderStore.frameSet;
+    if (set == null) return;
+    if (!set.current.identity.matchesPage(page)) return;
+    final rebuilt = PageFrame(
+      identity: set.current.identity,
+      configFingerprint: set.current.configFingerprint,
+      sessionEpoch: set.current.sessionEpoch,
+      requestGeneration: set.current.requestGeneration,
+      page: page,
+      manifest: set.current.manifest,
+      resourceState: set.current.resourceState,
+    );
+    _publishPinned(FrameSet(
+      setRevision: _renderStore.nextSetRevision(),
+      current: rebuilt,
+      previous: set.previous,
+      next: set.next,
+      configFingerprint: set.configFingerprint,
+      sessionEpoch: set.sessionEpoch,
+    ));
   }
 
   /// 添加笔记/划线（区间与已有笔记重叠时返回已有笔记 id，不新增）
@@ -1750,14 +1740,29 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _selectionTick.value++;
   }
 
-  /// 扩展选区（拖拽时调用）
+  /// 扩展选区尾端（end 手柄拖拽）
   void updateSelection(int charOffset) {
     if (_selectionStart == null) return;
-    // start 保持不变，end 随手指移动
     _selectionEnd = charOffset.clamp(
       _selectionStart! + 1,
       state.currentPage?.endCharIndex ?? charOffset + 1,
     );
+    _selectionTick.value++;
+  }
+
+  /// 拖拽 start 手柄：只改起点，**不重置 end**。
+  /// 越过 end 时区间翻转为 [end, finger+1)。
+  void updateSelectionStart(int charOffset) {
+    final end = _selectionEnd;
+    if (end == null) return;
+    final pageEnd = state.currentPage?.endCharIndex ?? end;
+    final (start, newEnd) = resolveSelectionStartDrag(
+      currentEnd: end,
+      charOffset: charOffset,
+      pageEnd: pageEnd,
+    );
+    _selectionStart = start;
+    _selectionEnd = newEnd;
     _selectionTick.value++;
   }
 
@@ -1801,48 +1806,40 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }
 
   /// A31-v5: 字符命中测试（使用缓存 TextPainter，避免重复 layout）
+  ///
+  /// [localPos] 为阅读区局部坐标。严格包围盒未命中时回退最近 entry
+  /// （按纵向距离），避免手指落在行间隙/行外时拖拽完全无响应。
   int? hitTestCharOffset(Offset localPos, PageInfo page) {
-    for (final entry in page.entries) {
-      final text = entry.text;
-      if (text == null || !entry.hasCharRange) continue;
-      // 命中 entry 包围盒
-      if (localPos.dx < entry.x ||
-          localPos.dx > entry.x + entry.width ||
-          localPos.dy < entry.y ||
-          localPos.dy > entry.y + entry.height) {
-        continue;
-      }
-      // 优先使用缓存的 TextPainter
-      TextPainter textPainter;
-      final cacheKey = '${entry.startCharIndex}';
-      final cached = _dragTextPainters[cacheKey];
-      if (cached != null) {
-        textPainter = cached;
-      } else {
-        // 缓存未命中时才创建（使用真实排版参数）
-        final baseStyle = TextStyle(
-          fontSize: fontSize * (entry.fontScale ?? 1.0),
-          height: lineHeight,
-          fontFamily: ReaderFont.family,
-          letterSpacing: entry.letterGap,
-        );
-        textPainter = TextPainter(
-          text: TextSpan(text: text, style: baseStyle),
-          textDirection: TextDirection.ltr,
-        )..layout(minWidth: 0, maxWidth: double.infinity);
-        // 不加入缓存（临时使用，避免泄漏）
-        final position = textPainter.getPositionForOffset(
-          Offset(localPos.dx - entry.x, localPos.dy - entry.y),
-        );
-        textPainter.dispose();
-        return entry.startCharIndex! + position.offset;
-      }
-      final position = textPainter.getPositionForOffset(
+    final entry = findEntryForHitTest(localPos, page.entries);
+    if (entry == null) return null;
+    return _charOffsetInEntry(entry, localPos);
+  }
+
+  int _charOffsetInEntry(PageEntry entry, Offset localPos) {
+    final text = entry.text!;
+    final cacheKey = '${entry.startCharIndex}';
+    final cached = _dragTextPainters[cacheKey];
+    if (cached != null) {
+      final position = cached.getPositionForOffset(
         Offset(localPos.dx - entry.x, localPos.dy - entry.y),
       );
       return entry.startCharIndex! + position.offset;
     }
-    return null;
+    final baseStyle = TextStyle(
+      fontSize: fontSize * (entry.fontScale ?? 1.0),
+      height: lineHeight,
+      fontFamily: ReaderFont.family,
+      letterSpacing: entry.letterGap,
+    );
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: baseStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(minWidth: 0, maxWidth: double.infinity);
+    final position = textPainter.getPositionForOffset(
+      Offset(localPos.dx - entry.x, localPos.dy - entry.y),
+    );
+    textPainter.dispose();
+    return entry.startCharIndex! + position.offset;
   }
 
   /// 将选区所在词扩展到词边界（中文按标点/空白分词）
@@ -2221,6 +2218,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
     ++_requestGeneration;
 
+    // 换页必清选区：否则 overlay 残留会挡住新手势/长按
+    clearSelection();
+
+    // 预载页已是邻居槽 enrich 后的实例；raw 从缓存恢复供后续 re-enrich
+    final rawKey = _pageCacheKey(chapterIndex, page.pageIndex);
+    _rawCurrentPage = _rawPageCache[rawKey] ?? page;
+
     // 先模型后 state：provisional 集合让门控立即与可见页对齐
     _publishPinned(FrameSet(
       setRevision: _renderStore.nextSetRevision(),
@@ -2235,6 +2239,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       currentPage: page,
       currentPageIndex: page.pageIndex,
     );
+    // 跨章 adopt 时刷新本章笔记缓存（fire-and-forget；同章无需）
+    if (chapterIndex != _cachedNotesChapterIndex) {
+      unawaited(_refreshCurrentChapterNotes(force: true));
+    }
     _prepareAndPublishFrameSet(page);
     _prefetchNextChapterEpub();
 
@@ -2427,6 +2435,201 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }
 }
 
+/// 选区命中：盒内优先，否则纵向最近的文本行（横向 48px 容差内）。
+/// 供 [ReaderNotifier.hitTestCharOffset] 与单测共用。
+PageEntry? findEntryForHitTest(Offset localPos, List<PageEntry> entries) {
+  PageEntry? nearest;
+  var nearestDy = double.infinity;
+  for (final entry in entries) {
+    if (entry.text == null || !entry.hasCharRange) continue;
+    final inBox = localPos.dx >= entry.x &&
+        localPos.dx <= entry.x + entry.width &&
+        localPos.dy >= entry.y &&
+        localPos.dy <= entry.y + entry.height;
+    if (inBox) return entry;
+    final midY = entry.y + entry.height / 2;
+    final dy = (localPos.dy - midY).abs();
+    final dx = localPos.dx < entry.x
+        ? entry.x - localPos.dx
+        : localPos.dx > entry.x + entry.width
+            ? localPos.dx - (entry.x + entry.width)
+            : 0.0;
+    if (dy < nearestDy && dx <= 48.0) {
+      nearestDy = dy;
+      nearest = entry;
+    }
+  }
+  return nearest;
+}
+
+/// 拖 start 手柄时解析合法 [start, end)。
+/// - 手指在 end 左侧：只动 start，end 不变
+/// - 手指越过 end：区间翻转为 [end, finger+1)
+(int, int) resolveSelectionStartDrag({
+  required int currentEnd,
+  required int charOffset,
+  required int pageEnd,
+}) {
+  if (pageEnd <= 0) return (0, 1);
+  final p = charOffset.clamp(0, pageEnd - 1);
+  if (p < currentEnd) {
+    return (p, currentEnd);
+  }
+  final start = currentEnd.clamp(0, pageEnd - 1);
+  final end = (p + 1).clamp(start + 1, pageEnd);
+  return (start, end);
+}
+
+/// 笔记颜色索引 → 背景色 hex（#AARRGGBB，约 40% 透明度）
+///
+/// colorIndex：0=黄 / 1=绿 / 2=蓝 / 3=粉 / 4=下划线（不使用本色）
+String noteColorHex(int colorIndex) {
+  switch (colorIndex) {
+    case 1:
+      return '#6681C784';
+    case 2:
+      return '#6664B5F6';
+    case 3:
+      return '#66F48FB1';
+    case 4:
+      return '#66E57373';
+    default:
+      return '#66FFD54F';
+  }
+}
+
+/// 笔记样式：下划线色用 segment.underline，其余用 backgroundColor
+({String? backgroundColor, bool underline}) noteSegmentStyle(int colorIndex) {
+  if (colorIndex == 4) {
+    return (backgroundColor: null, underline: true);
+  }
+  return (backgroundColor: noteColorHex(colorIndex), underline: false);
+}
+
+/// 布局层单轨：将当前章笔记按字符区间注入 PageInfo.segments。
+///
+/// - 与 EPUB 原有 segments **合并**（笔记覆盖背景/下划线，其余样式保留）
+/// - 不改几何；绘制端只读 segments，不再运行时按 notes 画矩形
+PageInfo enrichPageWithNotes(PageInfo rawPage, List<Note> notes) {
+  if (notes.isEmpty) return rawPage;
+  final pageNotes = notes
+      .where((n) =>
+          n.startCharOffset < rawPage.endCharIndex &&
+          n.endCharOffset > rawPage.startCharIndex)
+      .toList();
+  if (pageNotes.isEmpty) return rawPage;
+
+  final enriched = <PageEntry>[];
+  for (final entry in rawPage.entries) {
+    if (entry.text == null || !entry.hasCharRange) {
+      enriched.add(entry);
+      continue;
+    }
+    final overlapping = pageNotes
+        .where((n) =>
+            n.startCharOffset < entry.endCharIndex! &&
+            n.endCharOffset > entry.startCharIndex!)
+        .toList();
+    if (overlapping.isEmpty) {
+      enriched.add(entry);
+      continue;
+    }
+    enriched.add(_entryWithNoteSegments(entry, overlapping));
+  }
+  return PageInfo(
+    pageIndex: rawPage.pageIndex,
+    chapterIndex: rawPage.chapterIndex,
+    entries: enriched,
+    backgroundHref: rawPage.backgroundHref,
+    backgroundSize: rawPage.backgroundSize,
+    backgroundPosition: rawPage.backgroundPosition,
+    startCharIndex: rawPage.startCharIndex,
+    endCharIndex: rawPage.endCharIndex,
+  );
+}
+
+PageEntry _entryWithNoteSegments(PageEntry entry, List<Note> notes) {
+  final text = entry.text!;
+  final entryStart = entry.startCharIndex!;
+  final textLen = text.length;
+
+  final boundaries = <int>{0, textLen};
+  for (final n in notes) {
+    final s = (n.startCharOffset - entryStart).clamp(0, textLen);
+    final e = (n.endCharOffset - entryStart).clamp(0, textLen);
+    if (s > 0) boundaries.add(s);
+    if (e < textLen) boundaries.add(e);
+  }
+  for (final seg in entry.segments) {
+    final s = seg.start.clamp(0, textLen);
+    final e = seg.end.clamp(0, textLen);
+    if (s > 0) boundaries.add(s);
+    if (e < textLen) boundaries.add(e);
+  }
+  final sorted = boundaries.toList()..sort();
+
+  EntrySegment? originalCovering(int segStart, int segEnd) {
+    for (final seg in entry.segments) {
+      if (seg.start <= segStart && seg.end >= segEnd) return seg;
+    }
+    return null;
+  }
+
+  Note? noteCovering(int segStart, int segEnd) {
+    final absStart = entryStart + segStart;
+    final absEnd = entryStart + segEnd;
+    for (final n in notes) {
+      if (n.startCharOffset <= absStart && n.endCharOffset >= absEnd) return n;
+    }
+    return null;
+  }
+
+  final segs = <EntrySegment>[];
+  for (var i = 0; i < sorted.length - 1; i++) {
+    final segStart = sorted[i];
+    final segEnd = sorted[i + 1];
+    if (segStart >= segEnd) continue;
+    final base = originalCovering(segStart, segEnd);
+    final note = noteCovering(segStart, segEnd);
+    if (base == null && note == null) continue;
+    final style = note != null
+        ? noteSegmentStyle(note.colorIndex)
+        : (backgroundColor: null, underline: false);
+    segs.add(EntrySegment(
+      start: segStart,
+      end: segEnd,
+      color: base?.color,
+      backgroundColor: style.backgroundColor ?? base?.backgroundColor,
+      fontScale: base?.fontScale,
+      bold: base?.bold ?? false,
+      italic: base?.italic ?? false,
+      underline: style.underline || (base?.underline ?? false),
+      letterSpacing: base?.letterSpacing,
+    ));
+  }
+  // 无边界交集时回落原 segments（避免误清 EPUB 富文本）
+  if (segs.isEmpty) {
+    return entry;
+  }
+  return PageEntry(
+    text: entry.text,
+    resourceHref: entry.resourceHref,
+    x: entry.x,
+    y: entry.y,
+    width: entry.width,
+    height: entry.height,
+    color: entry.color,
+    fontScale: entry.fontScale,
+    segments: segs,
+    isChapterStart: entry.isChapterStart,
+    isTableFrame: entry.isTableFrame,
+    isComment: entry.isComment,
+    letterGap: entry.letterGap,
+    startCharIndex: entry.startCharIndex,
+    endCharIndex: entry.endCharIndex,
+  );
+}
+
 /// 阅读状态（不可变快照）
 class ReadingState {
   final String? bookId;
@@ -2476,6 +2679,7 @@ class ReadingState {
       currentPage: currentPage ?? this.currentPage,
       isLoading: isLoading ?? this.isLoading,
       error: error ?? this.error,
+      currentChapterNotes: currentChapterNotes ?? this.currentChapterNotes,
     );
   }
 }
