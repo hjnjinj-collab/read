@@ -1801,6 +1801,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         child: ValueListenableBuilder<int>(
           valueListenable: notesTick,
           builder: (context, _, __) {
+            // A31-bugfix-v2 诊断日志
+            debugPrint(
+                '[A31-diag] composer builder fired: ${notifier.currentChapterNotes.length} notes for page ${pageInfo.chapterIndex}/${pageInfo.pageIndex}');
             return ReaderPageWidget(
               key: ValueKey(
                 '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',

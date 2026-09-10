@@ -1496,6 +1496,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _currentChapterNotes = await _db.notesOfChapter(filePath, chapterIndex);
     _cachedNotesChapterIndex = chapterIndex;
     notesTick.value++;
+    // A31-bugfix-v2 诊断日志
+    debugPrint(
+        '[A31-diag] notesTick=${notesTick.value} ch=$chapterIndex notes=${_currentChapterNotes.length}');
   }
 
   /// 添加笔记/划线（区间与已有笔记重叠时返回已有笔记 id，不新增）

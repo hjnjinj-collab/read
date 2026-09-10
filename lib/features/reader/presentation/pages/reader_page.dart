@@ -182,10 +182,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final notifier = ref.read(readerProvider.notifier);
     final page = notifier.state.currentPage;
 
-    // A31-bugfix: 选区已激活时，不做任何新手势处理（由 _onPointerMove/Up 处理扩展/清除）
-    if (notifier.hasSelection) return;
-
-    // A31-bugfix: 点击已有笔记高亮 → 弹出编辑菜单（不启动长按 Timer）
+    // A31-bugfix-v2: 点击已有笔记高亮 → 弹出编辑菜单（不启动长按 Timer）
     if (page != null) {
       final hitOffset = notifier.hitTestCharOffset(
         Offset(event.localPosition.dx, event.localPosition.dy),

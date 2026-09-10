@@ -118,6 +118,7 @@ class PagePainter extends CustomPainter {
       'page': '${pageInfo.chapterIndex}/${pageInfo.pageIndex}',
       'pageId': readerPageId(pageInfo),
       'entries': pageInfo.entries.length,
+      'notes': notes.length, // A31-bugfix-v2 诊断
       'fingerprint': readerPageFingerprint([
         ...pageInfo.entries
             .take(3)
