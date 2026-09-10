@@ -1630,12 +1630,42 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _selectionTick.value++;
   }
 
-  /// 字符命中测试：屏幕坐标 → 章内字符偏移
-  ///
-  /// 返回 null = 命中位置无文字（空白/图片/表格框）
+  /// A31-v5: 拖拽期间的 TextPainter 缓存（避免每次 PointerMove 都 layout）
+  final Map<String, TextPainter> _dragTextPainters = {};
+
+  /// 开始拖拽选区时预构建 TextPainter 缓存
+  void prepareDragCache(PageInfo page) {
+    clearDragCache();
+    for (final entry in page.entries) {
+      final text = entry.text;
+      if (text == null || !entry.hasCharRange) continue;
+      final baseStyle = TextStyle(
+        fontSize: fontSize * (entry.fontScale ?? 1.0),
+        height: lineHeight,
+        fontFamily: ReaderFont.family,
+        letterSpacing: entry.letterGap,
+      );
+      final tp = TextPainter(
+        text: TextSpan(text: text, style: baseStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: double.infinity);
+      _dragTextPainters['${entry.startCharIndex}'] = tp;
+    }
+  }
+
+  /// 清理拖拽缓存
+  void clearDragCache() {
+    for (final tp in _dragTextPainters.values) {
+      tp.dispose();
+    }
+    _dragTextPainters.clear();
+  }
+
+  /// A31-v5: 字符命中测试（使用缓存 TextPainter，避免重复 layout）
   int? hitTestCharOffset(Offset localPos, PageInfo page) {
     for (final entry in page.entries) {
-      if (entry.text == null || !entry.hasCharRange) continue;
+      final text = entry.text;
+      if (text == null || !entry.hasCharRange) continue;
       // 命中 entry 包围盒
       if (localPos.dx < entry.x ||
           localPos.dx > entry.x + entry.width ||
@@ -1643,22 +1673,34 @@ class ReaderNotifier extends Notifier<ReadingState> {
           localPos.dy > entry.y + entry.height) {
         continue;
       }
-      // 构建与绘制同参数的 TextPainter 做精确命中
-      final baseStyle = TextStyle(
-        fontSize: 18.0 * (entry.fontScale ?? 1.0),
-        height: 1.5,
-        fontFamily: ReaderFont.family,
-        letterSpacing: entry.letterGap,
-      );
-      final textPainter = TextPainter(
-        text: TextSpan(text: entry.text!, style: baseStyle),
-        textDirection: TextDirection.ltr,
-      )..layout(minWidth: 0, maxWidth: double.infinity);
+      // 优先使用缓存的 TextPainter
+      TextPainter textPainter;
+      final cacheKey = '${entry.startCharIndex}';
+      final cached = _dragTextPainters[cacheKey];
+      if (cached != null) {
+        textPainter = cached;
+      } else {
+        // 缓存未命中时才创建（使用真实排版参数）
+        final baseStyle = TextStyle(
+          fontSize: fontSize * (entry.fontScale ?? 1.0),
+          height: lineHeight,
+          fontFamily: ReaderFont.family,
+          letterSpacing: entry.letterGap,
+        );
+        textPainter = TextPainter(
+          text: TextSpan(text: text, style: baseStyle),
+          textDirection: TextDirection.ltr,
+        )..layout(minWidth: 0, maxWidth: double.infinity);
+        // 不加入缓存（临时使用，避免泄漏）
+        final position = textPainter.getPositionForOffset(
+          Offset(localPos.dx - entry.x, localPos.dy - entry.y),
+        );
+        textPainter.dispose();
+        return entry.startCharIndex! + position.offset;
+      }
       final position = textPainter.getPositionForOffset(
         Offset(localPos.dx - entry.x, localPos.dy - entry.y),
       );
-      textPainter.dispose();
-      // 偏移转章内绝对偏移
       return entry.startCharIndex! + position.offset;
     }
     return null;

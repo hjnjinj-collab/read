@@ -228,6 +228,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         if (hitOffset != null) {
           _longPressTriggered = true;
           final (wordStart, _) = notifier.expandToWordBoundary(hitOffset, page);
+          notifier.prepareDragCache(page); // A31-v5: 预构建 TextPainter 缓存
           notifier.beginSelection(wordStart);
         }
       });
@@ -308,13 +309,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     if (!_isDragging) return;
     _isDragging = false;
 
-    // A31: 长按选区模式下抬起不触发翻页
+    final notifier = ref.read(readerProvider.notifier);
+
+    // A31-v5: 长按选区模式下抬起 → 清理拖拽缓存
     if (_longPressTriggered) {
       _longPressTriggered = false;
       return;
     }
 
-    final notifier = ref.read(readerProvider.notifier);
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
     final moveDist = (dx.abs() + dy.abs());
