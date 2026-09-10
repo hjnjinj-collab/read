@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/database/app_database.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/reader_font.dart';
 import '../providers/reader_provider.dart';
@@ -34,8 +33,43 @@ class ReaderSelectionOverlay extends ConsumerStatefulWidget {
 }
 
 class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay> {
-  /// 当前正在拖拽哪个手柄（null=无拖拽）
-  int? _draggingHandle; // 0=start, 1=end
+  /// 拖拽中的手柄：0=start, 1=end；null=未拖
+  int? _draggingHandle;
+  int? _activePointerId;
+  final GlobalKey _stackKey = GlobalKey();
+
+  Offset? _pageLocalFromGlobal(Offset global) {
+    final box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return null;
+    return box.globalToLocal(global);
+  }
+
+  void _onHandlePointerDown(PointerDownEvent event, {required bool isStart}) {
+    final notifier = ref.read(readerProvider.notifier);
+    _draggingHandle = isStart ? 0 : 1;
+    _activePointerId = event.pointer;
+    notifier.prepareDragCache(widget.page);
+  }
+
+  void _onHandlePointerMove(PointerMoveEvent event, ReaderNotifier notifier) {
+    if (_activePointerId != event.pointer) return;
+    final local = _pageLocalFromGlobal(event.position);
+    if (local == null) return;
+    final hitOffset = notifier.hitTestCharOffset(local, widget.page);
+    if (hitOffset == null) return;
+    if (_draggingHandle == 0) {
+      notifier.updateSelectionStart(hitOffset);
+    } else if (_draggingHandle == 1) {
+      notifier.updateSelection(hitOffset);
+    }
+  }
+
+  void _onHandlePointerEnd(PointerEvent event) {
+    if (_activePointerId != null && event.pointer != _activePointerId) return;
+    _draggingHandle = null;
+    _activePointerId = null;
+    ref.read(readerProvider.notifier).clearDragCache();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,19 +143,28 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
     final toolbarX = ((firstCharTopLeft!.dx + lastCharBottomRight!.dx) / 2 - 120)
         .clamp(8.0, MediaQuery.of(context).size.width - 248);
 
-    return Stack(
-      children: [
-        // A31-v4: 高亮矩形由 SelectionHighlightLayer 独立绘制（在 reader_page Stack 中），
-        // 这里只保留工具条和手柄，避免每次 selectionTick 变化都触发整页重绘
-        // 拖拽手柄
-        ..._buildHandles(rects, notifier),
-        // 浮动工具条
-        Positioned(
-          left: toolbarX,
-          top: toolbarY,
-          child: _buildToolbar(context, notifier),
+    return Positioned.fill(
+      key: _stackKey,
+      // 拖拽中吞掉底层翻页手势；未拖时手柄外区域放行
+      child: Listener(
+        behavior: _draggingHandle != null
+            ? HitTestBehavior.opaque
+            : HitTestBehavior.translucent,
+        onPointerMove: (e) => _onHandlePointerMove(e, notifier),
+        onPointerUp: _onHandlePointerEnd,
+        onPointerCancel: _onHandlePointerEnd,
+        child: Stack(
+          children: [
+            // 高亮由 SelectionHighlightLayer 绘制；此处只放手柄与工具条
+            ..._buildHandles(rects, notifier),
+            Positioned(
+              left: toolbarX,
+              top: toolbarY,
+              child: _buildToolbar(context, notifier),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -130,20 +173,20 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
     ReaderNotifier notifier,
   ) {
     final handles = <Widget>[];
-    // start 手柄：选区左上角
     final startRect = rects.first;
     handles.add(
       _buildHandle(
-        position: Offset(startRect.left - 1, startRect.bottom),
+        key: const ValueKey('sel-handle-start'),
+        position: Offset(startRect.left - 8, startRect.bottom - 14),
         isStart: true,
         notifier: notifier,
       ),
     );
-    // end 手柄：选区右下角
     final endRect = rects.last;
     handles.add(
       _buildHandle(
-        position: Offset(endRect.right - 12, endRect.bottom),
+        key: const ValueKey('sel-handle-end'),
+        position: Offset(endRect.right - 8, endRect.bottom - 14),
         isStart: false,
         notifier: notifier,
       ),
@@ -152,40 +195,34 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
   }
 
   Widget _buildHandle({
+    required Key key,
     required Offset position,
     required bool isStart,
     required ReaderNotifier notifier,
   }) {
     return Positioned(
+      key: key,
       left: position.dx,
-      top: position.dy - 4,
-      child: GestureDetector(
-        onPanStart: (_) => _draggingHandle = isStart ? 0 : 1,
-        onPanUpdate: (details) {
-          final page = widget.page;
-          final hitOffset = notifier.hitTestCharOffset(
-            details.localPosition + position,
-            page,
-          );
-          if (hitOffset == null) return;
-          if (isStart) {
-            if (hitOffset < notifier.selectionEnd!) {
-              notifier.beginSelection(hitOffset);
-            }
-          } else {
-            notifier.updateSelection(hitOffset);
-          }
-        },
-        onPanEnd: (_) => _draggingHandle = null,
-        child: Container(
-          width: 16,
-          height: 28,
-          decoration: BoxDecoration(
-            color: Colors.blue.shade600,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: CustomPaint(
-            painter: _HandlePainter(isStart: isStart),
+      top: position.dy,
+      child: Listener(
+        // 手柄热区放大，便于拇指按住
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (e) => _onHandlePointerDown(e, isStart: isStart),
+        child: SizedBox(
+          width: 28,
+          height: 36,
+          child: Center(
+            child: Container(
+              width: 16,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.blue.shade600,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: CustomPaint(
+                painter: _HandlePainter(isStart: isStart),
+              ),
+            ),
           ),
         ),
       ),
@@ -266,10 +303,8 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
       colorIndex: 0, // 黄色
     );
     notifier.clearSelection();
-    // P5: 划线成功后强制刷新当前页（_enrichPageWithNotes 重新注入高亮 segments）
-    if (resultId > 0) {
-      notifier.reloadCurrentPage();
-    }
+    // 布局层单轨：addNote 内部已 force 刷缓存并从 _rawCurrentPage re-enrich，
+    // 无需再整页 FFI 重载。
 
     // resultId == -1 → 添加失败；resultId 是已有笔记 id → 区间重叠未新增
     if (resultId > 0 && mounted) {
