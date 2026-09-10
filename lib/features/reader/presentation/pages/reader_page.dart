@@ -53,6 +53,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   int _pointerDownMs = 0;
   /// 选区扩展节流（60fps = 16ms）
   int _lastSelectionUpdateMs = 0;
+  /// A31-v6 P4: 笔记模式标志（激活后完全屏蔽翻页手势）
+  bool _isNoteMode = false;
 
   /// P4: 翻页合成器的 key，用于调用其方法
   final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
@@ -175,6 +177,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   // 全部使用 event.localPosition：与 CurlPainter 绘制坐标系一致
 
   void _onPointerDown(PointerDownEvent event) {
+    // A31-v6 P4: 笔记模式完全屏蔽翻页手势
+    if (_isNoteMode) {
+      _isDragging = true;
+      _dragStartX = event.localPosition.dx;
+      _dragStartY = event.localPosition.dy;
+      _dragLastX = event.localPosition.dx;
+      _dragLastY = event.localPosition.dy;
+      return;
+    }
     _isDragging = true;
     _dragStartX = event.localPosition.dx;
     _dragStartY = event.localPosition.dy;
@@ -227,6 +238,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         );
         if (hitOffset != null) {
           _longPressTriggered = true;
+          _isNoteMode = true; // P4: 激活笔记模式
           final (wordStart, _) = notifier.expandToWordBoundary(hitOffset, page);
           notifier.prepareDragCache(page); // A31-v5: 预构建 TextPainter 缓存
           notifier.beginSelection(wordStart);
@@ -321,11 +333,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final dy = _dragLastY - _dragStartY;
     final moveDist = (dx.abs() + dy.abs());
 
-    // A31-bugfix: 选区激活时，单击（几乎无移动）→ 清除选区；
+    // A31-bugfix: 选区激活时，单击（几乎无移动）→ 清除选区并退出笔记模式；
     // 拖拽后抬起 → 保持选区（用户在扩展选区）
     if (notifier.hasSelection) {
       if (moveDist < 8.0) {
         notifier.clearSelection();
+        _isNoteMode = false; // P4: 单击空白退出笔记模式
+        notifier.clearDragCache();
       }
       return; // 选区模式下不触发翻页
     }

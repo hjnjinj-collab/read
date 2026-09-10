@@ -1667,6 +1667,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
     await _refreshCurrentChapterNotes(force: true);
   }
 
+  /// A31-v6 P5: 划线后强制刷新当前页
+  /// 触发 _loadCurrentPage 重载 → _enrichPageWithNotes 重新注入高亮 segments
+  Future<void> reloadCurrentPage() async {
+    final page = state.currentPage;
+    if (page == null) return;
+    await _loadCurrentPage();
+  }
+
   /// A31-bugfix: 查找包含指定字符偏移的已有笔记（null=无笔记覆盖）
   Note? noteAtCharOffset(int charOffset) {
     for (final n in state.currentChapterNotes) {

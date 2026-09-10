@@ -266,6 +266,10 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
       colorIndex: 0, // 黄色
     );
     notifier.clearSelection();
+    // P5: 划线成功后强制刷新当前页（_enrichPageWithNotes 重新注入高亮 segments）
+    if (resultId > 0) {
+      notifier.reloadCurrentPage();
+    }
 
     // resultId == -1 → 添加失败；resultId 是已有笔记 id → 区间重叠未新增
     if (resultId > 0 && mounted) {
