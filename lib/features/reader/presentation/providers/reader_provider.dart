@@ -1482,21 +1482,23 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 当前章节的笔记（用于渲染高亮；带缓存）
   List<Note> get currentChapterNotes => List.unmodifiable(_currentChapterNotes);
 
-  /// 刷新当前章节笔记缓存（章节切换时调用）
-  Future<void> _refreshCurrentChapterNotes() async {
+  /// 刷新当前章节笔记缓存（章节切换时调用；force=true 时强制重新查询）
+  Future<void> _refreshCurrentChapterNotes({bool force = false}) async {
     final filePath = state.filePath;
     final chapterIndex = state.currentChapterIndex;
     if (filePath == null) {
       _currentChapterNotes = [];
       _cachedNotesChapterIndex = null;
+      notesTick.value++;
       return;
     }
-    if (_cachedNotesChapterIndex == chapterIndex) return; // 已缓存
+    if (!force && _cachedNotesChapterIndex == chapterIndex) return; // 已缓存
     _currentChapterNotes = await _db.notesOfChapter(filePath, chapterIndex);
     _cachedNotesChapterIndex = chapterIndex;
+    notesTick.value++;
   }
 
-  /// 添加笔记/划线
+  /// 添加笔记/划线（区间与已有笔记重叠时返回已有笔记 id，不新增）
   Future<int> addNote({
     required int chapterIndex,
     required int startCharOffset,
@@ -1507,6 +1509,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
   }) async {
     final filePath = state.filePath;
     if (filePath == null) return -1;
+
+    // A31-bugfix: 区间查重——与已有笔记重叠则不新增
+    if (chapterIndex == state.currentChapterIndex) {
+      for (final n in _currentChapterNotes) {
+        if (startCharOffset < n.endCharOffset &&
+            endCharOffset > n.startCharOffset) {
+          return n.id; // 重叠，返回已有笔记 id
+        }
+      }
+    }
+
     final id = await _db.addNote(
       bookPath: filePath,
       chapterIndex: chapterIndex,
@@ -1516,9 +1529,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
       colorIndex: colorIndex,
       note: note,
     );
-    // 如果是当前章节，刷新缓存
+    // 如果是当前章节，强制刷新缓存
     if (chapterIndex == state.currentChapterIndex) {
-      await _refreshCurrentChapterNotes();
+      await _refreshCurrentChapterNotes(force: true);
     }
     return id;
   }
@@ -1526,15 +1539,23 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 更新笔记文本
   Future<void> updateNoteText(int id, String noteText) async {
     await _db.updateNoteText(id, noteText);
-    // 刷新当前章节缓存
-    await _refreshCurrentChapterNotes();
+    await _refreshCurrentChapterNotes(force: true);
   }
 
   /// 删除笔记
   Future<void> deleteNote(int id) async {
     await _db.deleteNote(id);
-    // 刷新当前章节缓存
-    await _refreshCurrentChapterNotes();
+    await _refreshCurrentChapterNotes(force: true);
+  }
+
+  /// A31-bugfix: 查找包含指定字符偏移的已有笔记（null=无笔记覆盖）
+  Note? noteAtCharOffset(int charOffset) {
+    for (final n in _currentChapterNotes) {
+      if (charOffset >= n.startCharOffset && charOffset < n.endCharOffset) {
+        return n;
+      }
+    }
+    return null;
   }
 
   /// 跳转到笔记位置（复用书签跳转机制）
@@ -2277,6 +2298,10 @@ class ReadingState {
 }
 
 // Provider
+/// A31-bugfix: 笔记变更全局重绘 tick（仿 imageReadyTick 模式）
+/// addNote/updateNoteText/deleteNote 后自增，驱动 PagePainter 重绘
+final notesTick = ValueNotifier<int>(0);
+
 final bookServiceProvider = Provider((ref) => BookService());
 
 final readerProvider = NotifierProvider<ReaderNotifier, ReadingState>(() {

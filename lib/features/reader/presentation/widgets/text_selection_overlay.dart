@@ -260,10 +260,11 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
   }
 
   /// 直接划线（默认黄色高亮，无备注）
+  /// A31-bugfix: 选区与已有笔记重叠 → 打开已有笔记编辑而非重复添加
   Future<void> _addHighlight(ReaderNotifier notifier) async {
     final excerpt = notifier.selectionText;
     if (excerpt.isEmpty) return;
-    await notifier.addNote(
+    final resultId = await notifier.addNote(
       chapterIndex: widget.page.chapterIndex,
       startCharOffset: notifier.selectionStart!,
       endCharOffset: notifier.selectionEnd!,
@@ -271,6 +272,23 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
       colorIndex: 0, // 黄色
     );
     notifier.clearSelection();
+
+    // resultId == -1 → 添加失败；resultId 是已有笔记 id → 区间重叠未新增
+    if (resultId > 0 && mounted) {
+      // 检查是否是已有笔记（区间重叠）——查一下这个 id 对应的笔记
+      final existing = notifier.currentChapterNotes
+          .where((n) => n.id == resultId)
+          .firstOrNull;
+      if (existing != null && existing.excerpt != excerpt) {
+        // 已有不同摘录的笔记覆盖此区间 → 提示用户
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('该段已有笔记，未重复添加'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   /// 添加备注（弹出编辑框）

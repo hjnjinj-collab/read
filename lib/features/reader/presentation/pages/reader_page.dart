@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/database/app_database.dart' show Note;
 import '../../../../core/models/simple_models.dart';
 import '../providers/reader_provider.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
@@ -78,6 +79,93 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     });
   }
 
+  /// A31-bugfix: 点击已有笔记高亮 → 弹出编辑/删除菜单
+  void _showNoteEditMenu(Note note) {
+    final notifier = ref.read(readerProvider.notifier);
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 摘录预览
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                note.excerpt.length > 80
+                    ? '${note.excerpt.substring(0, 80)}…'
+                    : note.excerpt,
+                style: const TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+            ),
+            if (note.note != null && note.note!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  '备注：${note.note}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.edit, size: 20),
+              title: const Text('编辑备注'),
+              dense: true,
+              onTap: () {
+                Navigator.pop(ctx);
+                _editNoteDialog(note);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline,
+                  size: 20, color: Colors.red),
+              title: const Text('删除笔记', style: TextStyle(color: Colors.red)),
+              dense: true,
+              onTap: () {
+                Navigator.pop(ctx);
+                notifier.deleteNote(note.id);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A31-bugfix: 编辑笔记备注对话框
+  void _editNoteDialog(Note note) {
+    final notifier = ref.read(readerProvider.notifier);
+    final controller = TextEditingController(text: note.note ?? '');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('编辑备注'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: '输入备注…',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              notifier.updateNoteText(note.id, controller.text);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── P2+P4: 手势处理（驱动 PageTurnComposer） ──
   // 全部使用 event.localPosition：与 CurlPainter 绘制坐标系一致
 
@@ -91,13 +179,45 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     _releaseVelocityX = 0;
     _longPressTriggered = false;
 
-    // A31: 启动长按计时器（500ms 后触发选区）
     final notifier = ref.read(readerProvider.notifier);
     final page = notifier.state.currentPage;
-    if (page != null && !notifier.hasSelection) {
+
+    // A31-bugfix: 选区已激活时，不做任何新手势处理（由 _onPointerMove/Up 处理扩展/清除）
+    if (notifier.hasSelection) return;
+
+    // A31-bugfix: 点击已有笔记高亮 → 弹出编辑菜单（不启动长按 Timer）
+    if (page != null) {
+      final hitOffset = notifier.hitTestCharOffset(
+        Offset(event.localPosition.dx, event.localPosition.dy),
+        page,
+      );
+      if (hitOffset != null) {
+        final existingNote = notifier.noteAtCharOffset(hitOffset);
+        if (existingNote != null) {
+          // 短暂延迟等待抬起——若用户拖拽则取消（不是单击）
+          _longPressTimer?.cancel();
+          _longPressTimer = Timer(const Duration(milliseconds: 200), () {
+            if (!_isDragging) {
+              // 手指已抬起且未拖拽 → 单击已有笔记
+              _showNoteEditMenu(existingNote);
+            }
+          });
+          return; // 不启动长按选区 Timer
+        }
+      }
+    }
+
+    // A31-bugfix: 启动长按计时器（500ms 后触发选区）
+    // 互斥规则：Timer 到时检查翻页是否已启动——已启动则放弃选区
+    if (page != null) {
       _longPressTimer?.cancel();
       _longPressTimer = Timer(const Duration(milliseconds: 500), () {
         if (!_isDragging) return; // 手指已抬起
+        // 模式互斥：翻页拖拽已启动 → 不激活选区
+        final composerIdle = _composerKey.currentState?.isIdle ?? true;
+        final composerPending =
+            _composerKey.currentState?.hasPendingTurn ?? false;
+        if (!composerIdle || composerPending) return;
         final hitOffset = notifier.hitTestCharOffset(
           Offset(_dragStartX, _dragStartY),
           page,
@@ -126,8 +246,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     final notifier = ref.read(readerProvider.notifier);
 
-    // A31: 如果长按已触发选区，拖拽更新选区 end
-    if (_longPressTriggered && notifier.hasSelection) {
+    // A31-bugfix: 选区已激活 → 拖拽扩展选区，不翻页
+    // （无论本次长按还是已有选区，拖拽都用于扩展）
+    if (notifier.hasSelection) {
       final page = notifier.state.currentPage;
       if (page != null) {
         final hitOffset = notifier.hitTestCharOffset(local, page);
@@ -136,12 +257,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         }
       }
       return; // 选区模式下不触发翻页
-    }
-
-    // 如果已有选区（非本次长按），点选区外取消
-    if (notifier.hasSelection && !_longPressTriggered) {
-      notifier.clearSelection();
-      return;
     }
 
     // 首次移动时确定方向并通知 composer 开始拖拽
@@ -157,6 +272,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       final direction = dx > 0 ? PageDirection.prev : PageDirection.next;
       // 竖向意图压倒横向时不启动
       if (dy.abs() <= distance * 1.5) {
+        // A31-bugfix: 翻页拖拽启动 → 取消长按 Timer（模式互斥）
+        _longPressTimer?.cancel();
         _composerKey.currentState?.startDrag(
           direction,
           Offset(_dragStartX, _dragStartY),
@@ -187,15 +304,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
 
     final notifier = ref.read(readerProvider.notifier);
-
-    // A31: 已有选区时，抬起点击选区外取消选区
-    if (notifier.hasSelection) {
-      notifier.clearSelection();
-      return;
-    }
-
     final dx = _dragLastX - _dragStartX;
     final dy = _dragLastY - _dragStartY;
+    final moveDist = (dx.abs() + dy.abs());
+
+    // A31-bugfix: 选区激活时，单击（几乎无移动）→ 清除选区；
+    // 拖拽后抬起 → 保持选区（用户在扩展选区）
+    if (notifier.hasSelection) {
+      if (moveDist < 8.0) {
+        notifier.clearSelection();
+      }
+      return; // 选区模式下不触发翻页
+    }
 
     // 单次手势判定（此前重复计算两遍，已合并）
     final result = resolveGesture(

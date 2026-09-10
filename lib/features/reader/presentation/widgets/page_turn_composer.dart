@@ -1795,20 +1795,25 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       if (mismatch) {
         return const SizedBox.expand();
       }
+      // A31-bugfix: notesTick 驱动重绘——笔记增删改后 ValueListenableBuilder
+      // 重建 → 新 notes 传入 PagePainter → shouldRepaint 命中 → 高亮更新
       return RepaintBoundary(
-        child: ReaderPageWidget(
-          // 页面 identity 变化时强制替换 StatefulWidget，避免动画 CustomPaint
-          // 切回普通页面时复用旧页面节点/旧 repaint notifier。
-          key: ValueKey(
-            '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
-          ),
-          pageInfo: pageInfo,
-          applyBold: notifier.boldEnabled,
-          applyItalic: notifier.italicEnabled,
-          applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
-          baseFontSize: notifier.fontSize,
-          baseLineHeight: notifier.lineHeight,
-          notes: notifier.currentChapterNotes,
+        child: ValueListenableBuilder<int>(
+          valueListenable: notesTick,
+          builder: (context, _, __) {
+            return ReaderPageWidget(
+              key: ValueKey(
+                '${pageInfo.chapterIndex}/${pageInfo.pageIndex}/${readerPageId(pageInfo)}',
+              ),
+              pageInfo: pageInfo,
+              applyBold: notifier.boldEnabled,
+              applyItalic: notifier.italicEnabled,
+              applyTitleBold: notifier.boldEnabled && !notifier.renderAsEpub,
+              baseFontSize: notifier.fontSize,
+              baseLineHeight: notifier.lineHeight,
+              notes: notifier.currentChapterNotes,
+            );
+          },
         ),
       );
     });
