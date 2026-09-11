@@ -849,14 +849,18 @@ pub fn batch_locate_notes(
         punctuation_compress: effective_punct_compress(),
     };
 
-    // 获取书籍
-    let books = BOOKS.read().map_err(|e| anyhow::anyhow!("锁失败: {}", e))?;
-    let handle = books
-        .get(&book_id)
-        .ok_or_else(|| anyhow::anyhow!("书籍未找到: {}", book_id))?;
+    // 获取书籍（只探测格式，**不得**在持锁期间调用会再取 BOOKS 的 API——
+    // RwLock 非可重入，否则 EPUB 批量定位死锁并拖死后续 parse/release）
+    let is_structured = {
+        let books = BOOKS.read().map_err(|e| anyhow::anyhow!("锁失败: {}", e))?;
+        let handle = books
+            .get(&book_id)
+            .ok_or_else(|| anyhow::anyhow!("书籍未找到: {}", book_id))?;
+        handle.structured.is_some()
+    };
 
     // 分路径（EPUB 用结构化路径，TXT 用传统路径）
-    if handle.structured.is_some() {
+    if is_structured {
         // EPUB 路径：获取结构化分页并批量定位
         let page_count = get_page_count_structured(
             book_id.clone(),

@@ -241,9 +241,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         if (hitOffset != null) {
           _longPressTriggered = true;
           _isNoteMode = true; // P4: 激活笔记模式
-          final (wordStart, _) = notifier.expandToWordBoundary(hitOffset, page);
+          final (wordStart, wordEnd) =
+              notifier.expandToWordBoundary(hitOffset, page);
           notifier.prepareDragCache(page); // A31-v5: 预构建 TextPainter 缓存
-          notifier.beginSelection(wordStart);
+          // 词边界整词选中，避免摘录只剩首字
+          notifier.beginSelection(wordStart, end: wordEnd);
         }
       });
     }

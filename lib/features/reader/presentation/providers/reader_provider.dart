@@ -1702,7 +1702,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
               pageFillThreshold: _pageFillThreshold,
               showComments: _showComments,
             )
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(milliseconds: 800));
         for (var i = 0; i < chapterNotes.length; i++) {
           result[chapterNotes[i].id] = i < pages.length ? pages[i] : null;
         }
@@ -1951,10 +1951,15 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return buffer.toString();
   }
 
-  /// 开始选区（长按命中时调用）
-  void beginSelection(int charOffset) {
+  /// 开始选区（长按命中时调用）。[end] 为空时默认单字符；长按应传入词边界终点，
+  /// 否则划线摘录只剩首字。
+  void beginSelection(int charOffset, {int? end}) {
     _selectionStart = charOffset;
-    _selectionEnd = charOffset + 1;
+    final maxEnd = state.currentPage?.endCharIndex;
+    var newEnd = end ?? (charOffset + 1);
+    if (newEnd <= charOffset) newEnd = charOffset + 1;
+    if (maxEnd != null && newEnd > maxEnd) newEnd = maxEnd;
+    _selectionEnd = newEnd;
     _selectionTick.value++;
   }
 
