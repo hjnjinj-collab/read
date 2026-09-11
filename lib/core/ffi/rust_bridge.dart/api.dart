@@ -82,7 +82,7 @@ Future<void> clearContentCleaningOptions() => RustLib.instance.api.crateApiClear
 ///
 /// Dart 侧调用：用户在设置 UI 修改缩进/重分段模式/切分阈值时，
 /// 通过此函数同步 Rust 全局设置，随后 FFI 分页调用自动应用。
-/// 阈值钳制在 [20, 2000]，防病态输入（过小退化为逐句切分、过大等同不切）。
+/// 阈值钳制在 [5, 200]，防病态输入（过小退化为逐句切分、过大等同不切）。
 Future<void> setParagraphFormatSettings({
   required bool enableIndent,
   required int indentSizeChars,
@@ -578,6 +578,11 @@ Future<List<SearchHit>> searchInBook({
 
 /// Release book from memory
 Future<void> releaseBook({required String bookId}) => RustLib.instance.api.crateApiReleaseBook(bookId: bookId);
+
+/// 清空指定书的结构化分页缓存（EPUB）。
+/// Dart 首翻两遍：喂入 MeasureCache 后调用，强制以 Skia 宽重排。
+Future<void> clearStructuredPaginationCache({required String bookId}) =>
+    RustLib.instance.api.crateApiClearStructuredPaginationCache(bookId: bookId);
 
 /// Load book source from JSON string
 /// Returns book source URL as identifier

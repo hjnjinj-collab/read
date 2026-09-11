@@ -108,6 +108,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 身份 → FFI 原始页缓存（邻居/预载用）。翻页 adopt 后可恢复 raw 供 re-enrich。
   final Map<String, PageInfo> _rawPageCache = <String, PageInfo>{};
 
+  /// EPUB 首翻 MeasureCache 已 warm 的章（bookId/chapterIndex）
+  final Set<String> _measureWarmedChapters = <String>{};
+
   // A31: 文本选区状态（长按选择 + 拖拽扩展）
   int? _selectionStart;
   int? _selectionEnd;
@@ -816,7 +819,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
     try {
       // 分流：EPUB 结构化分页 / TXT 文本分页
-      final PageInfo page;
+      var page;
       if (_isEpub) {
         // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
         int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -847,6 +850,38 @@ class ReaderNotifier extends Notifier<ReadingState> {
           reSegment: _reSegment, // 统一智能分段：EPUB 与 TXT 同核
           segmentRules: _segmentRules,
         );
+        // 首翻两遍：喂入 Skia 前缀宽后清 structured 缓存重排一次，
+        // 使本章断行与 TXT 同级（MeasureCache 命中 = 实测宽）
+        final warmKey = '$requestedBookId/$requestedChapterIndex';
+        if (!_measureWarmedChapters.contains(warmKey)) {
+          _feedPageMeasurePrefixes(page);
+          await MeasureTextService.instance.flushToRust();
+          _measureWarmedChapters.add(warmKey);
+          await _bookService.clearStructuredPaginationCache(requestedBookId);
+          page = await _bookService.getPageStructured(
+            requestedBookId,
+            requestedChapterIndex,
+            requestedPageIndex,
+            width: _screenWidth,
+            height: _screenHeight,
+            fontSize: _fontSize,
+            lineHeightMultiplier: _lineHeight,
+            paddingLeft: _paddingHorizontal,
+            paddingTop: _paddingVertical,
+            paddingRight: _paddingHorizontal,
+            paddingBottom: _paddingVertical,
+            fontName: ReaderFont.family,
+            anchorCharOffset: anchorCharOffset,
+            chineseConvert: chineseConvertCode,
+            pageFillThreshold: _pageFillThreshold,
+            showComments: _showComments,
+            paraFormatHash: _paraFormatHash,
+            removeDuplicateTitle: _removeDuplicateTitle,
+            replaceRules: _replaceRules,
+            reSegment: _reSegment,
+            segmentRules: _segmentRules,
+          );
+        }
       } else {
         // 转换简繁设置为数字代码
         int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -2296,6 +2331,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// M8-P4：排版参数变更时清空页数缓存
   void _invalidatePageCountCache() {
     _chapterPageCounts.clear();
+  }
+
+  /// EPUB 首翻：把本页各行前缀喂入 MeasureTextService（与绘制路径同 style）
+  void _feedPageMeasurePrefixes(PageInfo page) {
+    MeasureTextService.instance.configure(
+      fontFamily: ReaderFont.family,
+      fontSize: _fontSize,
+    );
+    for (final e in page.entries) {
+      final t = e.text;
+      if (t == null || t.isEmpty) continue;
+      MeasureTextService.instance.feedPageTextsWithPrefixes(t);
+    }
   }
 
   /// Frame 失效统一入口：推进会话世代，旧 FrameSet 与待决手势全部作废。

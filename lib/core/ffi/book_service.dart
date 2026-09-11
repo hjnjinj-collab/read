@@ -432,6 +432,11 @@ class BookService {
     await rust_api.releaseBook(bookId: bookId);
   }
 
+  /// 清空 EPUB 结构化分页缓存（首翻 MeasureCache 两遍用）
+  Future<void> clearStructuredPaginationCache(String bookId) async {
+    await rust_api.clearStructuredPaginationCache(bookId: bookId);
+  }
+
   /// A30：书内全文搜索（单次异步 FFI，全书扫描/匹配全在 Rust 线程池执行，
   /// UI 线程零参与）。命中词自动叠加双向简繁变体；超时/命中上限由 Rust
   /// 内置预算控制。

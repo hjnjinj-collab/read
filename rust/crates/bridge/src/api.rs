@@ -3479,6 +3479,13 @@ pub fn release_book(book_id: String) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 清空指定书的结构化分页缓存（EPUB）。
+/// Dart 首翻两遍：喂入 MeasureCache 后调用，强制以 Skia 宽重排。
+pub fn clear_structured_pagination_cache(book_id: String) -> anyhow::Result<()> {
+    clear_structured_pagination_cache_for_book(&book_id);
+    Ok(())
+}
+
 // ===== 书源解析引擎 API =====
 
 /// Load book source from JSON string

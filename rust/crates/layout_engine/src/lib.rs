@@ -231,6 +231,8 @@ struct LaidLine {
     newlines_before: usize,
     /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行）
     letter_gap: f32,
+    /// A33：本行字号倍率（块级 × 行内 run max）；行高 = font_size × line_h × scale
+    scale: f32,
 }
 
 /// 表格输入（原子排版：列宽提示 + 单元格文本项序列）
@@ -649,28 +651,42 @@ impl LayoutEngine {
                     if laid.is_empty() {
                         continue;
                     }
-                    // 行高取段落内最大字号倍率（行内 run 可能超过块级）
-                    let para_max_scale = item
-                        .font_scale
-                        .unwrap_or(1.0)
-                        .max(item.runs.iter().filter_map(|r| r.font_scale).fold(1.0, f32::max));
-                    // 本章说：固定小字倍率覆盖 para_max_scale；正常段落用 para_max_scale
-                    let effective_scale = if item.is_comment { 0.7 } else { para_max_scale };
-                    // P2：行高倍率——书内显式 line-height 优先，未声明用用户全局
-                    let line_h = self.config.font_size
-                        * item.line_height.unwrap_or(self.config.line_height_multiplier)
-                        * effective_scale;
+                    // A33：行高基准 = font_size × 书内/全局行高倍率；
+                    // 每行再乘自身 scale。本章说强制 0.7 **覆盖**（不得再乘
+                    // CSS scale——否则与 Dart 绘制 font_scale=0.7 双重缩小）。
+                    let line_h_base = self.config.font_size
+                        * item.line_height.unwrap_or(self.config.line_height_multiplier);
+                    let line_h_of = |scale: f32| {
+                        if item.is_comment {
+                            line_h_base * 0.7
+                        } else {
+                            line_h_base * scale.max(1e-6)
+                        }
+                    };
+                    // 段首 fit 估计用行 scale 最大值（偏保守，避免少放行）
+                    let para_max_scale = laid
+                        .iter()
+                        .map(|l| l.scale)
+                        .fold(0.0f32, f32::max)
+                        .max(1.0);
+                    let line_h = line_h_of(para_max_scale);
 
                     // M9 P5：首行缩进 px（em × 基准字号）
                     let indent_px = item.indent_first_line_em.unwrap_or(0.0) * self.config.font_size;
 
                     // 段前间距（em → px）：页首折叠
+                    // A33 页尾折叠：预加后若首行放不下，不计入段前距（避免虚增 current_y）
                     let space_before = if entries.is_empty() && text_lines_on_page == 0 {
                         0.0
                     } else {
                         item.spacing_before_em * self.config.font_size
                     };
-                    current_y += space_before;
+                    if space_before > 0.0 {
+                        let first_h = laid.first().map(|l| line_h_of(l.scale)).unwrap_or(line_h);
+                        if current_y + space_before + first_h <= bottom_limit + 0.5 {
+                            current_y += space_before;
+                        }
+                    }
 
                     // M9 P2 场景 C：标题孤立避免
                     // 标题特征：font_scale > 1.0 或有段前间距（M8 标题分级设置）
@@ -738,10 +754,12 @@ impl LayoutEngine {
                         }
                     }
                     for (line_idx, line) in laid.into_iter().enumerate() {
+                        // A33：逐行真实行高（scale / comment）
+                        let line_h_i = line_h_of(line.scale);
                         // P4 修复：0.5px 容差——cap 用乘法（start + fit×line_h）、
                         // current_y 用逐行累加，浮点 ULP 漂移会让「整段恰好 fit」
                         // 的段落末行被判越界甩到下页（分页碎片化回归根因）
-                        if current_y + line_h > para_bottom_limit + 0.5
+                        if current_y + line_h_i > para_bottom_limit + 0.5
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
                         {
                             break_page!();
@@ -786,18 +804,18 @@ impl LayoutEngine {
                             x,
                             y: current_y,
                             width: w_report, // M11+12 实测宽；P3 悬挂行跳过钳制
-                            height: line_h,
+                            height: line_h_i,
                             // 本章说：灰色小字；非注释走原始色
                             color: if item.is_comment {
                                 Some("#888888".to_string())
                             } else {
                                 item.color.clone()
                             },
-                            // 本章说：强制固定小字号覆盖
+                            // 本章说：强制固定小字号覆盖；否则上报本行真实 scale
                             font_scale: if item.is_comment {
                                 Some(0.7)
                             } else {
-                                (para_max_scale != 1.0).then_some(para_max_scale)
+                                (line.scale != 1.0).then_some(line.scale)
                             },
                             segments,
                             letter_gap: gap,
@@ -807,7 +825,7 @@ impl LayoutEngine {
                             end_char_index: line_ce,
                         }));
                         text_lines_on_page += 1;
-                        current_y += line_h;
+                        current_y += line_h_i;
                     }
                     // 段后间距（em → px）：页首自动折叠已由段前处理。
                     // A25：页底折叠——底界处虚增 current_y 会侵蚀下段可用
@@ -1434,6 +1452,21 @@ impl LayoutEngine {
             .unwrap_or(1.0)
     }
 
+    /// A33：行内字符区间上的最大字号倍率（行高按此行真实 scale 计）
+    fn line_scale_at(item: &TextItem, start: usize, end: usize) -> f32 {
+        if end <= start {
+            return item.font_scale.unwrap_or(1.0);
+        }
+        let mut m = item.font_scale.unwrap_or(1.0);
+        for i in start..end {
+            let s = Self::scale_at(&item.runs, item.font_scale, i);
+            if s > m {
+                m = s;
+            }
+        }
+        m
+    }
+
     /// P3：行宽上报——悬挂行（压缩开关开 + 行尾可压缩标点）跳过
     /// content_width 钳制，上报 raw 宽。若仍钳制，Dart 端 2% 超宽检查
     /// （naturalWidth > width×1.02）会触发整行 canvas.scale 缩小而非悬挂。
@@ -1500,205 +1533,109 @@ impl LayoutEngine {
             .collect()
     }
 
-    /// 样式化段落排版：按逐字倍率测量换行，产出带实测宽度与段落内
-    /// 字符区间的行列表。与 layout_paragraph 的差异：支持 \n 显式断行、
-    /// 字号缩放测量、记录行区间供分段映射。TXT 路径仍走旧函数不动。
+    /// EPUB styled 段落：MeasureCache 优先二分断行（与 TXT find_longest_fit 同精度模型）
     ///
-    /// M7-P4 断行精修与 TXT 同款：行首禁则回退 + 英文整词移行；
-    /// 片段搬移只在相邻行间进行，char 区间总量不变 ⇒ 锚点口径不变。
+    /// - 判宽走 `measure_styled_prefix_width`（按 run scale 分段查 MeasureCache，
+    ///   命中 = Skia 实测；miss 回退 ttf，永不阻塞 UI）
+    /// - 硬换行 `\n` 仍为段内硬边界
+    /// - 禁则/断词回退与 TXT `apply_linebreak_rules` 同规则
+    /// - 锚点：char_start/char_end/newlines_before 口径与旧实现一致
     fn layout_styled_paragraph(
         &self,
         item: &TextItem,
         max_width: f32,
-        font: &ab_glyph::FontRef<'static>,
+        _font: &ab_glyph::FontRef<'static>,
     ) -> Result<Vec<LaidLine>> {
-        // 2026-09-04 P2: 禁则表/词判定收口到 kinsoku 模块
         use kinsoku::{LINE_START_FORBIDDEN, LINE_END_FORBIDDEN, is_word_char};
 
-        let mut lines: Vec<LaidLine> = Vec::new();
-        // 当前行片段：(grapheme, 字符数, 判满有效宽度)
-        let mut pieces: Vec<(&str, usize, f32)> = Vec::new();
-        let mut line_chars = 0usize;
-        let mut current_width = 0.0f32;
-        let mut line_start = 0usize;
-        let mut gi = 0usize;
-        let mut pending_newlines = 0usize;
-        // M9 P5：首行缩进——首行可用宽度减去 indent_px
+        if item.text.is_empty() {
+            return Ok(Vec::new());
+        }
+        let chars: Vec<char> = item.text.chars().collect();
+        let total = chars.len();
         let indent_px = item.indent_first_line_em.unwrap_or(0.0) * self.config.font_size;
         let mut first_line = indent_px > 0.01;
-        let mut effective_max_width = if first_line {
-            (max_width - indent_px).max(1.0)
-        } else {
-            max_width
-        };
-        
-        // M12-v4 调试：仅输出前 3 次调用避免刷屏
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
-        let count = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
-        if count < 3 {
-            eprintln!("[M12-v4 #{count}] layout_styled_paragraph: max_width={:.1}, indent_px={:.1}, first_line={}, effective_max_width={:.1}", 
-                max_width, indent_px, first_line, effective_max_width);
-        }
-        
-        // M12-v3：eps 不在此处计算，而是在每次判定时动态计算，
-        // 以适应 effective_max_width 的变化（首行 vs 后续行）
+        let mut lines: Vec<LaidLine> = Vec::new();
+        let mut pos = 0usize;
+        let mut pending_newlines = 0usize;
 
-        macro_rules! flush_line {
-            ($flushed_len:expr) => {{
-                if count < 3 {
-                    eprintln!("[M12-v4 #{count}] flush_line: line_chars={}, current_width={:.1}, effective_max_width={:.1}", 
-                        $flushed_len, current_width, effective_max_width);
-                }
-                lines.push(LaidLine {
-                    text: pieces.iter().map(|p| p.0).collect(),
-                    width: current_width,
-                    char_start: line_start,
-                    char_end: line_start + $flushed_len,
-                    newlines_before: pending_newlines,
-                    letter_gap: 0.0, // P2 justify：flush 时未知是否末行，排版完成后统一分配
-                });
-                pending_newlines = 0;
-                // M9 P5：首行已结束，后续行恢复满宽
-                if first_line {
-                    first_line = false;
-                    effective_max_width = max_width;
-                    if count < 3 {
-                        eprintln!("[M12-v4 #{count}] flush_line: first_line done, effective_max_width now = {:.1}", effective_max_width);
-                    }
-                }
-            }};
-        }
-
-        for grapheme in item.text.graphemes(true) {
-            if grapheme == "\n" {
-                if !pieces.is_empty() {
-                    flush_line!(line_chars);
-                    line_start += line_chars + 1; // 越过行内容与该 \n
-                    pieces.clear();
-                    line_chars = 0;
-                    current_width = 0.0;
-                } else {
-                    // 行首换行（连续 <br>）：计入下一行
-                    pending_newlines += 1;
-                    line_start = gi + 1;
-                }
-                gi += 1;
+        while pos < total {
+            if chars[pos] == '\n' {
+                pending_newlines += 1;
+                pos += 1;
                 continue;
             }
-            let scale = Self::scale_at(&item.runs, item.font_scale, gi);
-            let ch = grapheme.chars().next().unwrap_or(' ');
-            let w_eff =
-                self.get_char_width_scaled(ch, font, scale) + self.config.letter_spacing;
+            // 本行硬边界（段内 \n）
+            let seg_end = chars[pos..]
+                .iter()
+                .position(|&c| c == '\n')
+                .map(|i| pos + i)
+                .unwrap_or(total);
 
-            // M12-v3 修复：动态计算 eps，适应 effective_max_width 的变化
-            let eps = Self::line_fill_epsilon(effective_max_width);
-            if current_width + w_eff > effective_max_width + eps && !pieces.is_empty() {
-                // P3 行尾标点压缩悬挂：判满且当前字符是行尾可压缩标点、
-                // 折半宽能放进剩余空间 → 以 raw 宽收进本行（pieces 记 raw，
-                // 与记录口径一致）并立即 flush——被压缩字符恒为行尾字符，
-                // 渲染端全宽绘制自然悬挂出右缘
-                if self.config.punctuation_compress
-                    && kinsoku::is_line_end_compressible(ch)
-                    && current_width + w_eff * kinsoku::PUNCT_COMPRESS_RATE
-                        <= effective_max_width + eps
-                {
-                    let g_cnt = grapheme.chars().count();
-                    pieces.push((grapheme, g_cnt, w_eff));
-                    line_chars += g_cnt;
-                    current_width += w_eff;
-                    flush_line!(line_chars);
-                    line_start += line_chars;
-                    pieces.clear();
-                    line_chars = 0;
-                    current_width = 0.0;
-                    gi += g_cnt;
-                    continue;
-                }
-                // M12-v4: 移除 break_line 调试日志，避免刷屏
-                let head_forbidden = LINE_START_FORBIDDEN.contains(&ch);
-                let word_boundary = is_word_char(ch)
-                    && pieces
-                        .last()
-                        .and_then(|p| p.0.chars().next())
-                        .map_or(false, is_word_char);
+            let max_w = if first_line {
+                (max_width - indent_px).max(1.0)
+            } else {
+                max_width
+            };
+            let (mut end, mut width) = self.find_longest_fit_styled(item, pos, seg_end, max_w);
 
-                if head_forbidden || word_boundary {
-                    // 统一回退循环（与 TXT 路径同规则）：
-                    // ① 断词连续性 ② 行首禁则 ③ 行尾禁则
-                    let mut pulled: Vec<(&str, usize, f32)> = Vec::new();
-                    let mut pulled_chars = 0usize;
-                    let mut pulled_w = 0.0f32;
-                    loop {
-                        if pieces.is_empty() || pulled.len() >= 16 || line_chars <= 1 {
-                            break;
-                        }
-                        let tail_c = pieces.last().and_then(|p| p.0.chars().next());
-                        let tail_word = tail_c.map_or(false, is_word_char);
-                        let head_c = pulled
-                            .first()
-                            .and_then(|p| p.0.chars().next())
-                            .unwrap_or(ch);
-                        if is_word_char(head_c) && tail_word {
-                            let (g0, c0, w0) = pieces.pop().unwrap();
-                            pulled.insert(0, (g0, c0, w0));
-                            pulled_chars += c0;
-                            pulled_w += w0;
-                            line_chars -= c0;
-                            current_width -= w0;
-                            continue;
-                        }
-                        if pulled.is_empty() && head_forbidden {
-                            let (g0, c0, w0) = pieces.pop().unwrap();
-                            pulled.insert(0, (g0, c0, w0));
-                            pulled_chars += c0;
-                            pulled_w += w0;
-                            line_chars -= c0;
-                            current_width -= w0;
-                            continue;
-                        }
-                        if pulled.is_empty()
-                            && tail_c.map_or(false, |c| LINE_END_FORBIDDEN.contains(&c))
-                        {
-                            let (g0, c0, w0) = pieces.pop().unwrap();
-                            pulled.insert(0, (g0, c0, w0));
-                            pulled_chars += c0;
-                            pulled_w += w0;
-                            line_chars -= c0;
-                            current_width -= w0;
-                            continue;
-                        }
+            // 禁则/断词连续回退（与旧 per-char 实现同构）：
+            // ① 词连续（含已拉回片段作 next）② 行首禁则 ③ 行尾禁则——循环直至稳定
+            if end < seg_end && end > pos + 1 {
+                let mut pulled = 0usize;
+                loop {
+                    if end <= pos + 1 || pulled >= 16 {
                         break;
                     }
-                    flush_line!(line_chars);
-                    line_start += line_chars;
-                    // M9.1 修复：清空已发射前缀后仅保留拉回片段——
-                    // 原实现把 pulled 压在未清空的前缀之上，导致下一行
-                    // 重复发射整个前缀（EPUB/TXT 双路径同源 bug）
-                    pieces.clear();
-                    pieces.extend(pulled);
-                    line_chars = pulled_chars;
-                    current_width = pulled_w;
-                } else {
-                    flush_line!(line_chars);
-                    line_start += line_chars;
-                    pieces.clear();
-                    line_chars = 0;
-                    current_width = 0.0;
+                    let last = chars[end - 1];
+                    let next = chars[end]; // end < seg_end 保证存在
+                    // 词连续：当前行尾与「行首（含已拉回）」都是词字符 → 继续拖
+                    if is_word_char(last) && is_word_char(next) {
+                        end -= 1;
+                        pulled += 1;
+                        continue;
+                    }
+                    if pulled == 0 && LINE_START_FORBIDDEN.contains(&next) {
+                        end -= 1;
+                        pulled += 1;
+                        continue;
+                    }
+                    if pulled == 0 && LINE_END_FORBIDDEN.contains(&last) {
+                        end -= 1;
+                        pulled += 1;
+                        continue;
+                    }
+                    break;
+                }
+                if pulled > 0 {
+                    width = self.measure_styled_prefix_width(item, pos, end);
                 }
             }
-            let g_chars = grapheme.chars().count();
-            pieces.push((grapheme, g_chars, w_eff));
-            line_chars += g_chars;
-            current_width += w_eff;
-            gi += g_chars;
-        }
-        if !pieces.is_empty() {
-            flush_line!(line_chars);
+
+            lines.push(LaidLine {
+                text: chars[pos..end].iter().collect(),
+                width,
+                char_start: pos,
+                char_end: end,
+                newlines_before: pending_newlines,
+                letter_gap: 0.0,
+                scale: Self::line_scale_at(item, pos, end),
+            });
+            pending_newlines = 0;
+            first_line = false;
+            pos = end;
+            // 消费本行末的 \n（若有）
+            if pos < total && chars[pos] == '\n' {
+                pos += 1;
+                // 下一行的 newlines_before 从下一循环的 \n 累计或 0；
+                // 与旧实现一致：行后单个 \n 不额外计入下一行（由 line_start+line+1 消费）
+            }
+            if lines.len() > 10_000 {
+                break; // 安全阀
+            }
         }
 
-        // P2 两端对齐：flush 时未知末行，排版完成后统一分配行内间隙。
-        // 末行豁免；首行可用宽扣除缩进；Center/Right 天然不启用。
+        // P2 两端对齐：与旧实现同逻辑
         if lines.len() > 1 {
             let justify_on = match item.align {
                 Some(LayoutAlign::Justify) => true,
@@ -1709,7 +1646,7 @@ impl LayoutEngine {
                 let n = lines.len();
                 for (i, line) in lines.iter_mut().enumerate() {
                     if i + 1 >= n {
-                        break; // 末行豁免
+                        break;
                     }
                     let avail = if i == 0 && indent_px > 0.01 {
                         max_width - indent_px
@@ -1726,6 +1663,107 @@ impl LayoutEngine {
             }
         }
         Ok(lines)
+    }
+
+    /// styled 前缀宽：按 run/scale 分段调用 measure_text_width（MeasureCache 优先）
+    ///
+    /// 全段同 scale 时退化为一次整串测量（与 TXT 同路径，命中率最高）。
+    fn measure_styled_prefix_width(
+        &self,
+        item: &TextItem,
+        start_chars: usize,
+        end_chars: usize,
+    ) -> f32 {
+        if end_chars <= start_chars {
+            return 0.0;
+        }
+        let chars: Vec<char> = item.text.chars().collect();
+        let end_chars = end_chars.min(chars.len());
+        if start_chars >= end_chars {
+            return 0.0;
+        }
+        // 快路径：无 runs 或整段同一 scale → 一次测量
+        let base = item.font_scale.unwrap_or(1.0);
+        let uniform = item.runs.is_empty()
+            || item.runs.iter().all(|r| {
+                r.font_scale.map(|s| (s - base).abs() < 1e-6).unwrap_or(true)
+            });
+        let slice: String = chars[start_chars..end_chars].iter().collect();
+        if uniform {
+            return self.measure_text_width(&slice, self.config.font_size * base);
+        }
+        // 混 scale：按连续同 scale 切段求和
+        let mut total = 0.0f32;
+        let mut i = start_chars;
+        while i < end_chars {
+            let scale = Self::scale_at(&item.runs, item.font_scale, i);
+            let mut j = i + 1;
+            while j < end_chars {
+                let s2 = Self::scale_at(&item.runs, item.font_scale, j);
+                if (s2 - scale).abs() > 1e-6 {
+                    break;
+                }
+                j += 1;
+            }
+            let seg: String = chars[i..j].iter().collect();
+            total += self.measure_text_width(&seg, self.config.font_size * scale);
+            i = j;
+        }
+        total
+    }
+
+    /// styled 最长可容前缀：贪心自左向右测宽（仅查询「最终行前缀」，
+    /// 与 Dart feedPageTextsWithPrefixes 的 key 集合对齐，二次布局命中率最高）
+    /// 返回 (end_char, width)
+    fn find_longest_fit_styled(
+        &self,
+        item: &TextItem,
+        start_chars: usize,
+        seg_end: usize,
+        max_width: f32,
+    ) -> (usize, f32) {
+        if start_chars >= seg_end {
+            return (start_chars, 0.0);
+        }
+        let eps = Self::line_fill_epsilon(max_width);
+        let mut best = start_chars;
+        let mut best_w = 0.0f32;
+
+        for end in (start_chars + 1)..=seg_end {
+            let w = self.measure_styled_prefix_width(item, start_chars, end);
+            if w <= max_width + eps {
+                best = end;
+                best_w = w;
+            } else {
+                if best == start_chars {
+                    // 单字已超宽：强制 1 字防死循环
+                    return (start_chars + 1, w);
+                }
+                break;
+            }
+        }
+
+        // P3 标点压缩：下一字可压缩且折半宽能进 → 多吃一字
+        if self.config.punctuation_compress && best < seg_end {
+            let chars: Vec<char> = item.text.chars().collect();
+            let next_ch = chars[best];
+            if kinsoku::is_line_end_compressible(next_ch) {
+                let ext_end = best + 1;
+                let w_full = self.measure_styled_prefix_width(item, start_chars, ext_end);
+                let natural = self.measure_text_width(
+                    &next_ch.to_string(),
+                    self.config.font_size
+                        * Self::scale_at(&item.runs, item.font_scale, best),
+                );
+                let discount = kinsoku::compression_discount(natural);
+                if w_full - discount <= max_width + eps {
+                    best = ext_end;
+                    best_w = w_full;
+                }
+            }
+        }
+
+        (best, best_w)
     }
 
     /// 表格原子排版：返回（定位行[(行, 列x偏移)], 单元格线框矩形,
@@ -3595,6 +3633,185 @@ mod tests {
             assert_eq!(
                 w[0].end_char_index, w[1].start_char_index,
                 "页间锚点必须无缝衔接"
+            );
+        }
+    }
+
+    // ===== A33：页底行级填满一致性基线 =====
+
+    fn page_bottom_residual(page: &Page, bottom_limit: f32) -> f32 {
+        let last_bottom = page
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l.y + l.height),
+                PageEntry::Image(img) => Some(img.y + img.height),
+                PageEntry::Rect(r) => Some(r.y + r.height),
+            })
+            .fold(0.0f32, f32::max);
+        (bottom_limit - last_bottom).max(0.0)
+    }
+
+    /// 纯文本长段 @ fill=1.0：非末页残余必须 < 1 行高（A33 产品契约）
+    #[test]
+    fn items_pure_text_full_fill_residual_under_one_line() {
+        let (engine, cfg) = create_test_engine();
+        assert!(
+            (cfg.page_fill_threshold - 1.0).abs() < 1e-6,
+            "基线夹具应用 fill=1.0"
+        );
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let bottom_limit = cfg.padding.top
+            + (cfg.height - cfg.padding.top - cfg.padding.bottom) * cfg.page_fill_threshold;
+
+        let items: Vec<LayoutItem> = (0..40)
+            .map(|_| LayoutItem::Text(long_text_item(200)))
+            .collect();
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 3, "应跨多页（实得 {}）", pages.len());
+
+        for (i, p) in pages.iter().enumerate() {
+            if i + 1 == pages.len() {
+                continue;
+            }
+            let residual = page_bottom_residual(p, bottom_limit);
+            assert!(
+                residual < line_h + 0.5,
+                "page {} 残余 {:.1}px ≥ 1 行高 {:.1}px（忽满忽空）",
+                i,
+                residual,
+                line_h
+            );
+        }
+    }
+
+    /// 页尾 space_before 折叠：段前距不得单独把本页顶出一截空洞
+    #[test]
+    fn items_space_before_folded_at_page_bottom() {
+        let (engine, cfg) = create_test_engine();
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let bottom_limit = cfg.padding.top
+            + (cfg.height - cfg.padding.top - cfg.padding.bottom) * cfg.page_fill_threshold;
+
+        // 先用若干短段把页填到只剩约 1.5 行，再接大段前距段落
+        let short = LayoutItem::text("短段测试一二三四五六七八九十");
+        let mut items: Vec<LayoutItem> = Vec::new();
+        for _ in 0..12 {
+            items.push(short.clone());
+        }
+        // 段前距 2em ≈ 32px，接近 1.5 行——若页尾预加后正文放不下会空洞
+        items.push(LayoutItem::Text(TextItem {
+            text: "带段前距的段落内容一二三四五六七八九十十一十二十三十四十五十六十七十八十九二十。".into(),
+            spacing_before_em: 2.0,
+            ..Default::default()
+        }));
+        // 后续长段保证至少 2 页
+        for _ in 0..10 {
+            items.push(LayoutItem::Text(long_text_item(180)));
+        }
+
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2);
+        for (i, p) in pages.iter().enumerate() {
+            if i + 1 == pages.len() {
+                continue;
+            }
+            let residual = page_bottom_residual(p, bottom_limit);
+            assert!(
+                residual < line_h + 0.5,
+                "page {} 段前距未折叠，残余 {:.1}px（行高 {:.1}）",
+                i,
+                residual,
+                line_h
+            );
+        }
+    }
+
+    /// 混 scale 段落：fit 应按逐行真实行高累计，非末页残余 < 1 行
+    #[test]
+    fn items_mixed_scale_per_line_height_fill() {
+        let (engine, cfg) = create_test_engine();
+        let line_h = cfg.font_size * cfg.line_height_multiplier;
+        let bottom_limit = cfg.padding.top
+            + (cfg.height - cfg.padding.top - cfg.padding.bottom) * cfg.page_fill_threshold;
+
+        // 同段内混 scale：主体 1.0，中间一段 1.5
+        let text = format!(
+            "{}{}{}",
+            "甲".repeat(40),
+            "乙".repeat(40),
+            "丙".repeat(80)
+        );
+        let chars_len = text.chars().count();
+        let item = TextItem {
+            text,
+            runs: vec![RunSpan {
+                start: 80,
+                end: (80 + 40).min(chars_len),
+                color: None,
+                font_scale: Some(1.5),
+                bold: false,
+                italic: false,
+                underline: false,
+            }],
+            ..Default::default()
+        };
+        let items: Vec<LayoutItem> = (0..20).map(|_| LayoutItem::Text(item.clone())).collect();
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2);
+        for (i, p) in pages.iter().enumerate() {
+            if i + 1 == pages.len() {
+                continue;
+            }
+            let residual = page_bottom_residual(p, bottom_limit);
+            // 混 scale 允许略松，但仍不得超过 1 行 + 半个大字号行
+            let loose = line_h * 1.6;
+            assert!(
+                residual < loose + 0.5,
+                "page {} 混 scale 残余 {:.1}px 过大（宽松上限 {:.1}）",
+                i,
+                residual,
+                loose
+            );
+        }
+    }
+
+    /// 本章说行高：强制 0.7 覆盖，不得与 CSS font_scale 双重相乘（审查 C1）
+    #[test]
+    fn items_comment_line_height_single_07_scale() {
+        let (engine, cfg) = create_test_engine();
+        let base = cfg.font_size * cfg.line_height_multiplier;
+        let item = TextItem {
+            text: "这是一条本章说注释内容，用于验证行高只乘一次 0.7。".repeat(2),
+            is_comment: true,
+            font_scale: Some(0.7), // CSS 物化常见路径
+            ..Default::default()
+        };
+        let items = vec![LayoutItem::Text(item)];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let lines: Vec<_> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Text(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        assert!(lines.len() >= 2, "应有多行注释");
+        let expected_h = base * 0.7;
+        for l in &lines {
+            assert!(
+                (l.height - expected_h).abs() < 0.05,
+                "注释行高 {:.2} 应为 base×0.7={:.2}（禁止再乘 CSS scale）",
+                l.height,
+                expected_h
+            );
+        }
+        // y 递进一致
+        for w in lines.windows(2) {
+            assert!(
+                (w[1].y - (w[0].y + w[0].height)).abs() < 0.05,
+                "注释行 y 递进应等于单倍 0.7 行高"
             );
         }
     }
