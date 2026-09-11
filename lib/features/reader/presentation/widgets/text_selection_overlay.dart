@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/simple_models.dart';
@@ -240,8 +241,19 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
           _toolbarButton(
             icon: Icons.copy,
             label: '复制',
-            onTap: () {
-              // TODO: 复制到剪贴板
+            onTap: () async {
+              final text = notifier.selectionText;
+              if (text.isNotEmpty) {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制到剪贴板'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              }
               notifier.clearSelection();
             },
           ),

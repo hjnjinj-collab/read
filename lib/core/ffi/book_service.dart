@@ -1,5 +1,8 @@
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:typed_data' show Uint8List;
+
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    as frb;
 
 import '../models/simple_models.dart';
 import 'rust_bridge.dart/api.dart' as rust_api;
@@ -350,6 +353,61 @@ class BookService {
     );
 
     return count.toInt();
+  }
+
+  /// A30d：批量定位笔记锚点 → 每个 offset 对应的页索引（0-based）。
+  ///
+  /// 参数与 [getPageCountProcessed] 同口径；空 offsets 直接返回空列表。
+  Future<List<int>> batchLocateNotes(
+    String bookId,
+    int chapterIndex, {
+    required List<int> offsets,
+    required double width,
+    required double height,
+    required double fontSize,
+    required double lineHeightMultiplier,
+    required double paddingLeft,
+    required double paddingTop,
+    required double paddingRight,
+    required double paddingBottom,
+    String fontName = 'default',
+    required bool removeDuplicateTitle,
+    required int chineseConvert,
+    List<ReplaceRuleItem> replaceRules = const [],
+    double pageFillThreshold = 1.0,
+    bool showComments = true,
+  }) async {
+    if (offsets.isEmpty) return const [];
+    // flutter_rust_bridge 的 Uint64List 与 dart:typed_data 不同源
+    final pages = await rust_api.batchLocateNotes(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      offsets: frb.Uint64List.fromList(offsets),
+      width: width,
+      height: height,
+      fontSize: fontSize,
+      lineHeightMultiplier: lineHeightMultiplier,
+      paddingLeft: paddingLeft,
+      paddingTop: paddingTop,
+      paddingRight: paddingRight,
+      paddingBottom: paddingBottom,
+      fontName: fontName,
+      chineseConvert: chineseConvert,
+      pageFillThreshold: pageFillThreshold,
+      showComments: showComments,
+      removeDuplicateTitle: removeDuplicateTitle,
+      replaceRules: replaceRules
+          .map(
+            (r) => rust_api.FfiReplaceRule(
+              pattern: r.pattern,
+              replacement: r.replacement,
+              ruleType: r.isRegex ? 1 : 0,
+              enabled: r.enabled,
+            ),
+          )
+          .toList(),
+    );
+    return pages.map((e) => e.toInt()).toList();
   }
 
   /// Release book from memory

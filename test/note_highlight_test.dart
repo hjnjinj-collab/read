@@ -119,4 +119,18 @@ void main() {
       expect(eight, const Color(0x66FFD54F));
     });
   });
+
+  group('groupNotesByChapter', () {
+    test('按章分组且保持组内顺序', () {
+      final notes = [
+        _note(id: 1, chapterIndex: 2, start: 10, end: 12),
+        _note(id: 2, chapterIndex: 0, start: 1, end: 3),
+        _note(id: 3, chapterIndex: 2, start: 40, end: 42),
+      ];
+      final g = groupNotesByChapter(notes);
+      expect(g.keys.toSet(), {0, 2});
+      expect(g[2]!.map((n) => n.id), [1, 3]);
+      expect(g[0]!.single.id, 2);
+    });
+  });
 }

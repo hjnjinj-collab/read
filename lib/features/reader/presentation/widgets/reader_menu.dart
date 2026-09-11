@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../diagnostics/reader_trace.dart';
@@ -465,9 +466,8 @@ class NoteListDialog extends ConsumerStatefulWidget {
 }
 
 class _NoteListDialogState extends ConsumerState<NoteListDialog> {
-  late Future<List<Note>> _future;
+  late Future<List<NoteListItem>> _future;
 
-  static const _colorLabels = ['黄色', '绿色', '蓝色', '粉色', '直线'];
   static const _colorDots = [
     Color(0xFFFFD54F),
     Color(0xFF81C784),
@@ -484,7 +484,7 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
 
   void _reload() {
     setState(() {
-      _future = ref.read(readerProvider.notifier).notesForCurrentBook();
+      _future = ref.read(readerProvider.notifier).loadNotesWithPages();
     });
   }
 
@@ -495,7 +495,7 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
       content: SizedBox(
         width: double.maxFinite,
         height: 360,
-        child: FutureBuilder<List<Note>>(
+        child: FutureBuilder<List<NoteListItem>>(
           future: _future,
           builder: (context, snap) {
             final items = snap.data ?? const [];
@@ -506,8 +506,11 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
               itemCount: items.length,
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
-                final n = items[i];
+                final item = items[i];
+                final n = item.note;
                 final colorDot = _colorDots[n.colorIndex.clamp(0, 4)];
+                final pageLabel =
+                    item.pageIndex != null ? ' · 第 ${item.pageIndex! + 1} 页' : '';
                 return ListTile(
                   dense: true,
                   leading: Container(
@@ -526,7 +529,7 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
                   ),
                   subtitle: Text(
                     [
-                      '第 ${n.chapterIndex + 1} 章',
+                      '第 ${n.chapterIndex + 1} 章$pageLabel',
                       if (n.note != null && n.note!.isNotEmpty) '备注: ${n.note}',
                     ].join(' · '),
                     style: const TextStyle(fontSize: 11),
@@ -536,6 +539,27 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        icon: const Icon(Icons.copy, size: 18),
+                        tooltip: '复制',
+                        onPressed: () async {
+                          final buf = StringBuffer(n.excerpt);
+                          if (n.note != null && n.note!.isNotEmpty) {
+                            buf.write('\n${n.note}');
+                          }
+                          await Clipboard.setData(
+                            ClipboardData(text: buf.toString()),
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('已复制到剪贴板'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                       IconButton(
                         icon: const Icon(Icons.edit, size: 18),
                         tooltip: '编辑备注',

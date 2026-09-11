@@ -1561,6 +1561,58 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return _db.notesOf(filePath);
   }
 
+  /// 笔记列表项：附带批量定位得到的页索引（失败为 null）
+  Future<List<NoteListItem>> loadNotesWithPages() async {
+    final notes = await notesForCurrentBook();
+    if (notes.isEmpty) return const [];
+    final bookId = state.bookId;
+    if (bookId == null) {
+      return notes.map((n) => NoteListItem(note: n)).toList();
+    }
+    final grouped = groupNotesByChapter(notes);
+    final result = <int, int?>{}; // note.id → pageIndex
+    for (final entry in grouped.entries) {
+      final chapterIndex = entry.key;
+      final chapterNotes = entry.value;
+      final offsets = chapterNotes.map((n) => n.startCharOffset).toList();
+      try {
+        final pages = await _bookService.batchLocateNotes(
+          bookId,
+          chapterIndex,
+          offsets: offsets,
+          width: _screenWidth,
+          height: _screenHeight,
+          fontSize: _fontSize,
+          lineHeightMultiplier: _lineHeight,
+          paddingLeft: _paddingHorizontal,
+          paddingTop: _paddingVertical,
+          paddingRight: _paddingHorizontal,
+          paddingBottom: _paddingVertical,
+          fontName: ReaderFont.family,
+          removeDuplicateTitle: _removeDuplicateTitle,
+          chineseConvert: _chineseConvert == ChineseConvertType.s2t
+              ? 1
+              : _chineseConvert == ChineseConvertType.t2s
+                  ? 2
+                  : 0,
+          replaceRules: _replaceRules,
+          pageFillThreshold: _pageFillThreshold,
+          showComments: _showComments,
+        );
+        for (var i = 0; i < chapterNotes.length; i++) {
+          result[chapterNotes[i].id] = i < pages.length ? pages[i] : null;
+        }
+      } catch (_) {
+        for (final n in chapterNotes) {
+          result[n.id] = null;
+        }
+      }
+    }
+    return notes
+        .map((n) => NoteListItem(note: n, pageIndex: result[n.id]))
+        .toList();
+  }
+
   /// A31-v3: 当前章节的笔记（从 state 读取，Riverpod 响应式）
   List<Note> get currentChapterNotes => state.currentChapterNotes;
 
@@ -2478,6 +2530,22 @@ PageEntry? findEntryForHitTest(Offset localPos, List<PageEntry> entries) {
   final start = currentEnd.clamp(0, pageEnd - 1);
   final end = (p + 1).clamp(start + 1, pageEnd);
   return (start, end);
+}
+
+/// 笔记列表展示项（含批量定位页索引）
+class NoteListItem {
+  final Note note;
+  final int? pageIndex;
+  const NoteListItem({required this.note, this.pageIndex});
+}
+
+/// 按章节分组笔记（批量定位一次 FFI/章）
+Map<int, List<Note>> groupNotesByChapter(List<Note> notes) {
+  final map = <int, List<Note>>{};
+  for (final n in notes) {
+    map.putIfAbsent(n.chapterIndex, () => []).add(n);
+  }
+  return map;
 }
 
 /// 笔记颜色索引 → 背景色 hex（#AARRGGBB，约 40% 透明度）
