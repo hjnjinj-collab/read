@@ -244,8 +244,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           final (wordStart, wordEnd) =
               notifier.expandToWordBoundary(hitOffset, page);
           notifier.prepareDragCache(page); // A31-v5: 预构建 TextPainter 缓存
-          // 词边界整词选中，避免摘录只剩首字
-          notifier.beginSelection(wordStart, end: wordEnd);
+          // 词边界整词选中，避免摘录只剩首字；
+          // 页尾等退化位置选区建立失败 → 复位前置状态，避免残留独占模式
+          if (!notifier.beginSelection(wordStart, end: wordEnd)) {
+            _longPressTriggered = false;
+            _isNoteMode = false;
+          }
         }
       });
     }

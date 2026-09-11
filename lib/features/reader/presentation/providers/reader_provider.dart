@@ -1953,14 +1953,21 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 开始选区（长按命中时调用）。[end] 为空时默认单字符；长按应传入词边界终点，
   /// 否则划线摘录只剩首字。
-  void beginSelection(int charOffset, {int? end}) {
-    _selectionStart = charOffset;
+  ///
+  /// 返回 false 表示选区未建立（charOffset 恰在页尾、clamp 后退化为
+  /// 空区间）——调用方应复位选区前置状态，不得再读 hasSelection。
+  bool beginSelection(int charOffset, {int? end}) {
     final maxEnd = state.currentPage?.endCharIndex;
     var newEnd = end ?? (charOffset + 1);
     if (newEnd <= charOffset) newEnd = charOffset + 1;
     if (maxEnd != null && newEnd > maxEnd) newEnd = maxEnd;
+    // 页尾防御：clamp 后仍 start==end → 空选区会让 hasSelection 误为
+    // true 且摘录为空，直接拒绝建立
+    if (newEnd <= charOffset) return false;
+    _selectionStart = charOffset;
     _selectionEnd = newEnd;
     _selectionTick.value++;
+    return true;
   }
 
   /// 扩展选区尾端（end 手柄拖拽）
