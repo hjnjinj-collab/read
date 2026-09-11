@@ -515,11 +515,15 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // 移动端适配：高度随屏幕自适应（小屏不溢出、大屏不留大片空白），
+    // 左右 inset 收窄让弹窗在窄屏上尽量宽——摘录文本宽度是稀缺资源
+    final media = MediaQuery.sizeOf(context);
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       title: const Text('笔记'),
       content: SizedBox(
         width: double.maxFinite,
-        height: 360,
+        height: (media.height * 0.55).clamp(300.0, 460.0),
         child: FutureBuilder<List<NoteListItem>>(
           future: _future,
           builder: (context, snap) {
@@ -546,6 +550,7 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
                     item.pageIndex != null ? ' · 第 ${item.pageIndex! + 1} 页' : '';
                 return ListTile(
                   dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                   leading: Container(
                     width: 12,
                     height: 12,
@@ -558,17 +563,20 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
                     n.excerpt,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
+                    style: const TextStyle(fontSize: 14),
                   ),
                   subtitle: Text(
                     [
                       '第 ${n.chapterIndex + 1} 章$pageLabel',
                       if (n.note != null && n.note!.isNotEmpty) '备注: ${n.note}',
                     ].join(' · '),
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: 12),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  // 移动端适配：窄屏上 3 个并排图标(≈144px)会把摘录挤到
+                  // 只剩一两个字宽。复制最高频保持外露，编辑/删除收进
+                  // 溢出菜单，行尾宽度省回给文本。
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -593,17 +601,29 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
                           }
                         },
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.edit, size: 18),
-                        tooltip: '编辑备注',
-                        onPressed: () => _editNote(n),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18),
-                        onPressed: () async {
-                          await ref.read(readerProvider.notifier).deleteNote(n.id);
-                          _reload();
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 20),
+                        tooltip: '更多',
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _editNote(n);
+                          } else if (value == 'delete') {
+                            ref
+                                .read(readerProvider.notifier)
+                                .deleteNote(n.id)
+                                .then((_) => _reload());
+                          }
                         },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text('编辑备注'),
+                          ),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('删除'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
