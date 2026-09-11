@@ -613,7 +613,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 段落格式变更仅触发自然换键（L1/L2 缓存键含 para_format_hash）
     if (needsCleaningUpdate) {
       // 更新 parser 净化器并失效相关缓存（含全局选项同步）；
-      // 智能分段为净化层内部行为恒开（M9.3 起不暴露设置项）
+      // smartParagraph 为导入/净化层内部行为（与阅读级 A35 智能分段开关无关）
       await _bookService.updateBookCleaning(
         state.bookId!,
         removeHtmlTags: removeHtmlTags,
@@ -844,6 +844,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：EPUB 去重标题同口径
           replaceRules: _replaceRules, // A30b：EPUB 净化规则同口径下发
+          reSegment: _reSegment, // 统一智能分段：EPUB 与 TXT 同核
+          segmentRules: _segmentRules,
         );
       } else {
         // 转换简繁设置为数字代码
@@ -1541,6 +1543,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：邻居页与前台同参
         replaceRules: _replaceRules, // A30b：邻居页排版与前台同参（含规则）
+        reSegment: _reSegment,
+        segmentRules: _segmentRules,
       );
     } else {
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -1606,6 +1610,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：预取与前台完全同参
         replaceRules: _replaceRules, // A30b：预取与前台完全同参（含规则）
+        reSegment: _reSegment,
+        segmentRules: _segmentRules,
       ),
     );
   }
@@ -2126,8 +2132,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       bookId,
       query,
       removeDuplicateTitle: _removeDuplicateTitle,
-      // M9.3：旧重排已被 ParagraphFormatter 取代，恒关（与展示管线一致）
-      reSegment: false,
+      // 统一智能分段：总开关真实控制引擎（与展示同口径）
+      reSegment: _reSegment,
       chineseConvert: convertCode,
       replaceRules: _replaceRules,
       segmentRules: _segmentRules, // A35-L2：分段规则与展示同口径
@@ -2173,7 +2179,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         '${_removeDuplicateTitle}_'
         '${_chineseConvert.index}_'
         '${_replaceRulesFingerprint()}_'
-        '${_paraFormatHash}';
+        '${_reSegment ? 1 : 0}'
+        '_${_paraFormatHash}';
   }
 
   /// 生成页数缓存键（排版参数指纹 + 章节索引）
@@ -2256,6 +2263,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paraFormatHash: _paraFormatHash,
         removeDuplicateTitle: _removeDuplicateTitle, // A30c：页数与页内容同参
         replaceRules: _replaceRules, // A30b：页数与页内容同参（含规则）
+        reSegment: _reSegment,
+        segmentRules: _segmentRules,
       );
     }
     int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
@@ -2275,10 +2284,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       paddingRight: common.padH,
       paddingBottom: common.padV,
       removeDuplicateTitle: _removeDuplicateTitle,
-      reSegment: false, // M9.3：旧重排已被 ParagraphFormatter 取代，恒关
+      reSegment: _reSegment,
       chineseConvert: chineseConvertCode,
       replaceRules: _replaceRules,
-      segmentRules: _segmentRules, // A35-L2：分段规则
+      segmentRules: _segmentRules,
       pageFillThreshold: _pageFillThreshold,
       paraFormatHash: _paraFormatHash,
     );
@@ -2651,6 +2660,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paraFormatHash: _paraFormatHash,
           removeDuplicateTitle: _removeDuplicateTitle, // A30c：图片预热取页同参
           replaceRules: _replaceRules, // A30b：图片预热取页与前台同参
+          reSegment: _reSegment,
+          segmentRules: _segmentRules,
         );
       } else {
         return;  // TXT 暂不支持预测预热

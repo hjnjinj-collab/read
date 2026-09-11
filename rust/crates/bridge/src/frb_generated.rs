@@ -1895,6 +1895,9 @@ fn wire__crate__api__get_page_count_structured_impl(
             let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_re_segment = <bool>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1917,6 +1920,8 @@ fn wire__crate__api__get_page_count_structured_impl(
                             api_para_format_hash,
                             api_remove_duplicate_title,
                             api_replace_rules,
+                            api_re_segment,
+                            api_segment_rules,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2044,6 +2049,9 @@ fn wire__crate__api__get_page_structured_impl(
             let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_re_segment = <bool>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2068,6 +2076,8 @@ fn wire__crate__api__get_page_structured_impl(
                             api_para_format_hash,
                             api_remove_duplicate_title,
                             api_replace_rules,
+                            api_re_segment,
+                            api_segment_rules,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2722,6 +2732,9 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
             let api_remove_duplicate_title = <bool>::sse_decode(&mut deserializer);
             let api_replace_rules =
                 <Vec<crate::api::FfiReplaceRule>>::sse_decode(&mut deserializer);
+            let api_re_segment = <bool>::sse_decode(&mut deserializer);
+            let api_segment_rules =
+                <Vec<crate::api::FfiSegmentRule>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2744,6 +2757,8 @@ fn wire__crate__api__prefetch_structured_chapter_impl(
                             api_para_format_hash,
                             api_remove_duplicate_title,
                             api_replace_rules,
+                            api_re_segment,
+                            api_segment_rules,
                         )?;
                         Ok(output_ok)
                     })(),

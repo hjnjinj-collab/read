@@ -71,8 +71,9 @@ static PAGINATION_CACHE: Lazy<Arc<Mutex<PaginationCache>>> = Lazy::new(|| {
 // M9.5-G：预处理结果缓存——reader_core::PreprocessedCache 首次接入生产路径。
 // process_and_layout_chapter_inner 在预处理前查缓存，命中则连「取原文+六阶段
 // 预处理流水线」一并跳过；miss 正常处理后回填。容量 20 章，进程内存不落盘。
-// 键=book_id+章节+预处理选项 hash（para_format_hash 不参与预处理输出、置 0，
-// 段落格式化在缓存之后执行）。净化选项（ContentCleaningOptions）不在键中，
+// 键=book_id+章节+预处理选项 hash（para_format_hash 不参与预处理输出、置 0；
+// re_segment 开启时 segment_threshold 混入 hash——Stage2 消费阈值）。
+// 净化选项（ContentCleaningOptions）不在键中，
 // 但 set_content_cleaning_options 重建章节偏移时同步 clear_book 失效，
 // 不产生陈旧命中。内部 tokio Mutex 自同步，无需外层 std Mutex。
 static PREPROCESSED_CACHE: Lazy<reader_core::cache::PreprocessedCache> =
@@ -260,6 +261,10 @@ struct StructuredPageKey {
     remove_duplicate_title: bool,
     /// A30b：用户替换规则集哈希（规则变更即换键自然重算）
     rules_hash: u64,
+    /// 统一智能分段总开关（开/关切换即换键）
+    re_segment: bool,
+    /// 分段规则集哈希（规则变更即换键自然重算）
+    seg_hash: u64,
 }
 
 impl StructuredPageKey {
@@ -272,6 +277,8 @@ impl StructuredPageKey {
         para_format_hash: u64,
         remove_duplicate_title: bool,
         rules_hash: u64,
+        re_segment: bool,
+        seg_hash: u64,
     ) -> Self {
         Self {
             cache_schema_revision: CACHE_SCHEMA_REVISION,
@@ -295,6 +302,8 @@ impl StructuredPageKey {
             para_format_hash,
             remove_duplicate_title,
             rules_hash,
+            re_segment,
+            seg_hash,
         }
     }
 }
@@ -307,6 +316,35 @@ static CONTENT_CLEANING_OPTIONS: Lazy<Arc<Mutex<Option<ContentCleaningOptions>>>
 /// M9：全局段落格式化设置
 static PARAGRAPH_FORMAT_SETTINGS: Lazy<Mutex<reader_core::ParagraphFormatSettings>> =
     Lazy::new(|| Mutex::new(reader_core::ParagraphFormatSettings::default()));
+
+/// 统一智能分段阈值（字）——来自段落设置面板，默认 50
+fn current_seg_threshold() -> usize {
+    let t = PARAGRAPH_FORMAT_SETTINGS
+        .lock()
+        .unwrap()
+        .smart_split_threshold;
+    if t == 0 {
+        reader_core::DEFAULT_SEG_THRESHOLD
+    } else {
+        t
+    }
+}
+
+/// 由 FFI 规则构造统一引擎配置；None = 总开关关
+fn smart_seg_config(
+    re_segment: bool,
+    segment_rules: &[FfiSegmentRule],
+) -> Option<reader_core::SmartSegConfig> {
+    if !re_segment {
+        return None;
+    }
+    let rules: Vec<reader_core::SegmentRule> =
+        segment_rules.iter().map(|sr| sr.into()).collect();
+    Some(reader_core::SmartSegConfig::from_rules(
+        current_seg_threshold(),
+        &rules,
+    ))
+}
 
 /// M9.2：段距有效值 = 基准（字号×0.8）× 用户倍率。
 /// 仅活跃 FFI 入口（get_page_processed / get_page_count_processed /
@@ -653,11 +691,21 @@ pub fn set_paragraph_format_settings(
     settings.enable_indent = enable_indent;
     settings.indent_size_chars = indent_size_chars;
     settings.paragraph_spacing_multiplier = paragraph_spacing_multiplier;
-    settings.re_paragraph_mode = reader_core::ReParagraphMode::from_u8(re_paragraph_mode);
+    // 统一智能分段后：M9 三选一退役，生产路径恒 None（仅缩进/段距）。
+    // 入参 re_paragraph_mode 忽略；smart_split_threshold 作为统一引擎阈值。
+    let _ = re_paragraph_mode;
+    let old_threshold = settings.smart_split_threshold;
+    settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
     settings.smart_split_threshold = smart_split_threshold.clamp(20, 2000) as usize;
     settings.aggressive_split_threshold = aggressive_split_threshold.clamp(20, 2000) as usize;
     settings.justify = justify;
     settings.punctuation_compress = punctuation_compress;
+    // 阈值变更会改变 TXT 预处理 Stage2 输出：清空预处理缓存，防陈旧命中
+    // （分页缓存由 para_format_hash 换键；预处理缓存键已含阈值，此处双保险）
+    if old_threshold != settings.smart_split_threshold {
+        drop(settings);
+        invalidate_preprocessed_cache(None);
+    }
     Ok(())
 }
 
@@ -882,6 +930,8 @@ pub fn batch_locate_notes(
             /* para_format_hash= */ 0,
             remove_duplicate_title,
             replace_rules.clone(),
+            /* re_segment= */ false,
+            /* segment_rules= */ Vec::new(),
         )?;
 
         // 构建页面起始偏移数组用于定位
@@ -907,6 +957,8 @@ pub fn batch_locate_notes(
                 /* para_format_hash= */ 0,
                 remove_duplicate_title,
                 replace_rules.clone(),
+                /* re_segment= */ false,
+                /* segment_rules= */ Vec::new(),
             )?;
             page_starts.push(page.start_char_index);
         }
@@ -1008,19 +1060,28 @@ fn process_and_layout_chapter_inner(
     }
 
     // M9.5-G：预处理结果缓存——命中则跳过取原文与整个预处理流水线。
-    // para_format_hash 置 0：段落格式化（PARAGRAPH_FORMAT_SETTINGS）在缓存
-    // 之后执行、不影响预处理输出，段落设置变更不应失效本缓存。
+    // para_format_hash 置 0：缩进/段距等格式化在缓存之后执行、不影响预处理输出。
+    // A35 统一后：Stage2 消费 segment_threshold——re_segment 开启时阈值必须入键，
+    // 否则调阈值后仍命中旧预处理（展示与搜索口径分叉）。
+    let mut pre_opt_hash = CacheKey::hash_process_options(
+        remove_duplicate_title,
+        re_segment,
+        chinese_convert,
+        rules_hash,
+        /*para_format_hash=*/ 0,
+        seg_hash,
+    );
+    if re_segment {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        pre_opt_hash.hash(&mut h);
+        current_seg_threshold().hash(&mut h);
+        pre_opt_hash = h.finish();
+    }
     let pre_key = reader_core::cache::CacheKey {
         book_id: book_id.to_string(),
         chapter_index,
-        rules_hash: CacheKey::hash_process_options(
-            remove_duplicate_title,
-            re_segment,
-            chinese_convert,
-            rules_hash,
-            /*para_format_hash=*/ 0,
-            seg_hash,
-        ),
+        rules_hash: pre_opt_hash,
     };
     let processed = match shared_tokio_runtime().block_on(PREPROCESSED_CACHE.get(&pre_key)) {
         Some(hit) => hit,
@@ -1059,6 +1120,7 @@ fn process_and_layout_chapter_inner(
                     enabled: sr.enabled,
                     builtin: sr.is_builtin,
                 }).collect(),
+                segment_threshold: current_seg_threshold(),
                 chinese_convert: match chinese_convert {
                     1 => Some(ChineseConvertType::S2T),
                     2 => Some(ChineseConvertType::T2S),
@@ -1077,16 +1139,11 @@ fn process_and_layout_chapter_inner(
         }
     };
 
-    // M9 P4：段落格式化（缩进 + 重新分段），在预处理后、布局前
-    // A35-L2：智能分段引擎激活（reSegment 开或用户分段规则非空）时，
-    // 接管重新分段+超长段切分语义（50字开关+终结标点+引号吸附），
-    // formatter 覆盖为仅缩进——否则 split_ranges 的窗口回退切分会在
-    // 顿号/闭引号处误切（v2 真机误切根因），双系统打架。
+    // 统一智能分段：M9 切分退役，formatter 仅做缩进/段距。
+    // 重分段已在预处理 Stage2（re_segment 总开关真实控制）完成。
     // 缓存安全：options_hash 已含 re_segment 与 seg_hash，切换即换键重算。
     let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
-    if re_segment || !seg_rules.is_empty() {
-        para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
-    }
+    para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
     let processed = if para_settings.needs_formatting() {
         let formatter = reader_core::ParagraphFormatter::new(para_settings);
         formatter.format(&processed)
@@ -1619,6 +1676,7 @@ pub fn get_chapter_content_processed(
         remove_duplicate_title,
         re_segment,
         segment_rules: Vec::new(),
+        segment_threshold: current_seg_threshold(),
         chinese_convert: match chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -1968,13 +2026,11 @@ pub fn get_page_count_processed(
 fn apply_paragraph_format_settings(
     blocks: &mut Vec<book_parser::ContentBlock>,
     settings: &reader_core::ParagraphFormatSettings,
+    smart: Option<&reader_core::SmartSegConfig>,
 ) {
     use book_parser::ContentBlock;
 
-    // 模式 → 切分阈值（字，用户可调）；None = 不切。
-    // split_ranges 循环保证：切口后的剩余文本作为新段落从头计数继续检测切分
-    let split_threshold = settings.effective_split_threshold();
-
+    // 统一智能分段：smart=Some 时用 A35 块内区间切分；None 时不切（M9 退役）。
     let indent_override = if settings.enable_indent {
         Some(settings.indent_size_chars as f32)
     } else {
@@ -2018,16 +2074,14 @@ fn apply_paragraph_format_settings(
         // P3：用户缩进覆盖（设置优先于 CSS 物化值）
         let indent_first_line_em = indent_override;
 
-        // P2：超长段按强标点切短（runs 区间同步裁剪/平移）
+        // 统一智能分段：A35 块内切分（阈值+终结构+引号吸附；D10 同步重写 runs）
         let mut pieces: Vec<String> = Vec::new();
         let mut piece_runs: Vec<Vec<book_parser::StyledRun>> = Vec::new();
-        if let Some(threshold) = split_threshold {
-            let total = text.chars().count();
-            if total > threshold {
-                // M9.2：切点策略在共享切分器（区间契约：升序无缝无叠、无空片、
-                // 闭标吸附、省略号原子），此处只做文本切片与 runs 裁剪（D10 同步重写）
+        if let Some(cfg) = smart {
+            let ranges = reader_core::split_paragraph_ranges(&text, cfg);
+            if ranges.len() > 1 {
                 let chars: Vec<char> = text.chars().collect();
-                for (s, e) in reader_core::split_ranges(&text, threshold) {
+                for (s, e) in ranges {
                     pieces.push(chars[s..e].iter().collect());
                     piece_runs.push(clip_runs(&runs, s, e));
                 }
@@ -2551,8 +2605,20 @@ fn process_structured_chapter(
 
     {
         let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
-        if para_settings.needs_formatting() {
-            apply_paragraph_format_settings(&mut content.blocks, &para_settings);
+        let smart = if params.re_segment {
+            Some(reader_core::SmartSegConfig::from_rules(
+                current_seg_threshold(),
+                &params.segment_rules,
+            ))
+        } else {
+            None
+        };
+        if smart.is_some() || para_settings.needs_formatting() {
+            apply_paragraph_format_settings(
+                &mut content.blocks,
+                &para_settings,
+                smart.as_ref(),
+            );
         }
     }
 
@@ -2677,6 +2743,10 @@ struct StructuredParams {
     remove_duplicate_title: bool,
     rules: Arc<Vec<ReplaceRule>>,
     rules_hash: u64,
+    /// 统一智能分段总开关 + 规则（展示/页数/预取/搜索四口同参）
+    re_segment: bool,
+    segment_rules: Arc<Vec<reader_core::SegmentRule>>,
+    seg_hash: u64,
 }
 
 impl StructuredParams {
@@ -2697,9 +2767,14 @@ impl StructuredParams {
         para_format_hash: u64,
         remove_duplicate_title: bool,
         replace_rules: Vec<FfiReplaceRule>,
+        re_segment: bool,
+        segment_rules: Vec<FfiSegmentRule>,
     ) -> Self {
         let rules: Vec<ReplaceRule> = replace_rules.into_iter().map(Into::into).collect();
         let rules_hash = CacheKey::hash_replace_rules(&rules);
+        let seg_rules: Vec<reader_core::SegmentRule> =
+            segment_rules.iter().map(|sr| sr.into()).collect();
+        let seg_hash = reader_core::SegmentRule::hash_rules(&seg_rules);
         Self {
             config: structured_layout_config(
                 width,
@@ -2719,6 +2794,9 @@ impl StructuredParams {
             remove_duplicate_title,
             rules: Arc::new(rules),
             rules_hash,
+            re_segment,
+            segment_rules: Arc::new(seg_rules),
+            seg_hash,
         }
     }
 }
@@ -2737,6 +2815,8 @@ fn structured_cache_key(
         params.para_format_hash,
         params.remove_duplicate_title,
         params.rules_hash,
+        params.re_segment,
+        params.seg_hash,
     )
 }
 
@@ -2749,6 +2829,7 @@ fn structured_cache_key(
 /// 即换键重算。与 TXT 路径同口径）
 /// `remove_duplicate_title`: 去重标题（A30c：TXT 预处理 Stage1 同口径，
 /// 开关入缓存键）
+/// `re_segment` / `segment_rules`: 统一智能分段（与 TXT 同核；入缓存键）
 #[allow(clippy::too_many_arguments)]
 pub fn get_page_structured(
     book_id: String,
@@ -2770,6 +2851,8 @@ pub fn get_page_structured(
     para_format_hash: u64,
     remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
+    re_segment: bool,
+    segment_rules: Vec<FfiSegmentRule>,
 ) -> anyhow::Result<crate::PageInfo> {
     // M12-v4 诊断：输出 FFI 入口收到的 width 参数（仅首次）
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -2795,6 +2878,8 @@ pub fn get_page_structured(
         para_format_hash,
         remove_duplicate_title,
         replace_rules,
+        re_segment,
+        segment_rules,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &params, false)?
@@ -2840,6 +2925,8 @@ pub fn get_page_count_structured(
     para_format_hash: u64,
     remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
+    re_segment: bool,
+    segment_rules: Vec<FfiSegmentRule>,
 ) -> anyhow::Result<usize> {
     let params = StructuredParams::from_args(
         width,
@@ -2857,6 +2944,8 @@ pub fn get_page_count_structured(
         para_format_hash,
         remove_duplicate_title,
         replace_rules,
+        re_segment,
+        segment_rules,
     );
     let pages =
         process_structured_chapter(&book_id, chapter_index, &params, false)?
@@ -2889,6 +2978,8 @@ pub fn prefetch_structured_chapter(
     para_format_hash: u64,
     remove_duplicate_title: bool,
     replace_rules: Vec<FfiReplaceRule>,
+    re_segment: bool,
+    segment_rules: Vec<FfiSegmentRule>,
 ) -> anyhow::Result<bool> {
     let params = StructuredParams::from_args(
         width,
@@ -2906,6 +2997,8 @@ pub fn prefetch_structured_chapter(
         para_format_hash,
         remove_duplicate_title,
         replace_rules,
+        re_segment,
+        segment_rules,
     );
     let cache_key = structured_cache_key(&book_id, chapter_index, &params);
     // 阶段2优化：检查缓存存在且未过期
@@ -3065,6 +3158,8 @@ pub fn search_in_book(
                 chinese_convert,
                 remove_duplicate_title,
                 &rules,
+                re_segment,
+                &segment_rules,
                 &needles,
                 &mut hits,
                 max_hits,
@@ -3211,6 +3306,7 @@ fn search_txt_chapter(
         remove_duplicate_title,
         re_segment,
         segment_rules: seg_rules.clone(),
+        segment_threshold: current_seg_threshold(),
         chinese_convert: match chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -3221,12 +3317,10 @@ fn search_txt_chapter(
     };
     let preprocessor = get_preprocessor_for_rules(rules);
     let processed = shared_tokio_runtime().block_on(preprocessor.process(&raw_content, &options))?;
-    // 段落格式化（缩进字符注入/重新分段改变文本与偏移——锚点口径必须含此步）
-    // A35-L2：与展示同口径——引擎激活时 formatter 覆盖为仅缩进
+    // 段落格式化（缩进字符注入改变文本与偏移——锚点口径必须含此步）
+    // 统一智能分段：M9 切分退役，formatter 仅缩进
     let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
-    if re_segment || !seg_rules.is_empty() {
-        para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
-    }
+    para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
     let processed = if para_settings.needs_formatting() {
         reader_core::ParagraphFormatter::new(para_settings).format(&processed)
     } else {
@@ -3249,6 +3343,8 @@ fn search_epub_chapter(
     chinese_convert: u8,
     remove_duplicate_title: bool,
     rules: &[ReplaceRule],
+    re_segment: bool,
+    segment_rules: &[FfiSegmentRule],
     needles: &[Vec<char>],
     hits: &mut Vec<SearchHit>,
     max_hits: usize,
@@ -3306,8 +3402,13 @@ fn search_epub_chapter(
 
     {
         let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
-        if para_settings.needs_formatting() {
-            apply_paragraph_format_settings(&mut content.blocks, &para_settings);
+        let smart = smart_seg_config(re_segment, segment_rules);
+        if smart.is_some() || para_settings.needs_formatting() {
+            apply_paragraph_format_settings(
+                &mut content.blocks,
+                &para_settings,
+                smart.as_ref(),
+            );
         }
     }
     // 块流 → 布局项（与分页路径调用同一函数，规则零漂移）
@@ -4077,6 +4178,7 @@ pub fn process_chapter_content(
         remove_duplicate_title: ffi_config.remove_duplicate_title,
         re_segment: ffi_config.re_segment,
         segment_rules: Vec::new(),
+        segment_threshold: current_seg_threshold(),
         chinese_convert: match ffi_config.chinese_convert {
             1 => Some(ChineseConvertType::S2T),
             2 => Some(ChineseConvertType::T2S),
@@ -4515,17 +4617,21 @@ mod tests {
         }
     }
 
-    fn settings(mode: ReParagraphMode, indent: bool) -> ParagraphFormatSettings {
+    fn settings(_mode: ReParagraphMode, indent: bool) -> ParagraphFormatSettings {
         ParagraphFormatSettings {
             enable_indent: indent,
             indent_size_chars: 2,
             paragraph_spacing_multiplier: 1.0,
-            re_paragraph_mode: mode,
+            re_paragraph_mode: ReParagraphMode::None, // M9 切分退役
             smart_split_threshold: reader_core::SMART_THRESHOLD,
             aggressive_split_threshold: reader_core::AGGRESSIVE_THRESHOLD,
             justify: false,
             punctuation_compress: false,
         }
+    }
+
+    fn smart_cfg(threshold: usize) -> reader_core::SmartSegConfig {
+        reader_core::SmartSegConfig::default_with_threshold(threshold)
     }
 
     /// 长文本：n 句，每句恰 11 字（10 汉字 + 句号）
@@ -4534,21 +4640,23 @@ mod tests {
     }
 
     #[test]
-    fn epub_split_smart_over_200_chars() {
-        // 28 句 = 308 字 > Smart 阈值 200（M9.2 统一）→ 应切分
-        let text = long_text(28);
-        assert_eq!(text.chars().count(), 308);
+    fn epub_split_smart_over_threshold() {
+        // A35：阈值 50，6 句=66 字 → 在超过 50 后的句号处切开
+        let text = long_text(6);
+        assert_eq!(text.chars().count(), 66);
         let mut blocks = vec![para(&text)];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Smart, false));
+        apply_paragraph_format_settings(
+            &mut blocks,
+            &settings(ReParagraphMode::None, false),
+            Some(&smart_cfg(50)),
+        );
 
         assert!(blocks.len() >= 2, "超长段应被切开，实得 {} 块", blocks.len());
-        // 拼接不变量：切分不丢字不重字
         let joined: String = blocks.iter().map(|b| para_text(b)).collect();
         assert_eq!(joined, text, "切分后拼接必须还原原文");
-        // 每块 ≤ 阈值上界（闭标吸附允许略超，但不得翻倍）
         for b in &blocks {
             assert!(
-                para_text(b).chars().count() <= 200 + 60,
+                para_text(b).chars().count() <= 50 + 20,
                 "切分块过长: {}",
                 para_text(b).chars().count()
             );
@@ -4556,18 +4664,26 @@ mod tests {
     }
 
     #[test]
-    fn epub_split_aggressive_lower_threshold() {
-        // 14 句 = 154 字：Smart(200) 不切、Aggressive(100) 切
+    fn epub_split_threshold_controls_cut() {
+        // 阈值 200：154 字不切；阈值 100：切
         let text = long_text(14);
         assert_eq!(text.chars().count(), 154);
-        let mut smart = vec![para(&text)];
-        apply_paragraph_format_settings(&mut smart, &settings(ReParagraphMode::Smart, false));
-        assert_eq!(smart.len(), 1, "154 字不应触发 Smart 切分");
+        let mut high = vec![para(&text)];
+        apply_paragraph_format_settings(
+            &mut high,
+            &settings(ReParagraphMode::None, false),
+            Some(&smart_cfg(200)),
+        );
+        assert_eq!(high.len(), 1, "154 字不应触发阈值 200 切分");
 
-        let mut agg = vec![para(&text)];
-        apply_paragraph_format_settings(&mut agg, &settings(ReParagraphMode::Aggressive, false));
-        assert!(agg.len() >= 2, "154 字应触发 Aggressive 切分");
-        let joined: String = agg.iter().map(|b| para_text(b)).collect();
+        let mut low = vec![para(&text)];
+        apply_paragraph_format_settings(
+            &mut low,
+            &settings(ReParagraphMode::None, false),
+            Some(&smart_cfg(100)),
+        );
+        assert!(low.len() >= 2, "154 字应触发阈值 100 切分");
+        let joined: String = low.iter().map(|b| para_text(b)).collect();
         assert_eq!(joined, text);
     }
 
@@ -4575,7 +4691,7 @@ mod tests {
     fn epub_none_mode_no_split() {
         let text = long_text(20); // 600 字
         let mut blocks = vec![para(&text)];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false));
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false), None);
         assert_eq!(blocks.len(), 1, "None 模式不切分");
     }
 
@@ -4595,7 +4711,7 @@ mod tests {
             line_height: None,
         };
         let mut blocks = vec![b];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true));
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true), None);
         match &blocks[0] {
             ContentBlock::Paragraph {
                 indent_first_line_em, ..
@@ -4617,7 +4733,7 @@ mod tests {
             line_height: None,
         };
         let mut blocks = vec![b];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false));
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false), None);
         match &blocks[0] {
             ContentBlock::Paragraph {
                 indent_first_line_em, ..
@@ -4650,7 +4766,7 @@ mod tests {
             *f = None;
         }
         let mut blocks = vec![b];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, true));
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, true), None);
         assert_eq!(blocks.len(), 1, "注释块不切分");
         match &blocks[0] {
             ContentBlock::Paragraph {
@@ -4667,7 +4783,7 @@ mod tests {
 
     #[test]
     fn epub_split_runs_clip_and_shift() {
-        // 20 句 = 220 字，runs 覆盖 [10,150)；Aggressive(100) 切分
+        // A35 阈值 50：20 句=220 字切分；runs 覆盖 [10,150)
         let text = long_text(20);
         assert_eq!(text.chars().count(), 220);
         let runs = vec![book_parser::StyledRun {
@@ -4692,7 +4808,11 @@ mod tests {
             spacing_after_em: None,
             line_height: None,
         }];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Aggressive, false));
+        apply_paragraph_format_settings(
+            &mut blocks,
+            &settings(ReParagraphMode::None, false),
+            Some(&smart_cfg(50)),
+        );
         assert!(blocks.len() >= 2);
 
         // runs 区间必须落在各块文本范围内（锚定自洽）
@@ -4726,7 +4846,7 @@ mod tests {
 
     #[test]
     fn epub_split_preserves_align_and_glues_closer() {
-        // M9.2：居中长段切分后所有子段保留 align（回归：旧实现仅首段保留）；
+        // 统一智能分段：居中长段切分后所有子段保留 align；
         // 闭引号 ” 吸附在前片尾部，不得悬到后一段段首
         let mut text = "他说完了。".repeat(30); // 150 字
         text.push('\u{201C}');
@@ -4746,8 +4866,11 @@ mod tests {
             spacing_after_em: None,
             line_height: None,
         }];
-        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::Smart, false));
-        // 注：末片 55 字 ≥ 20%·阈值，不会触发尾段再平衡合并
+        apply_paragraph_format_settings(
+            &mut blocks,
+            &settings(ReParagraphMode::None, false),
+            Some(&smart_cfg(50)),
+        );
         assert!(blocks.len() >= 2, "251 字应被切开");
         for (i, b) in blocks.iter().enumerate() {
             match b {
@@ -4978,6 +5101,7 @@ mod tests {
         let params = StructuredParams::from_args(
             360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0,
             "TestFont".to_string(), 0, 0.9, true, 0, false, Vec::new(),
+            false, Vec::new(),
         );
         for hit in &hits {
             let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)

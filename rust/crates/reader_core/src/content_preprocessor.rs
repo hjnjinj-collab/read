@@ -67,73 +67,10 @@ impl ReplaceRule {
     }
 }
 
-/// A35-L2: 分段规则动作类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SegmentAction {
-    /// 匹配行后强制分段（该行收尾，下一行起新段）
-    ForceBreakAfter,
-    /// 匹配行前强制分段（上一行收尾，该行起新段）
-    ForceBreakBefore,
-    /// 匹配行独立成段（前后断开）
-    KeepIndependent,
-    /// 匹配行强制与上一行合并（吸附，压过默认断开项）
-    MergeWithPrev,
-}
-
-/// A35-L2: 分段规则来源
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SegmentRuleKind {
-    /// 内置谓词（Rust 原生实现，按 id 分派）
-    Builtin,
-    /// 用户自定义正则
-    Regex,
-}
-
-/// A35-L2: 统一分段规则模型（内置 + 用户同模型）
-#[derive(Debug, Clone)]
-pub struct SegmentRule {
-    /// 规则标识（内置："builtin:quote_unclosed" 等；用户：任意）
-    pub id: String,
-    /// 规则来源
-    pub kind: SegmentRuleKind,
-    /// 正则模式（kind=Regex 时使用；kind=Builtin 时忽略）
-    pub pattern: String,
-    /// 动作类型（Builtin 谓词的 action 由 id 语义决定，此处冗余存储）
-    pub action: SegmentAction,
-    /// 是否启用
-    pub enabled: bool,
-    /// 是否内置规则（UI 不可删除，仅可开关）
-    pub builtin: bool,
-}
-
-impl SegmentRule {
-    /// 用户正则规则构造
-    pub fn user_regex(id: impl Into<String>, pattern: impl Into<String>, action: SegmentAction) -> Self {
-        Self {
-            id: id.into(),
-            kind: SegmentRuleKind::Regex,
-            pattern: pattern.into(),
-            action,
-            enabled: true,
-            builtin: false,
-        }
-    }
-
-    /// 计算规则列表哈希（用于缓存键）
-    pub fn hash_rules(rules: &[SegmentRule]) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for rule in rules {
-            rule.id.hash(&mut hasher);
-            (rule.action as u8).hash(&mut hasher);
-            rule.enabled.hash(&mut hasher);
-            if rule.kind == SegmentRuleKind::Regex {
-                rule.pattern.hash(&mut hasher);
-            }
-        }
-        hasher.finish()
-    }
-}
+/// A35-L2: 分段规则类型本体在 smart_segment，此处再导出保持既有路径
+pub use crate::processing::smart_segment::{
+    SegmentAction, SegmentRule, SegmentRuleKind, DEFAULT_SEG_THRESHOLD,
+};
 
 /// Simplified/Traditional Chinese conversion direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +89,8 @@ pub struct ProcessOptions {
     pub re_segment: bool,
     /// A35-L2: 用户自定义分段规则（内置 + 用户同模型）
     pub segment_rules: Vec<SegmentRule>,
+    /// 统一智能分段阈值（字）；默认 50
+    pub segment_threshold: usize,
     pub chinese_convert: Option<ChineseConvertType>,
     pub adapt_special_style: bool,
     pub apply_user_markings: bool,
@@ -166,6 +105,7 @@ impl Default for ProcessOptions {
             remove_duplicate_title: true,
             re_segment: false,
             segment_rules: Vec::new(),
+            segment_threshold: DEFAULT_SEG_THRESHOLD,
             chinese_convert: None,
             adapt_special_style: true,
             apply_user_markings: false,
@@ -276,9 +216,13 @@ impl ContentPreprocessor {
             content = Self::remove_duplicate_title(&content, &options.title);
         }
 
-        // Stage 2: Re-segment（A35-L2：合并式引擎 + 统一规则模型）
-        if options.re_segment || !options.segment_rules.is_empty() {
-            content = Self::re_segment(&content, &options.segment_rules);
+        // Stage 2: Re-segment（统一引擎：总开关真实控制；阈值可配）
+        if options.re_segment {
+            content = Self::re_segment_with_threshold(
+                &content,
+                &options.segment_rules,
+                options.segment_threshold,
+            );
         }
 
         // Stage 3: Protect HTML tags
@@ -394,228 +338,26 @@ impl ContentPreprocessor {
         result.join("\n")
     }
 
-    /// A35-L2 v3: 累积式分段引擎（用户钦定算法）
-    ///
-    /// 核心语义（2026-09-09 用户定义）：
-    /// - **50 字开关**：段落累积字符数 ≤ 50 时永不切分（软换行自然合并）；
-    /// - **强语气标点段尾**：超过 50 字后，遇到句末终结标点（。！？…）即断开；
-    /// - **引号吸附**：引号未闭合时永不切分（跨行对话合并）；`。”` 等闭标
-    ///   吸附到段尾（切口不落在终结标点与其闭标之间）；
-    /// - **非终结标点不作段尾**：逗号/顿号/分号/冒号/破折号永不触发切分；
-    /// - **重新计数**：切分后新段从 0 重新统计，独立判断是否再次分段。
-    ///
-    /// 硬段落边界（无条件 flush）：空行、章节标题行、场景分隔符、
-    /// 用户规则 KeepIndependent / ForceBreakBefore。
-    ///
-    /// 与 ParagraphFormatter 的关系：引擎激活（reSegment 开或用户规则非空）
-    /// 时，bridge 侧将 formatter 的 re_paragraph_mode 覆盖为 None（保留缩进），
-    /// 避免双系统打架（split_ranges 的窗口回退切分是 v2 误切根因）。
+    /// A35 统一智能分段（默认阈值 50；实现见 processing::smart_segment）
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn re_segment(content: &str, segment_rules: &[SegmentRule]) -> String {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.is_empty() {
-            return String::new();
-        }
-
-        // 内置规则开关查询（Dart 未传时按默认值兜底，兼容旧持久化数据）
-        let rule_enabled = |id: &str, default: bool| -> bool {
-            segment_rules
-                .iter()
-                .find(|r| r.id == id)
-                .map(|r| r.enabled)
-                .unwrap_or(default)
-        };
-        let quote_unclosed_on = rule_enabled("builtin:quote_unclosed", true);
-        let chapter_title_on = rule_enabled("builtin:chapter_title", true);
-        let scene_sep_on = rule_enabled("builtin:scene_separator", true);
-        let short_poem_on = rule_enabled("builtin:short_line_poem", false);
-
-        // 预编译用户正则规则并按动作分组（行级硬边界/合并压制）
-        let mut user_merge_rules: Vec<Regex> = Vec::new();
-        let mut user_break_after_rules: Vec<Regex> = Vec::new();
-        let mut user_break_before_rules: Vec<Regex> = Vec::new();
-        let mut user_independent_rules: Vec<Regex> = Vec::new();
-        for r in segment_rules {
-            if !r.enabled || r.kind != SegmentRuleKind::Regex || r.pattern.is_empty() {
-                continue;
-            }
-            match Regex::new(&r.pattern) {
-                Ok(re) => match r.action {
-                    SegmentAction::MergeWithPrev => user_merge_rules.push(re),
-                    SegmentAction::ForceBreakAfter => user_break_after_rules.push(re),
-                    SegmentAction::ForceBreakBefore => user_break_before_rules.push(re),
-                    SegmentAction::KeepIndependent => user_independent_rules.push(re),
-                },
-                Err(e) => log::warn!("分段规则正则编译失败 '{}': {}", r.pattern, e),
-            }
-        }
-        let user_indep_hit = |t: &str| user_independent_rules.iter().any(|re| re.is_match(t));
-        let user_break_before_hit = |t: &str| user_break_before_rules.iter().any(|re| re.is_match(t));
-        let user_break_after_hit = |t: &str| user_break_after_rules.iter().any(|re| re.is_match(t));
-        let user_merge_hit = |t: &str| user_merge_rules.iter().any(|re| re.is_match(t));
-
-        let mut out: Vec<String> = Vec::new();
-        let mut cur = String::new();
-        let mut count: usize = 0; // 当前段累积字符数（切分后归零重新计数）
-        let mut quote_depth: i32 = 0; // 当前段引号深度（开-闭；仅跟踪成对 CJK 引号）
-
-        macro_rules! flush {
-            () => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                    count = 0;
-                    quote_depth = 0;
-                }
-            };
-        }
-
-        for line in lines {
-            let t = line.trim();
-
-            // 空行：原始段落边界（无条件 flush）
-            if t.is_empty() {
-                flush!();
-                continue;
-            }
-
-            // 用户行级规则：独立成段 / 行前分段
-            let indep = user_indep_hit(t);
-            if indep || user_break_before_hit(t) {
-                flush!();
-            }
-            if indep {
-                out.push(t.to_string());
-                continue;
-            }
-
-            // 内置硬边界：章节标题 / 场景分隔符
-            if (chapter_title_on && Self::is_chapter_marker_line(t))
-                || (scene_sep_on && Self::is_scene_separator(t))
-            {
-                flush!();
-                out.push(t.to_string());
-                continue;
-            }
-
-            // 诗词短行独立（默认关；诗词类书籍手动开启）
-            if short_poem_on && t.chars().count() < 20 {
-                flush!();
-                out.push(t.to_string());
-                continue;
-            }
-
-            // 闭标禁则：新行以闭合引号/括号开头且当前缓冲非空 → 吸附到上一段
-            // （不得落段首；前一行行尾终结标点已触发切分的罕见排版修正）
-            if !cur.is_empty() && Self::is_closing_glue(t.chars().next().unwrap()) {
-                if let Some(prev) = out.last_mut() {
-                    prev.push_str(t);
-                    // 吸附行整体并入，不计入新段（本行不再参与切分）
-                    continue;
-                }
-            }
-
-            let user_merge = user_merge_hit(t);
-
-            // 累积式逐字符处理（跨行合并的核心：行尾不断开即自然续入下一段）
-            let chars: Vec<char> = t.chars().collect();
-            let mut k = 0usize;
-            while k < chars.len() {
-                let ch = chars[k];
-                cur.push(ch);
-                count += 1;
-                match ch {
-                    '\u{201C}' | '\u{300C}' | '\u{300E}' => quote_depth += 1, // “ 「 『
-                    '\u{201D}' | '\u{300D}' | '\u{300F}' => quote_depth -= 1, // ” 」 』
-                    _ => {}
-                }
-                k += 1;
-
-                // 50 字开关：之下永不切分
-                if count <= Self::SMART_SEG_THRESHOLD {
-                    continue;
-                }
-                // 引号吸附：未闭合永不切分
-                if quote_unclosed_on && quote_depth > 0 {
-                    continue;
-                }
-                // 用户 MergeWithPrev：该行内压制所有切分点
-                if user_merge {
-                    continue;
-                }
-
-                // 终结标点切分点：吞并紧随的闭标/续终结标点 run 后切
-                //（`。”` 不拆开、`！！` 整体、`……` 原子）
-                if Self::is_terminal_punct(ch) {
-                    let mut j = k;
-                    while j < chars.len()
-                        && (Self::is_closing_glue(chars[j]) || Self::is_terminal_punct(chars[j]))
-                    {
-                        j += 1;
-                    }
-                    while k < j {
-                        let g = chars[k];
-                        cur.push(g);
-                        count += 1;
-                        match g {
-                            '\u{201C}' | '\u{300C}' | '\u{300E}' => quote_depth += 1,
-                            '\u{201D}' | '\u{300D}' | '\u{300F}' => quote_depth -= 1,
-                            _ => {}
-                        }
-                        k += 1;
-                    }
-                    flush!();
-                }
-                // 注意：孤立闭合引号（前无终结标点，如 “知行合一”的功夫）不是切分点
-            }
-
-            // 用户行级规则：行后强制分段
-            if user_break_after_hit(t) {
-                flush!();
-            }
-        }
-        flush!();
-
-        out.join("\n")
+        Self::re_segment_with_threshold(content, segment_rules, DEFAULT_SEG_THRESHOLD)
     }
 
-    /// A35-L2: 智能分段阈值（字）——分段开关：累积超过此字数后，
-    /// 终结标点才成为切分候选；之下所有软换行合并为一段。
-    pub const SMART_SEG_THRESHOLD: usize = 50;
-
-    /// 终结标点（强语气段尾）：。！？…（省略号原子性由调用方 run 吞并保证；
-    /// 刻意不含分号/冒号/逗号/顿号/破折号——非终结标点不作段尾）
-    fn is_terminal_punct(c: char) -> bool {
-        matches!(c, '。' | '！' | '？' | '…')
+    /// 阈值可配的智能分段入口
+    fn re_segment_with_threshold(
+        content: &str,
+        segment_rules: &[SegmentRule],
+        threshold: usize,
+    ) -> String {
+        let config =
+            crate::processing::smart_segment::SmartSegConfig::from_rules(threshold, segment_rules);
+        crate::processing::smart_segment::segment_lines(content, &config).join("\n")
     }
 
-    /// 闭标吸附集：终结标点后紧随这些字符时不切，吞并到段尾
-    ///（”不得落段首；！” ？） 等组合整体收尾）
-    fn is_closing_glue(c: char) -> bool {
-        matches!(
-            c,
-            '\u{201D}' | '\u{2019}' | '」' | '』' | '）' | '】' | '》' | '〉' | '〕'
-        )
-    }
-
-    /// 章节标题行：第X章/回/卷/节/集/部/篇（独立成段硬边界）
-    fn is_chapter_marker_line(line: &str) -> bool {
-        use std::sync::OnceLock;
-        static CHAPTER_RE: OnceLock<Regex> = OnceLock::new();
-        let re = CHAPTER_RE.get_or_init(|| {
-            Regex::new(r"^第[0-9零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+\s*[章回卷节集部篇]").expect("章节标题正则编译必胜")
-        });
-        re.is_match(line)
-    }
-
-    /// 场景切换分隔符：*** / ---（至少3个）
-    fn is_scene_separator(line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.chars().count() < 3 {
-            return false;
-        }
-        let all_stars = trimmed.chars().all(|c| c == '*');
-        let all_dashes = trimmed.chars().all(|c| c == '-' || c == '—');
-        all_stars || all_dashes
-    }
+    /// 智能分段默认阈值（字）——可经 ProcessOptions.segment_threshold 覆盖
+    pub const SMART_SEG_THRESHOLD: usize = DEFAULT_SEG_THRESHOLD;
 
     /// Simplified -> Traditional Chinese conversion.
     ///

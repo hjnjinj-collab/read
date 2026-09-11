@@ -159,8 +159,8 @@ class ReaderSettings {
         enableIndent: true,
         indentSizeChars: 2,
         paragraphSpacingMultiplier: 1.0,
-        reParagraphMode: 1,
-        smartSplitThreshold: 200,
+        reParagraphMode: 0, // 统一后 M9 三选一退役，恒 None
+        smartSplitThreshold: 50, // 统一智能分段默认阈值
         aggressiveSplitThreshold: 100,
         justify: false,
         punctuationCompress: false,
@@ -198,8 +198,13 @@ class ReaderSettings {
         enableIndent: _b(j, 'enableIndent', true),
         indentSizeChars: _i(j, 'indentSizeChars', 2),
         paragraphSpacingMultiplier: _d(j, 'paragraphSpacingMultiplier', 1.0),
-        reParagraphMode: _i(j, 'reParagraphMode', 1),
-        smartSplitThreshold: _i(j, 'smartSplitThreshold', 200),
+        // M9 三选一退役：读入忽略，恒 None（仅缩进）
+        reParagraphMode: 0,
+        // 迁移：旧默认 200（M9 滑杆）→ 统一引擎默认 50；用户显式改过的其它值保留
+        smartSplitThreshold: () {
+          final v = _i(j, 'smartSplitThreshold', 50);
+          return v == 200 ? 50 : v;
+        }(),
         aggressiveSplitThreshold: _i(j, 'aggressiveSplitThreshold', 100),
         justify: _b(j, 'justify', false),
         punctuationCompress: _b(j, 'punctuationCompress', false),

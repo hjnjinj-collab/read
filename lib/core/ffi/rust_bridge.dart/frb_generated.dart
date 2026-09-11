@@ -305,6 +305,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   });
 
   Future<PageInfo> crateApiGetPageProcessed({
@@ -350,6 +352,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   });
 
   Future<String> crateApiGetPaginationCacheStats();
@@ -422,6 +426,8 @@ abstract class RustLibApi extends BaseApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   });
 
   Future<String> crateApiProcessChapterContent({
@@ -1855,6 +1861,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1877,6 +1885,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_64(paraFormatHash, serializer);
           sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_bool(reSegment, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 46, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_usize, decodeErrorData: sse_decode_AnyhowException),
@@ -1899,6 +1909,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paraFormatHash,
           removeDuplicateTitle,
           replaceRules,
+          reSegment,
+          segmentRules,
         ],
         apiImpl: this,
       ),
@@ -1925,6 +1937,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paraFormatHash",
       "removeDuplicateTitle",
       "replaceRules",
+      "reSegment",
+      "segmentRules",
     ],
   );
 
@@ -2053,6 +2067,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2077,6 +2093,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_64(paraFormatHash, serializer);
           sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_bool(reSegment, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 48, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_page_info, decodeErrorData: sse_decode_AnyhowException),
@@ -2101,6 +2119,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paraFormatHash,
           removeDuplicateTitle,
           replaceRules,
+          reSegment,
+          segmentRules,
         ],
         apiImpl: this,
       ),
@@ -2129,6 +2149,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paraFormatHash",
       "removeDuplicateTitle",
       "replaceRules",
+      "reSegment",
+      "segmentRules",
     ],
   );
 
@@ -2534,6 +2556,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required BigInt paraFormatHash,
     required bool removeDuplicateTitle,
     required List<FfiReplaceRule> replaceRules,
+    required bool reSegment,
+    required List<FfiSegmentRule> segmentRules,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2556,6 +2580,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_64(paraFormatHash, serializer);
           sse_encode_bool(removeDuplicateTitle, serializer);
           sse_encode_list_ffi_replace_rule(replaceRules, serializer);
+          sse_encode_bool(reSegment, serializer);
+          sse_encode_list_ffi_segment_rule(segmentRules, serializer);
           pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 65, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_bool, decodeErrorData: sse_decode_AnyhowException),
@@ -2578,6 +2604,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           paraFormatHash,
           removeDuplicateTitle,
           replaceRules,
+          reSegment,
+          segmentRules,
         ],
         apiImpl: this,
       ),
@@ -2604,6 +2632,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "paraFormatHash",
       "removeDuplicateTitle",
       "replaceRules",
+      "reSegment",
+      "segmentRules",
     ],
   );
 

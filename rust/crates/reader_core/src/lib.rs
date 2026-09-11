@@ -34,6 +34,7 @@ pub use processing::{
     ParagraphFormatter,
     split_pieces, split_ranges,
     AGGRESSIVE_THRESHOLD, SMART_THRESHOLD,
+    segment_lines, split_paragraph_ranges, SmartSegConfig, DEFAULT_SEG_THRESHOLD,
 };
 
 pub use scheduler::{

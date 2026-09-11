@@ -740,6 +740,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A30 | 书内全文搜索（Rust 统一 API + 锚点对齐单测 + UI 跳转） | ✅ 2026-09-07 |
 | A30b | EPUB 替换规则接入（块级应用 + rules_hash 缓存键）+ 搜索键盘/跳转闪帧修复 | ✅ 2026-09-07 |
 | A31 | 笔记与划线（长按选区、行级字符区间、高亮渲染、备注、批量定位页码、移动端弹窗适配、页尾空选区防御、onPointerCancel 复位、BOOKS 锁纪律审计） | ✅ 2026-09-11 |
+| A32 | 统一智能分段：A35 核双路径（TXT 行流/EPUB 块内）+ M9 三选一退役 + 阈值可配默认50 + 省略号跨行原子 + 总开关真实控制 | ✅ 2026-09-12 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：

@@ -48,7 +48,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   bool _enableIndent = true;
   int _indentSizeChars = 2;
   double _paragraphSpacingMultiplier = 1.0;
-  int _reParagraphMode = 1; // 0=不处理 1=智能分段 2=强制重排
+  // M9 三选一已退役；字段保留以兼容持久化读入，恒写 0
   // M9.2：超长段切分阈值（字，用户可调）
   int _smartSplitThreshold = 200;
   int _aggressiveSplitThreshold = 100;
@@ -95,7 +95,6 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _enableIndent = n.enableIndent;
     _indentSizeChars = n.indentSizeChars;
     _paragraphSpacingMultiplier = n.paragraphSpacingMultiplier;
-    _reParagraphMode = n.reParagraphMode;
     _smartSplitThreshold = n.smartSplitThreshold;
     _aggressiveSplitThreshold = n.aggressiveSplitThreshold;
     _justify = n.justify;
@@ -276,7 +275,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         enableIndent: _enableIndent,
         indentSizeChars: _indentSizeChars,
         paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
-        reParagraphMode: _reParagraphMode,
+        reParagraphMode: 0, // M9 三选一退役，恒 None
         smartSplitThreshold: _smartSplitThreshold,
         aggressiveSplitThreshold: _aggressiveSplitThreshold,
         justify: _justify,
@@ -479,12 +478,42 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                 ),
                 _buildSwitchTile(
                   title: '智能分段',
-                  subtitle: '合并软换行：超过 50 字后在句末标点处分段，引号自动吸附',
+                  subtitle: '合并软换行：超过阈值后在句末标点处分段，引号自动吸附（TXT/EPUB）',
                   value: _reSegment,
                   onChanged: (value) {
                     setState(() => _reSegment = value);
                   },
                 ),
+                if (_reSegment)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '分段阈值：$_smartSplitThreshold 字',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        const Text(
+                          '超过该长度的段落在强语气标点处切开（默认 50）',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Slider(
+                          value: _smartSplitThreshold
+                              .clamp(20, 2000)
+                              .toDouble(),
+                          min: 20,
+                          max: 2000,
+                          divisions: 198,
+                          label: '$_smartSplitThreshold',
+                          onChanged: (value) {
+                            setState(
+                                () => _smartSplitThreshold = value.round());
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ..._buildSegmentRulesSection(), // A35-L2: 分段规则管理
 
                 const SizedBox(height: 24),
@@ -700,105 +729,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                     setState(() => _punctuationCompress = value);
                   },
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      RadioListTile<int>(
-                        title: const Text('不处理'),
-                        subtitle: const Text('保留原始段落结构', style: TextStyle(fontSize: 12)),
-                        value: 0,
-                        groupValue: _reParagraphMode,
-                        onChanged: (value) {
-                          setState(() => _reParagraphMode = value!);
-                        },
-                      ),
-                      RadioListTile<int>(
-                        title: const Text('智能分段'),
-                        subtitle: const Text('识别段落边界优化排版', style: TextStyle(fontSize: 12)),
-                        value: 1,
-                        groupValue: _reParagraphMode,
-                        onChanged: (value) {
-                          setState(() => _reParagraphMode = value!);
-                        },
-                      ),
-                      RadioListTile<int>(
-                        title: const Text('强制重排'),
-                        subtitle: const Text('按换行符强制重新分段', style: TextStyle(fontSize: 12)),
-                        value: 2,
-                        groupValue: _reParagraphMode,
-                        onChanged: (value) {
-                          setState(() => _reParagraphMode = value!);
-                        },
-                      ),
-                      // M9.2：超长段切分阈值（随模式启用显示对应滑杆）
-                      if (_reParagraphMode == 1)
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                '智能切分阈值：$_smartSplitThreshold 字',
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                '超过该长度的段落按标点切成短段',
-                                style: TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                            ),
-                            Slider(
-                              value: _smartSplitThreshold.toDouble(),
-                              min: 50,
-                              max: 500,
-                              divisions: 45,
-                              label: '$_smartSplitThreshold',
-                              onChanged: (value) {
-                                setState(() => _smartSplitThreshold = value.round());
-                              },
-                            ),
-                          ],
-                        ),
-                      if (_reParagraphMode == 2)
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                '强制切分阈值：$_aggressiveSplitThreshold 字',
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                '合并后超过该长度的段落按标点切开',
-                                style: TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                            ),
-                            Slider(
-                              value: _aggressiveSplitThreshold.toDouble(),
-                              min: 50,
-                              max: 300,
-                              divisions: 25,
-                              label: '$_aggressiveSplitThreshold',
-                              onChanged: (value) {
-                                setState(() => _aggressiveSplitThreshold = value.round());
-                              },
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
+                // 统一智能分段后：M9「不处理/智能/强制」三选一已退役，
+                // 重分段统一由「内容净化 · 智能分段」总开关 + 阈值 + 规则控制。
 
                 const SizedBox(height: 24),
 

@@ -505,6 +505,20 @@ class BookService {
           )
           .toList();
 
+  List<rust_api.FfiSegmentRule> _toFfiSegmentRules(List<SegmentRuleItem> rules) =>
+      rules
+          .map(
+            (r) => rust_api.FfiSegmentRule(
+              id: r.id,
+              pattern: r.pattern,
+              action: r.actionIndex,
+              enabled: r.enabled,
+              isBuiltin: r.isBuiltin,
+              isRegex: r.isRegex,
+            ),
+          )
+          .toList();
+
   // ===== 结构化阅读路径（EPUB 路线2） =====
 
   /// 书籍格式标记（"epub" | "txt"），Dart 据此分流分页 API
@@ -585,6 +599,8 @@ class BookService {
     BigInt? paraFormatHash,
     bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
+    bool reSegment = false,
+    List<SegmentRuleItem> segmentRules = const [],
   }) async {
     final rustPage = await rust_api.getPageStructured(
       bookId: bookId,
@@ -608,6 +624,8 @@ class BookService {
       paraFormatHash: paraFormatHash ?? BigInt.zero,
       removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
+      reSegment: reSegment,
+      segmentRules: _toFfiSegmentRules(segmentRules),
     );
     return _mapPage(rustPage);
   }
@@ -631,6 +649,8 @@ class BookService {
     BigInt? paraFormatHash,
     bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
+    bool reSegment = false,
+    List<SegmentRuleItem> segmentRules = const [],
   }) async {
     final count = await rust_api.getPageCountStructured(
       bookId: bookId,
@@ -650,6 +670,8 @@ class BookService {
       paraFormatHash: paraFormatHash ?? BigInt.zero,
       removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
+      reSegment: reSegment,
+      segmentRules: _toFfiSegmentRules(segmentRules),
     );
     return count.toInt();
   }
@@ -677,6 +699,8 @@ class BookService {
     BigInt? paraFormatHash,
     bool removeDuplicateTitle = false,
     List<ReplaceRuleItem> replaceRules = const [],
+    bool reSegment = false,
+    List<SegmentRuleItem> segmentRules = const [],
   }) async {
     return await rust_api.prefetchStructuredChapter(
       bookId: bookId,
@@ -696,6 +720,8 @@ class BookService {
       paraFormatHash: paraFormatHash ?? BigInt.zero,
       removeDuplicateTitle: removeDuplicateTitle,
       replaceRules: _toFfiRules(replaceRules),
+      reSegment: reSegment,
+      segmentRules: _toFfiSegmentRules(segmentRules),
     );
   }
 

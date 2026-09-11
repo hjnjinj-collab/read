@@ -216,6 +216,8 @@ async fn test_full_pipeline() {
         chapter_index: 0,
         remove_duplicate_title: true,
         re_segment: true,
+        segment_rules: Vec::new(),
+        segment_threshold: reader_core::DEFAULT_SEG_THRESHOLD,
         chinese_convert: Some(ChineseConvertType::S2T),
         adapt_special_style: true,
         apply_user_markings: false,

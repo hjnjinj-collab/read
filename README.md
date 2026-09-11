@@ -47,7 +47,7 @@
 | 书内搜索 | ✅ | ✅（同一 IR 字符流锚点） |
 | 笔记 / 书签 | ✅ | ✅（同源锚点） |
 | 替换规则 | ✅ 整章 | ✅ 块级 |
-| 分段规则 | ✅ | — |
+| 分段规则 | ✅ 统一智能分段 | ✅ 块级（同一引擎核） |
 
 ## 🎬 翻页动画
 
@@ -245,7 +245,6 @@ flutter_rust_bridge_codegen generate
 
 - `PREPROCESSED_CACHE` 键不含净化 config_hash（装回时靠显式 invalidate 兜底）
 - `EpubParser` 导入期 `parse(&mut self)` 与运行期 `&self` 读路径生命周期不重叠，无竞争
-- 分段规则仅 TXT 支持，EPUB 未接入
 - bridge 集成测试存在 A35-L2 签名漂移（PRE-EXISTING，待修复）
 
 ## 📚 文档
