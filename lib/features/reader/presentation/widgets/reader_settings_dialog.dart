@@ -500,11 +500,11 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                         ),
                         Slider(
                           value: _smartSplitThreshold
-                              .clamp(5, 2000)
+                              .clamp(5, 200)
                               .toDouble(),
                           min: 5,
-                          max: 2000,
-                          divisions: 399,
+                          max: 200,
+                          divisions: 39,
                           label: '$_smartSplitThreshold',
                           onChanged: (value) {
                             setState(
