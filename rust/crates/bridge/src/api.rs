@@ -2459,9 +2459,10 @@ async fn apply_replace_rules_to_blocks_inner(
 
 /// 结构化章节的「提取 + 分页」（带 LRU 缓存；键含排版配置+简繁模式）
 ///
-/// `prefer_try_lock`: 预取语义——提取段用 try_write 抢 BOOKS 写锁，
-/// 被前台占用时让路返回 Ok(None)（绝不阻塞前台）；前台调用恒传 false
-/// （阻塞等待、恒返回 Some）。
+/// `prefer_try_lock`: 预取语义——提取段用 try_read 抢 BOOKS 读锁
+/// （热点 3 改造后 structured_ex 为 &self），有写者（release_book/
+/// install 缓存）在场时让路返回 Ok(None)（绝不阻塞前台）；前台调用
+/// 恒传 false（阻塞等待、恒返回 Some）。
 ///
 /// M8-P4：返回类型改为 `Arc<Vec<PageInfo>>`，命中时 Arc::clone（~8ns）
 /// 替代整章 Vec 克隆（~数十μs），锁外取单页。
@@ -2920,7 +2921,7 @@ pub fn prefetch_structured_chapter(
 ///
 /// 快路径：read 锁内窥探 parser 资源缓存，命中直接返回。
 /// 慢路径：EpubParser.archive 已内部互斥（&self），ZIP 读取同样只取
-/// BOOKS.read()——不与前台分页（BOOKS.write）争写锁。
+/// BOOKS.read()——与前台分页（同为读锁）并发，不争写锁。
 pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Result<Vec<u8>> {
     let books = BOOKS.read().unwrap();
     let handle = books
