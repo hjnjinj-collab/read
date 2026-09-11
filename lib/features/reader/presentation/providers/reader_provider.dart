@@ -153,7 +153,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _paragraphSpacingMultiplier = 1.0;
   int _reParagraphMode = 1; // 0=不处理 1=智能分段 2=强制重排
   // M9.2：超长段切分阈值（字，用户可调；Rust 侧钳制 [20,2000]）
-  int _smartSplitThreshold = 200;
+  int _smartSplitThreshold = 50;
   int _aggressiveSplitThreshold = 100;
 
   // P2 两端对齐全局开关（EPUB 书内 justify 恒启用；TXT/Left 段跟随）

@@ -676,7 +676,7 @@ pub fn clear_content_cleaning_options() -> anyhow::Result<()> {
 ///
 /// Dart 侧调用：用户在设置 UI 修改缩进/重分段模式/切分阈值时，
 /// 通过此函数同步 Rust 全局设置，随后 FFI 分页调用自动应用。
-/// 阈值钳制在 [20, 2000]，防病态输入（过小退化为逐句切分、过大等同不切）。
+/// 阈值钳制在 [5, 2000]，防病态输入（过小退化为逐句切分、过大等同不切）。
 pub fn set_paragraph_format_settings(
     enable_indent: bool,
     indent_size_chars: u8,
@@ -696,8 +696,8 @@ pub fn set_paragraph_format_settings(
     let _ = re_paragraph_mode;
     let old_threshold = settings.smart_split_threshold;
     settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
-    settings.smart_split_threshold = smart_split_threshold.clamp(20, 2000) as usize;
-    settings.aggressive_split_threshold = aggressive_split_threshold.clamp(20, 2000) as usize;
+    settings.smart_split_threshold = smart_split_threshold.clamp(5, 2000) as usize;
+    settings.aggressive_split_threshold = aggressive_split_threshold.clamp(5, 2000) as usize;
     settings.justify = justify;
     settings.punctuation_compress = punctuation_compress;
     // 阈值变更会改变 TXT 预处理 Stage2 输出：清空预处理缓存，防陈旧命中

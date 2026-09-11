@@ -50,7 +50,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   double _paragraphSpacingMultiplier = 1.0;
   // M9 三选一已退役；字段保留以兼容持久化读入，恒写 0
   // M9.2：超长段切分阈值（字，用户可调）
-  int _smartSplitThreshold = 200;
+  int _smartSplitThreshold = 50;
   int _aggressiveSplitThreshold = 100;
 
   // P2 两端对齐（EPUB 书内 justify 恒启用；TXT/Left 段跟随本开关）
@@ -500,11 +500,11 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                         ),
                         Slider(
                           value: _smartSplitThreshold
-                              .clamp(20, 2000)
+                              .clamp(5, 2000)
                               .toDouble(),
-                          min: 20,
+                          min: 5,
                           max: 2000,
-                          divisions: 198,
+                          divisions: 399,
                           label: '$_smartSplitThreshold',
                           onChanged: (value) {
                             setState(
@@ -763,11 +763,6 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
 
                 const SizedBox(height: 24),
 
-                // A35-L2: 分段规则区块（智能分段开启时生效）
-                ..._buildSegmentRulesSection(),
-
-                const SizedBox(height: 24),
-
                 // Replace rules section
                 _buildSectionHeader('替换规则'),
                 const SizedBox(height: 8),
@@ -908,11 +903,11 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     return [
       _buildSectionHeader('分段规则'),
       const SizedBox(height: 4),
-      const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 4),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Text(
-          '智能分段开启时生效：软换行合并为段落，超过 50 字后在句末标点（。！？…）处切分，引号未闭合自动吸附',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+          '智能分段开启时生效：软换行合并为段落，超过 $_smartSplitThreshold 字后在句末标点（。！？…）处切分，引号未闭合自动吸附；无终结构时按次级标点/硬上限兜底切开',
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
         ),
       ),
       const SizedBox(height: 8),

@@ -148,6 +148,43 @@ pub fn is_terminal_punct(c: char) -> bool {
     matches!(c, '。' | '！' | '？' | '…')
 }
 
+/// 次级标点：无终结构时的硬上限兜底切点（仍吞并紧随闭标）
+pub fn is_secondary_punct(c: char) -> bool {
+    matches!(c, '，' | '、' | '；' | '：' | ',' | ';' | ':')
+}
+
+/// 硬上限：累积超过此长度仍无终结构时强制切开（2×阈值，至少阈值+10）
+pub fn hard_limit(threshold: usize) -> usize {
+    threshold.saturating_mul(2).max(threshold.saturating_add(10))
+}
+
+/// 在 buf 中自 from 起找最后一次级标点，切开为 (前段, 剩余)；找不到返回 None
+fn split_at_last_secondary(buf: &str, from: usize) -> Option<(String, String)> {
+    let chars: Vec<char> = buf.chars().collect();
+    if chars.len() <= from {
+        return None;
+    }
+    let pos = chars[from..]
+        .iter()
+        .rposition(|&c| is_secondary_punct(c))
+        .map(|i| i + from)?;
+    let head: String = chars[..=pos].iter().collect();
+    let tail: String = chars[pos + 1..].iter().collect();
+    Some((head, tail))
+}
+
+fn recount_quote_depth(s: &str) -> i32 {
+    let mut d = 0i32;
+    for c in s.chars() {
+        if is_open_quote(c) {
+            d += 1;
+        } else if is_close_quote(c) {
+            d -= 1;
+        }
+    }
+    d
+}
+
 /// 闭标吸附集：终结标点后紧随这些字符时不切，吞并到段尾
 ///（”不得落段首；！” ？） 等组合整体收尾）
 pub fn is_closing_glue(c: char) -> bool {
@@ -319,6 +356,30 @@ pub fn segment_lines(content: &str, config: &SmartSegConfig) -> Vec<String> {
                 } else {
                     flush!();
                 }
+            } else if count >= hard_limit(config.threshold) {
+                // 无终结构兜底：次级标点优先，否则段内回溯次级，再否则硬切
+                if is_secondary_punct(ch) {
+                    let mut j = k;
+                    while j < chars.len() && is_closing_glue(chars[j]) {
+                        j += 1;
+                    }
+                    while k < j {
+                        let g = chars[k];
+                        cur.push(g);
+                        count += 1;
+                        k += 1;
+                    }
+                    flush!();
+                } else if let Some((head, tail)) =
+                    split_at_last_secondary(&cur, config.threshold)
+                {
+                    out.push(head);
+                    quote_depth = recount_quote_depth(&tail);
+                    count = tail.chars().count();
+                    cur = tail;
+                } else {
+                    flush!();
+                }
             }
         }
 
@@ -394,6 +455,46 @@ pub fn split_paragraph_ranges(text: &str, config: &SmartSegConfig) -> Vec<(usize
             start = k;
             count = 0;
             quote_depth = 0;
+        } else if count >= hard_limit(config.threshold) {
+            // 无终结构兜底（与 segment_lines 同语义）
+            if is_secondary_punct(ch) {
+                let mut j = k;
+                while j < total && is_closing_glue(chars[j]) {
+                    j += 1;
+                }
+                while k < j {
+                    let g = chars[k];
+                    count += 1;
+                    if is_open_quote(g) {
+                        quote_depth += 1;
+                    } else if is_close_quote(g) {
+                        quote_depth -= 1;
+                    }
+                    k += 1;
+                }
+                out.push((start, k));
+                start = k;
+                count = 0;
+                quote_depth = 0;
+            } else {
+                // 段内自 threshold 起回溯次级标点
+                let piece: String = chars[start..k].iter().collect();
+                if let Some((head, tail)) =
+                    split_at_last_secondary(&piece, config.threshold)
+                {
+                    let cut = start + head.chars().count();
+                    out.push((start, cut));
+                    start = cut;
+                    // tail 是当前段剩余，已含刚读入的 ch；k 不回退，count 按 tail 重算
+                    count = tail.chars().count();
+                    quote_depth = recount_quote_depth(&tail);
+                } else {
+                    out.push((start, k));
+                    start = k;
+                    count = 0;
+                    quote_depth = 0;
+                }
+            }
         }
     }
     if start < total {
@@ -570,5 +671,53 @@ mod tests {
         let text = "短段落。";
         let ranges = split_paragraph_ranges(text, &cfg50());
         assert_eq!(ranges, vec![(0, text.chars().count())]);
+    }
+
+    #[test]
+    fn no_terminal_hard_limit_splits() {
+        // 超 2×阈值仍无终结构 → 次级标点兜底切开
+        let text = format!("{}，{}", "甲".repeat(55), "乙".repeat(55));
+        let paras = segment_lines(&text, &cfg50());
+        assert!(
+            paras.len() >= 2,
+            "无终结构长段应在硬上限附近切开: {:?}",
+            paras.iter().map(|p| p.chars().count()).collect::<Vec<_>>()
+        );
+        let joined = paras.join("");
+        assert_eq!(joined, text, "兜底切分不得丢字");
+    }
+
+    #[test]
+    fn no_punct_at_all_hard_cuts() {
+        // 全程无任何标点：硬上限处硬切
+        let text = "甲".repeat(120);
+        let paras = segment_lines(&text, &cfg50());
+        assert!(paras.len() >= 2, "无标点 120 字应硬切: {}", paras.len());
+        for p in &paras {
+            assert!(
+                p.chars().count() <= hard_limit(50) + 1,
+                "片段过长 {}",
+                p.chars().count()
+            );
+        }
+        assert_eq!(paras.concat(), text);
+    }
+
+    #[test]
+    fn ranges_no_terminal_hard_limit() {
+        let text = format!("{}，{}", "甲".repeat(55), "乙".repeat(55));
+        let ranges = split_paragraph_ranges(&text, &cfg50());
+        assert!(ranges.len() >= 2, "EPUB 无终结构也应兜底切开");
+        let total = text.chars().count();
+        assert_eq!(ranges.first().map(|r| r.0), Some(0));
+        assert_eq!(ranges.last().map(|r| r.1), Some(total));
+    }
+
+    #[test]
+    fn quote_open_still_suppresses_hard_limit() {
+        // 引号未闭合时硬上限也不得切开
+        let text = format!("\u{201C}{}", "甲".repeat(120));
+        let paras = segment_lines(&text, &cfg50());
+        assert_eq!(paras.len(), 1, "未闭合引号内禁止硬切");
     }
 }
