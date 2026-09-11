@@ -99,24 +99,43 @@ class ReaderMenu extends ConsumerWidget {
             // Progress slider
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Row(
-                children: [
-                  const Icon(Icons.book, size: 20),
-                  Expanded(
-                    child: Slider(
-                      value: state.currentPageIndex.toDouble(),
-                      min: 0,
-                      max: 100, // TODO: Calculate actual page count
-                      onChanged: (value) {
-                        // TODO: Jump to page
-                      },
-                    ),
-                  ),
-                  Text(
-                    '${state.currentPageIndex + 1}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ],
+              child: Builder(
+                builder: (context) {
+                  final notifier = ref.read(readerProvider.notifier);
+                  final pageCount = state.currentChapterPageCount;
+                  final maxIndex = (pageCount - 1).clamp(0, 1 << 30).toDouble();
+                  final current = state.currentPageIndex
+                      .clamp(0, maxIndex.toInt())
+                      .toDouble();
+                  return Row(
+                    children: [
+                      const Icon(Icons.book, size: 20),
+                      Expanded(
+                        child: Slider(
+                          value: pageCount <= 0 ? 0 : current,
+                          min: 0,
+                          max: pageCount <= 0 ? 1 : maxIndex,
+                          onChanged: pageCount <= 0
+                              ? null
+                              : (value) {
+                                  // 拖动中不跳页，松手再跳（避免连发 FFI）
+                                },
+                          onChangeEnd: pageCount <= 0
+                              ? null
+                              : (value) {
+                                  notifier.jumpToPage(value.round());
+                                },
+                        ),
+                      ),
+                      Text(
+                        pageCount <= 0
+                            ? '${state.currentPageIndex + 1}'
+                            : '${state.currentPageIndex + 1}/$pageCount',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
 
@@ -125,24 +144,30 @@ class ReaderMenu extends ConsumerWidget {
             // Font size control
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Row(
-                children: [
-                  const Text('Font Size:'),
-                  const SizedBox(width: 16),
-                  IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: () {
-                      // TODO: Decrease font size
-                    },
-                  ),
-                  const Text('18'),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: () {
-                      // TODO: Increase font size
-                    },
-                  ),
-                ],
+              child: Builder(
+                builder: (context) {
+                  final notifier = ref.read(readerProvider.notifier);
+                  final size = notifier.fontSize.round();
+                  return Row(
+                    children: [
+                      const Text('字号:'),
+                      const SizedBox(width: 16),
+                      IconButton(
+                        icon: const Icon(Icons.remove),
+                        onPressed: size <= 10
+                            ? null
+                            : () => notifier.setFontSize((size - 1).toDouble()),
+                      ),
+                      Text('$size'),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: size >= 40
+                            ? null
+                            : () => notifier.setFontSize((size + 1).toDouble()),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
 

@@ -97,6 +97,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // A31-v3: 章节笔记缓存的章节索引（用于判断是否需要重查）
   int? _cachedNotesChapterIndex;
 
+  /// currentChapterPageCount 所属章节（-1=未知）。换章导航多在
+  /// _loadCurrentPage 前就改了 currentChapterIndex，不能只靠 targetChapterIndex。
+  int _pageCountForChapter = -1;
+
   /// 未注入笔记的原始页（布局层单轨：state.currentPage 恒为 enrich 后结果；
   /// 笔记变更时从本字段重新 enrich，避免在已注入 segments 上二次叠加）
   PageInfo? _rawCurrentPage;
@@ -409,7 +413,38 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // P6 修复：必须带锚点重定位——新排版页码与旧页码不对应，
       // 裸页码越界会打回 "Page not found" 错误页（滑杆路径回归）
       _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+      unawaited(refreshCurrentChapterPageCount());
     }
+  }
+
+  /// 刷新当前章页数（菜单滑杆 max 用）
+  Future<void> refreshCurrentChapterPageCount() async {
+    if (state.bookId == null) return;
+    final chapterIndex = state.currentChapterIndex;
+    try {
+      final count = await _pageCountOf(chapterIndex);
+      _pageCountForChapter = chapterIndex;
+      if (count != state.currentChapterPageCount) {
+        state = state.copyWith(currentChapterPageCount: count);
+      }
+    } catch (_) {
+      // 页数失败不影响阅读
+    }
+  }
+
+  /// 跳转到当前章指定页（0-based）
+  Future<void> jumpToPage(int pageIndex) async {
+    if (state.bookId == null) return;
+    final count = state.currentChapterPageCount > 0
+        ? state.currentChapterPageCount
+        : await _pageCountOf(state.currentChapterIndex);
+    if (count <= 0) return;
+    final idx = pageIndex.clamp(0, count - 1);
+    state = state.copyWith(
+      currentPageIndex: idx,
+      currentChapterPageCount: count,
+    );
+    await _loadCurrentPage();
   }
 
   /// P6：行距变更（设置面板滑杆，即时生效）。
@@ -425,6 +460,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (state.bookId != null) {
       // P6 修复：带锚点重定位（同 setFontSize）
       _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+      unawaited(refreshCurrentChapterPageCount());
     }
   }
 
@@ -630,11 +666,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _rawCurrentPage = null;
     _rawPageCache.clear();
     _cachedNotesChapterIndex = null;
+    _pageCountForChapter = -1;
     clearSelection();
     state = state.copyWith(
       isLoading: true,
       error: null,
       currentChapterNotes: const [],
+      currentChapterPageCount: 0,
     );
     // 发布 loading 占位（无 frame；会话已推进，旧集合全部作废）
     _renderStore.publishEmpty(isLoading: true, message: '正在打开书籍…');
@@ -696,6 +734,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // A31 布局层单轨：加载页后刷本章笔记（内部会从 _rawCurrentPage re-enrich）
       await _refreshCurrentChapterNotes(force: true);
+      unawaited(refreshCurrentChapterPageCount());
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
@@ -878,6 +917,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'page': '${page.chapterIndex}/${page.pageIndex}',
         'range': '${page.startCharIndex}-${page.endCharIndex}',
       });
+
+      // 菜单滑杆页数：页数所属章 ≠ 当前展示章时必刷（覆盖换章/翻页/adopt）
+      if (_pageCountForChapter != page.chapterIndex ||
+          state.currentChapterPageCount <= 0) {
+        unawaited(refreshCurrentChapterPageCount());
+      }
 
       // 阶段1优化：立即预热当前页图片（fire-and-forget）
       // 在邻居页加载前启动，用户首屏图片零延迟
@@ -2818,6 +2863,9 @@ class ReadingState {
   /// A31-v3: 当前章节笔记（Riverpod 响应式，变更自动触发重建）
   final List<Note> currentChapterNotes;
 
+  /// 当前章页数（0=未知/加载中）
+  final int currentChapterPageCount;
+
   const ReadingState({
     this.bookId,
     this.filePath,
@@ -2829,6 +2877,7 @@ class ReadingState {
     this.isLoading = false,
     this.error,
     this.currentChapterNotes = const [],
+    this.currentChapterPageCount = 0,
   });
 
   ReadingState copyWith({
@@ -2842,6 +2891,7 @@ class ReadingState {
     bool? isLoading,
     String? error,
     List<Note>? currentChapterNotes,
+    int? currentChapterPageCount,
   }) {
     return ReadingState(
       bookId: bookId ?? this.bookId,
@@ -2854,6 +2904,8 @@ class ReadingState {
       isLoading: isLoading ?? this.isLoading,
       error: error ?? this.error,
       currentChapterNotes: currentChapterNotes ?? this.currentChapterNotes,
+      currentChapterPageCount:
+          currentChapterPageCount ?? this.currentChapterPageCount,
     );
   }
 }
