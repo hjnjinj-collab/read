@@ -3,7 +3,7 @@ feature: unified-smart-segmentation
 status: delivered
 updated: 2026-09-12
 branch: master
-commits: bb99730..HEAD
+commits: bb99730..6746006
 ---
 
 # 统一智能分段（A35 语义双路径）
