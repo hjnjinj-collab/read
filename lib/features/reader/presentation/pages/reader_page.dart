@@ -56,6 +56,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   /// A31-v6 P4: 笔记模式标志（激活后完全屏蔽翻页手势）
   bool _isNoteMode = false;
 
+  /// A31-bugfix: 锚定选区区间——长按/已有选区后，手指仍在选区内微抖时
+  /// 不得调用 updateSelection 重设尾端（否则整词塌缩回单字）
+  int? _selectionAnchorStart;
+  int? _selectionAnchorEnd;
+
   /// P4: 翻页合成器的 key，用于调用其方法
   final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
 
@@ -246,6 +251,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           notifier.prepareDragCache(page); // A31-v5: 预构建 TextPainter 缓存
           // 词边界整词选中，避免摘录只剩首字
           notifier.beginSelection(wordStart, end: wordEnd);
+          // A31-bugfix: 锚定初始选区——按住期间的抖动不塌缩
+          _selectionAnchorStart = notifier.selectionStart;
+          _selectionAnchorEnd = notifier.selectionEnd;
         }
       });
     }
@@ -275,7 +283,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       if (page != null) {
         final hitOffset = notifier.hitTestCharOffset(local, page);
         if (hitOffset != null) {
-          notifier.updateSelection(hitOffset);
+          // A31-bugfix: 手指仍在锚定选区内 → 保持既有选区。电容屏微抖
+          // 持续产生 PointerMove（raw Listener 无 touch-slop 过滤），
+          // 直接 updateSelection 会把整词尾端 clamp 回单字。
+          // 锚随手势 lazy 快照：pointer-up 清锚后，新手势锚定当前选区。
+          _selectionAnchorStart ??= notifier.selectionStart;
+          _selectionAnchorEnd ??= notifier.selectionEnd;
+          final anchored = hitOffset >= _selectionAnchorStart! &&
+              hitOffset < _selectionAnchorEnd!;
+          if (!anchored) {
+            notifier.updateSelection(hitOffset);
+          }
         }
       }
       return; // 选区模式下不触发翻页
@@ -331,6 +349,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     if (_longPressTriggered) {
       _longPressTriggered = false;
       _isNoteMode = false; // P4 修复：拖拽结束后退出独占模式
+      _selectionAnchorStart = null; // A31-bugfix: 清锚，下次手势重锚当前选区
+      _selectionAnchorEnd = null;
       return;
     }
 
@@ -346,6 +366,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         _isNoteMode = false; // P4: 单击空白退出笔记模式
         notifier.clearDragCache();
       }
+      _selectionAnchorStart = null; // A31-bugfix: 清锚
+      _selectionAnchorEnd = null;
       return; // 选区模式下不触发翻页
     }
 
