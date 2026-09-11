@@ -30,38 +30,47 @@ class _ShaderPrograms {
   static Future<ui.FragmentProgram>? _collapse;
 
   static Future<ui.FragmentProgram> ripple() async {
-    if (_ripple != null) {
-      try {
-        return await _ripple!;
-      } catch (_) {
-        _ripple = null; // 失败驱逐，下次可重试
+    while (true) {
+      final existing = _ripple;
+      if (existing != null) {
+        try {
+          return await existing;
+        } catch (_) {
+          // identical 保护：并发失败唤醒时不得驱逐他人刚写入的在途 Future
+          if (identical(_ripple, existing)) _ripple = null;
+          continue;
+        }
       }
-    }
-    final f = ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
-    _ripple = f;
-    try {
-      return await f;
-    } catch (e) {
-      if (identical(_ripple, f)) _ripple = null;
-      rethrow;
+      final f = ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
+      _ripple = f;
+      try {
+        return await f;
+      } catch (e) {
+        if (identical(_ripple, f)) _ripple = null;
+        rethrow;
+      }
     }
   }
 
   static Future<ui.FragmentProgram> collapse() async {
-    if (_collapse != null) {
-      try {
-        return await _collapse!;
-      } catch (_) {
-        _collapse = null;
+    while (true) {
+      final existing = _collapse;
+      if (existing != null) {
+        try {
+          return await existing;
+        } catch (_) {
+          if (identical(_collapse, existing)) _collapse = null;
+          continue;
+        }
       }
-    }
-    final f = ui.FragmentProgram.fromAsset('shaders/block_collapse.frag');
-    _collapse = f;
-    try {
-      return await f;
-    } catch (e) {
-      if (identical(_collapse, f)) _collapse = null;
-      rethrow;
+      final f = ui.FragmentProgram.fromAsset('shaders/block_collapse.frag');
+      _collapse = f;
+      try {
+        return await f;
+      } catch (e) {
+        if (identical(_collapse, f)) _collapse = null;
+        rethrow;
+      }
     }
   }
 
@@ -590,6 +599,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       img.dispose();
     }
     _snapshotCache.clear();
+    // shader 实例随 composer 生命周期释放（program 本身在进程缓存中复用）
+    _rippleShredderShader?.dispose();
+    _rippleShredderShader = null;
+    _collapseShader?.dispose();
+    _collapseShader = null;
     super.dispose();
   }
 
@@ -923,15 +937,22 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _rippleSeed = math.Random().nextDouble() * 100.0;
 
     // —— shader 就绪门控（修复：进书首翻强制 curl/仿真兜底）——
-    // program 走进程缓存，启动预热后此处同步完成；冷启动极端情况
-    // 有界等待，仍未就绪才放行走既有 curl 兜底（保功能不冻结）。
-    if (_isBlockShaderMode &&
-        _rippleShredderShader == null &&
-        _collapseShader == null) {
-      try {
-        await _loadShaders()
-            .timeout(const Duration(milliseconds: 500), onTimeout: () {});
-      } catch (_) {/* 加载失败由下方绘制层 curl 兜底承接 */}
+    // 按当前 mode 判「所需 shader」：_loadShaders 串行加载，双 null
+    // 判据会在半就绪窗口漏过（ripple 已好、collapse 未好时 collapse
+    // 模式首翻仍走 curl）。program 走进程缓存，启动预热后此处同步
+    // 完成；冷启动极端情况有界等待，仍未就绪才放行走 curl 兜底。
+    if (_isBlockShaderMode) {
+      final shaderMissing = switch (widget.mode) {
+        PageTurnMode.ripple => _rippleShredderShader == null,
+        PageTurnMode.collapse => _collapseShader == null,
+        _ => false,
+      };
+      if (shaderMissing) {
+        try {
+          await _loadShaders()
+              .timeout(const Duration(milliseconds: 500), onTimeout: () {});
+        } catch (_) {/* 加载失败由下方绘制层 curl 兜底承接 */}
+      }
     }
     if (!mounted) return;
 
