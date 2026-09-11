@@ -1,7 +1,7 @@
 # 文档索引 - Legado Flutter
 
-> 最后更新: 2026-08-21
-> 原则: 只保留当前有效的文档，历史记录在 [archive/](./archive/) 中
+> 最后更新: 2026-09-10
+> 原则: 根目录只保留指南/架构/变更日志；一次性实施报告不入库；Bug 记录统一放 [bugfixes/](./bugfixes/)
 
 ---
 
@@ -13,7 +13,7 @@
 | [../CHANGELOG.md](../CHANGELOG.md) | **变更日志**：版本历史与功能变更记录（遵循 Keep a Changelog 格式） |
 | [BUGFIX_INDEX.md](./BUGFIX_INDEX.md) | **Bug 快速查找索引（遇到问题先看这里）**：按症状/错误信息定位根因 |
 | [BUG_FIXES.md](./BUG_FIXES.md) | Bug 修复总记录：UTF-8 边界 panic、构建问题、已知问题 |
-| [bugfixes/](./bugfixes/) | 单次问题的完整分析报告（按日期命名），含章节边界系列修复的最终结论 |
+| [bugfixes/](./bugfixes/) | 单次问题的完整分析报告（按日期命名）；根目录一次性修复/调试报告已迁入 |
 
 ## 设计文档（docs/design/）
 

@@ -62,5 +62,5 @@ Write-Host "  - 左右边距视觉上对称"
 Write-Host "  - rustW ≈ skiaW (偏差 ≤2px)"
 Write-Host "  - 含英文/标点的行不再有 11.2px 偏差"
 Write-Host ""
-Write-Host "详细说明请查看: M12_FIX_REPORT.md" -ForegroundColor Gray
+Write-Host "详细说明请查看: docs/bugfixes/2026-09-02_左右边距不对称修复_M10-B_M11_M12.md" -ForegroundColor Gray
 Write-Host ""
