@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/reader/presentation/pages/reader_page.dart';
+import 'features/reader/presentation/widgets/page_turn_composer.dart';
 import 'package:file_picker/file_picker.dart';
 import 'core/database/app_database.dart';
 import 'core/database/app_settings_service.dart';
@@ -42,6 +44,10 @@ void main() async {
   await AppSettingsService.instance.load(db);
   final settings = ReaderSettings.tryParse(
       AppSettingsService.instance.raw('reader'));
+
+  // 翻页 shader 启动预热：进程级缓存，消除进书后首翻因 program
+  // 未就绪强制 curl（仿真）兜底的窗口。fire-and-forget，不阻塞启动。
+  unawaited(PageTurnComposerState.preloadShaders());
 
   // P6 自定义字体启动恢复：持久化副本存在 → 注入两侧引擎（Rust 注册
   // 名与 Dart FontLoader 同名 = 热路径字体名），必须先于任何排版；

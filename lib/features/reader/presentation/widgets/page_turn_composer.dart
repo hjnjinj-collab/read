@@ -19,6 +19,61 @@ import 'page_turn/collapse_painter.dart';
 import 'reader_page_widget.dart';
 import '../diagnostics/reader_trace.dart';
 
+/// 进程级 FragmentProgram 缓存（singleflight + 失败驱逐）。
+///
+/// 原缺陷：PageTurnComposer 每次进书都重新 fromAsset，加载完成前
+/// `_rippleShredderShader/_collapseShader` 为 null，绘制层强制
+/// curl 兜底 → 用户首翻永远看到仿真卷曲。program 只加载一次；
+/// FragmentShader 实例仍每 composer 创建（uniform 状态不可跨 painter 共享）。
+class _ShaderPrograms {
+  static Future<ui.FragmentProgram>? _ripple;
+  static Future<ui.FragmentProgram>? _collapse;
+
+  static Future<ui.FragmentProgram> ripple() async {
+    if (_ripple != null) {
+      try {
+        return await _ripple!;
+      } catch (_) {
+        _ripple = null; // 失败驱逐，下次可重试
+      }
+    }
+    final f = ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
+    _ripple = f;
+    try {
+      return await f;
+    } catch (e) {
+      if (identical(_ripple, f)) _ripple = null;
+      rethrow;
+    }
+  }
+
+  static Future<ui.FragmentProgram> collapse() async {
+    if (_collapse != null) {
+      try {
+        return await _collapse!;
+      } catch (_) {
+        _collapse = null;
+      }
+    }
+    final f = ui.FragmentProgram.fromAsset('shaders/block_collapse.frag');
+    _collapse = f;
+    try {
+      return await f;
+    } catch (e) {
+      if (identical(_collapse, f)) _collapse = null;
+      rethrow;
+    }
+  }
+
+  /// 启动预热（main 调用）：填充缓存，进书时 _loadShaders 同步命中
+  static Future<void> preload() async {
+    await Future.wait([
+      ripple().then((_) {}, onError: (_) {}),
+      collapse().then((_) {}, onError: (_) {}),
+    ]);
+  }
+}
+
 /// P4 翻页合成 Widget — 管理动画生命周期 + 双页渲染
 ///
 /// 三种呈现：
@@ -243,11 +298,14 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
   
   /// 加载水波纹 shaders（v16 新增 ripple_shredder）+ 坍塌 shader（M3）
+  ///
+  /// 走进程级 _ShaderPrograms 缓存：启动预热后此处同步命中，
+  /// 消除「进书首翻 shader 未就绪 → 强制 curl（仿真）兜底」窗口。
   Future<void> _loadShaders() async {
     // 水波纹粉碎 shader
     try {
-      final shredderProgram = await ui.FragmentProgram.fromAsset('shaders/ripple_shredder.frag');
-      if (mounted) {
+      final shredderProgram = await _ShaderPrograms.ripple();
+      if (mounted && _rippleShredderShader == null) {
         setState(() {
           _rippleShredderShader = shredderProgram.fragmentShader();
         });
@@ -258,8 +316,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     }
     // 坍塌溶解 shader（独立 try：一个失败不影响另一个）
     try {
-      final collapseProgram = await ui.FragmentProgram.fromAsset('shaders/block_collapse.frag');
-      if (mounted) {
+      final collapseProgram = await _ShaderPrograms.collapse();
+      if (mounted && _collapseShader == null) {
         setState(() {
           _collapseShader = collapseProgram.fragmentShader();
         });
@@ -273,6 +331,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       _prewarmAllPageImages();
     }
   }
+
+  /// 启动预热入口（main 调用）：填充进程级 program 缓存
+  static Future<void> preloadShaders() => _ShaderPrograms.preload();
   
   /// 将 PageInfo 转换为 ui.Image（用于 shader 纹理采样）
   /// 2026-09-03 v16.3: 按 devicePixelRatio 生成高分辨率快照——
@@ -860,6 +921,19 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _releaseTouch = localTouch;
     _lastTouchLocal = localTouch;
     _rippleSeed = math.Random().nextDouble() * 100.0;
+
+    // —— shader 就绪门控（修复：进书首翻强制 curl/仿真兜底）——
+    // program 走进程缓存，启动预热后此处同步完成；冷启动极端情况
+    // 有界等待，仍未就绪才放行走既有 curl 兜底（保功能不冻结）。
+    if (_isBlockShaderMode &&
+        _rippleShredderShader == null &&
+        _collapseShader == null) {
+      try {
+        await _loadShaders()
+            .timeout(const Duration(milliseconds: 500), onTimeout: () {});
+      } catch (_) {/* 加载失败由下方绘制层 curl 兜底承接 */}
+    }
+    if (!mounted) return;
 
     // —— 快照就绪门控（接入预缓存体系的核心）——
     var snapshotReady = true;
