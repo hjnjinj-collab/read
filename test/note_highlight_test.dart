@@ -133,4 +133,30 @@ void main() {
       expect(g[0]!.single.id, 2);
     });
   });
+
+  group('relocateNoteInText', () {
+    test('偏移漂移后按 excerpt 找到最近位置', () {
+      const text = '前言。他走进房间，看见桌上的信。窗外有雨。他走进房间。';
+      // 旧偏移指向错误位置，excerpt 在中间
+      final start = relocateNoteInText(text, 1, '看见桌上的信');
+      expect(start, isNotNull);
+      expect(text.substring(start!, start + '看见桌上的信'.length), '看见桌上的信');
+    });
+
+    test('多处命中取距 oldStart 最近者', () {
+      const text = '前言靶子中间很多字靶子后记';
+      // 两处「靶子」：index 2 与 index 10（约）
+      final nearFirst = relocateNoteInText(text, 0, '靶子');
+      final nearSecond = relocateNoteInText(text, 12, '靶子');
+      expect(nearFirst, 2);
+      expect(nearSecond, isNotNull);
+      expect(nearSecond! > nearFirst!, isTrue);
+    });
+
+    test('无命中返回 null', () {
+      expect(relocateNoteInText('只有别的文字', 0, '不存在的摘录'), isNull);
+      expect(relocateNoteInText('', 0, 'x'), isNull);
+      expect(relocateNoteInText('abc', 0, '  '), isNull);
+    });
+  });
 }

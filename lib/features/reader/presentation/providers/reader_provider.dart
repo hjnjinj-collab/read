@@ -490,6 +490,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _invalidateFrames(reason: 'settings'); // 旧指纹 FrameSet 与待决手势作废
 
     // 检测净化选项是否变更（影响 PreprocessedCache）
+    final previousRemoveDuplicateTitle = _removeDuplicateTitle;
+    final previousChineseConvert = _chineseConvert;
+    final previousReSegment = _reSegment;
+    final previousRemoveHtml = _removeHtmlTags;
+    final previousRemoveAds = _removeAds;
     final bool needsCleaningUpdate = (
       _removeHtmlTags != removeHtmlTags ||
       _removeAds != removeAds ||
@@ -499,6 +504,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
       _replaceRules.length != replaceRules.length ||
       !_listEquals(_replaceRules, replaceRules)
     );
+    // 仅「会改正文字符」的项触发笔记重定位；replace/segment 规则
+    // 不在 getChapterContentProcessed 口径内，不在这里触发
+    final bool needsNoteRelocate = previousRemoveDuplicateTitle != removeDuplicateTitle ||
+        previousChineseConvert != chineseConvert ||
+        previousReSegment != reSegment ||
+        previousRemoveHtml != removeHtmlTags ||
+        previousRemoveAds != removeAds;
 
     _removeDuplicateTitle = removeDuplicateTitle;
     _chineseConvert = chineseConvert;
@@ -554,6 +566,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       await _loadCurrentPage(
         anchorCharOffset: state.currentPage?.startCharIndex,
       );
+      // EPUB 简繁/去重标题也会改展示偏移；processed FFI 对 EPUB 可能失败则静默 0
+      if (needsNoteRelocate) {
+        unawaited(relocateChapterNotes(state.currentChapterIndex));
+      }
       return;
     }
 
@@ -574,6 +590,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
     // 单次重载：简繁/规则经 options_hash 隔离缓存自然重算，锚点保持进度
     await _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+    // 正文口径可能变化（简繁/净化/分段）→ 本章笔记按 excerpt 模糊重定位
+    if (needsNoteRelocate) {
+      unawaited(relocateChapterNotes(state.currentChapterIndex));
+    }
   }
   
   /// 辅助方法：比较两个 ReplaceRuleItem 列表是否相等
@@ -1746,6 +1766,64 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
   }
 
+  /// 净化/简繁/分段可能改写章内偏移：按 excerpt 模糊重挂本章笔记锚点。
+  /// 返回成功更新条数。仅在正文可能变化时调用（字号/行距不触发）。
+  Future<int> relocateChapterNotes(int chapterIndex) async {
+    final bookId = state.bookId;
+    final filePath = state.filePath;
+    if (bookId == null || filePath == null) return 0;
+    final notes = await _db.notesOfChapter(filePath, chapterIndex);
+    if (notes.isEmpty) return 0;
+    String text;
+    try {
+      text = await _bookService.getChapterContentProcessed(
+        bookId,
+        chapterIndex,
+        removeDuplicateTitle: _removeDuplicateTitle,
+        reSegment: _reSegment,
+        chineseConvert: _chineseConvert == ChineseConvertType.s2t
+            ? 1
+            : _chineseConvert == ChineseConvertType.t2s
+                ? 2
+                : 0,
+      );
+    } catch (e) {
+      readerTrace('note.relocate.error', {
+        'chapter': chapterIndex,
+        'error': e.toString(),
+      });
+      return 0;
+    }
+    if (text.isEmpty) return 0;
+    var updated = 0;
+    for (final n in notes) {
+      final query = n.excerpt.trim();
+      if (query.isEmpty) continue;
+      // 偏移仍在正文范围内且摘录一致 → 无需重定位
+      final end = n.startCharOffset + query.length;
+      if (n.startCharOffset >= 0 &&
+          end <= text.length &&
+          text.substring(n.startCharOffset, end) == query) {
+        continue;
+      }
+      final newStart = relocateNoteInText(text, n.startCharOffset, n.excerpt);
+      if (newStart == null || newStart == n.startCharOffset) continue;
+      final newEnd = newStart + query.length;
+      if (newEnd > text.length) continue;
+      await _db.updateNoteOffsets(n.id, newStart, newEnd);
+      updated++;
+      readerTrace('note.relocate', {
+        'id': n.id,
+        'from': n.startCharOffset,
+        'to': newStart,
+      });
+    }
+    if (updated > 0 && chapterIndex == state.currentChapterIndex) {
+      await _refreshCurrentChapterNotes(force: true);
+    }
+    return updated;
+  }
+
   // ===== A31: 文本选区 =====
 
   /// 当前选区（null=无选区）
@@ -2530,6 +2608,34 @@ PageEntry? findEntryForHitTest(Offset localPos, List<PageEntry> entries) {
   final start = currentEnd.clamp(0, pageEnd - 1);
   final end = (p + 1).clamp(start + 1, pageEnd);
   return (start, end);
+}
+
+/// 模糊重定位：在 [text] 中找 [excerpt]，返回距 [oldStart] 最近的起点。
+/// 无命中返回 null。[window] 限制搜索范围（0=全文）。
+int? relocateNoteInText(
+  String text,
+  int oldStart,
+  String excerpt, {
+  int window = 0,
+}) {
+  if (excerpt.isEmpty || text.isEmpty) return null;
+  final query = excerpt.trim();
+  if (query.isEmpty) return null;
+  var from = 0;
+  int? best;
+  var bestDist = 1 << 30;
+  while (true) {
+    final idx = text.indexOf(query, from);
+    if (idx < 0) break;
+    from = idx + 1;
+    if (window > 0 && (idx - oldStart).abs() > window) continue;
+    final dist = (idx - oldStart).abs();
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = idx;
+    }
+  }
+  return best;
 }
 
 /// 笔记列表展示项（含批量定位页索引）

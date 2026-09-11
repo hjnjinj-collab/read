@@ -104,7 +104,7 @@ class BookService {
 
   /// Get chapter content
   Future<String> getChapterContent(
-    String bookId, 
+    String bookId,
     int chapterIndex, {
     bool removeDuplicateTitle = false,
   }) async {
@@ -112,6 +112,23 @@ class BookService {
       bookId: bookId,
       chapterIndex: BigInt.from(chapterIndex),
       removeDuplicateTitle: removeDuplicateTitle,
+    );
+  }
+
+  /// A31 模糊重定位：取与展示管线同净化口径的章节全文（简繁/去重标题/重分段）。
+  Future<String> getChapterContentProcessed(
+    String bookId,
+    int chapterIndex, {
+    required bool removeDuplicateTitle,
+    required bool reSegment,
+    required int chineseConvert,
+  }) async {
+    return rust_api.getChapterContentProcessed(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+      removeDuplicateTitle: removeDuplicateTitle,
+      reSegment: reSegment,
+      chineseConvert: chineseConvert,
     );
   }
 

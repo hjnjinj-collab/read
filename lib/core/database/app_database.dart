@@ -260,6 +260,17 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// 模糊重定位：更新章内字符区间
+  Future<int> updateNoteOffsets(int id, int startCharOffset, int endCharOffset) {
+    return (update(notes)..where((n) => n.id.equals(id))).write(
+      NotesCompanion(
+        startCharOffset: Value(startCharOffset),
+        endCharOffset: Value(endCharOffset),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
   /// 删除笔记
   Future<int> deleteNote(int id) {
     return (delete(notes)..where((n) => n.id.equals(id))).go();
