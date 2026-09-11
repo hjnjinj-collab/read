@@ -4,7 +4,7 @@ pub mod diagnostics;
 
 use book_parser::{Book, Chapter};
 use layout_engine::Page;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::collections::HashMap;
 
 /// EPUB 结构化阅读句柄（路线2：解析器随书会话存活，
@@ -24,6 +24,10 @@ pub struct BookHandle {
     pub epub_cleaned: Option<book_parser::EpubCleanedBook>,
     /// EPUB 结构化阅读句柄（路线2 主路径；EPUB 书恒有，TXT 为 None）
     pub structured: Option<StructuredEpubHandle>,
+    /// 净化缓存 singleflight 门：锁外重建期间同一本书的并发重建在此汇合
+    /// （调用方在读锁内 clone Arc 后在 BOOKS 锁外等待/持有，见 api.rs
+    /// get_chapter_content_impl 两阶段重建）
+    pub clean_rebuild_gate: Arc<Mutex<()>>,
 }
 
 /// FFI-safe chapter info
@@ -418,12 +422,15 @@ impl From<book_source_engine::BookSource> for FfiBookSource {
 // 跨锁取数据一律「作用域内探测 → 立即放锁 → 再调用」（参照 api.rs
 // batch_locate_notes 的 is_structured 探测块）。
 //
-// 审计清单（2026-09-11，api.rs 全部 26 处锁点）：
+// 审计清单（2026-09-11，api.rs 全部锁点；1.0.5 锁竞争优化后更新）：
 //   ✅ 纯读/写、作用域内不再取锁：591/678/1033/1190/1199/1238/1259/1314/
 //      1412/1462/2808/2820/2906/3060/3232(release_book)/3695/3927/4077
-//   ⚠ 持写锁做重活（锁**竞争**隐患，非死锁，待优化）：
-//      1248 ensure_cleaned_chapter_cache、1286/1397 ensure_epub_cleaned_cache
-//      （磁盘重建全书净化缓存）、3128 搜索逐章写锁、2795 资源慢路径
+//   ✅ get_chapter_content_impl（原热点1/2）：稳态只取读锁；净化缓存重建
+//      改两阶段——读锁取快照+clean_rebuild_gate → 锁外构建 → 短写锁装回
+//      + invalidate 下游缓存（PREPROCESSED_CACHE 键不含净化 config_hash）
+//   ✅ get_book_resource（原热点4）：EpubParser.archive 内部互斥，慢路径
+//      ZIP IO 也只取 BOOKS.read()
+//   ⚠ 搜索逐章 IR 提取：仍持写锁做 parser 独占提取（竞争隐患，待结构性改造）
 //   ✅ 2361 process_structured_chapter：写锁仅覆盖 IR 提取（2382 即 drop），
 //      风险在调用方——现调用方 2607/2654/2679/2716/2771 均未持锁
 //   ✅ 855 batch_locate_notes：探测后放锁（唯一发生过死锁处，已修）

@@ -43,7 +43,7 @@ pub struct Chapter {
 }
 
 /// 向后兼容的书籍结构（包含完整内容）
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Book {
     pub title: String,
     pub content: String,

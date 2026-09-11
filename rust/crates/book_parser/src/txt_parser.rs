@@ -61,6 +61,18 @@ struct CleanedChapterOffset {
     end_pos: usize,
 }
 
+/// 锁外重建所需输入快照（bridge 层在读锁内采集，BOOKS 锁外构建——
+/// 见 lib.rs BOOKS 锁纪律；成本 = content 克隆，仅重建路径支付）
+pub struct CleanedCacheBuildSnapshot {
+    content: String,
+    chapters: Vec<RawChapter>,
+    cleaner: Option<ContentCleaner>,
+    file_path: Option<std::path::PathBuf>,
+}
+
+/// 锁外构建产物（不透明；经 install_cleaned_cache 校验 hash 后装回）
+pub struct BuiltCleanedChapterCache(CleanedChapterCache);
+
 /// 行号到字节偏移的映射器
 struct LineOffsetMapper {
     /// 原始行号 → 净化后字节偏移的映射
@@ -223,45 +235,102 @@ impl TxtParser {
     }
 
     /// 构建净化后的章节缓存
-    /// 
-    /// 这个方法执行以下步骤：
-    /// 1. 读取原始内容（从 mmap 或内存）
-    /// 2. 应用内容净化（如果有 content_cleaner）
-    /// 3. 在净化后的文本上重新计算章节字节边界
-    /// 4. 缓存净化后的内容和偏移量
+    ///
+    /// 便捷包装（&mut 路径）；两阶段锁外重建请走
+    /// cleaned_cache_build_snapshot + build_cleaned_cache_from_snapshot +
+    /// install_cleaned_cache。
     pub fn build_cleaned_chapter_cache(&mut self) -> Result<()> {
-        // 如果没有章节，无法构建缓存
         if self.chapters.is_empty() {
             return Ok(());
         }
-
-        // 1. 读取原始内容
-        let original_content = self.content.clone()
+        let content = self
+            .content
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("无可用内容源"))?;
+        let cache = Self::build_cleaned_cache_core(
+            content,
+            &self.chapters,
+            self.content_cleaner.as_ref(),
+            self.file_path.as_deref(),
+        )?;
+        self.cleaned_chapter_cache = Some(cache);
+        Ok(())
+    }
 
-        // 2. 应用内容净化
-        let cleaned_content = if let Some(ref cleaner) = self.content_cleaner {
-            cleaner.clean(&original_content)?
+    /// 净化缓存是否与当前净化配置一致（读锁内可调用；不修改任何状态）
+    pub fn cleaned_cache_current(&self) -> bool {
+        let current_hash = self.calculate_cleaning_config_hash();
+        match &self.cleaned_chapter_cache {
+            None => false,
+            Some(cache) => cache.config_hash == current_hash,
+        }
+    }
+
+    /// 采集锁外重建快照（读锁内调用；成本 = content 克隆）
+    pub fn cleaned_cache_build_snapshot(&self) -> Option<CleanedCacheBuildSnapshot> {
+        Some(CleanedCacheBuildSnapshot {
+            content: self.content.clone()?,
+            chapters: self.chapters.clone(),
+            cleaner: self.content_cleaner.clone(),
+            file_path: self.file_path.clone(),
+        })
+    }
+
+    /// 锁外构建净化缓存（不接触 self；可与前台分页并发）
+    pub fn build_cleaned_cache_from_snapshot(
+        snap: &CleanedCacheBuildSnapshot,
+    ) -> Result<BuiltCleanedChapterCache> {
+        let cache = Self::build_cleaned_cache_core(
+            &snap.content,
+            &snap.chapters,
+            snap.cleaner.as_ref(),
+            snap.file_path.as_deref(),
+        )?;
+        Ok(BuiltCleanedChapterCache(cache))
+    }
+
+    /// 装回锁外构建的缓存：仅当配置 hash 仍与快照一致才生效。
+    /// 返回 false = 期间配置又变更，调用方应丢弃并按新配置重建。
+    pub fn install_cleaned_cache(&mut self, cache: BuiltCleanedChapterCache) -> bool {
+        let current_hash = self.calculate_cleaning_config_hash();
+        if cache.0.config_hash != current_hash {
+            return false;
+        }
+        self.cleaned_chapter_cache = Some(cache.0);
+        true
+    }
+
+    /// 净化缓存构建核心（纯函数；&mut 便捷路径与锁外快照路径共用）
+    fn build_cleaned_cache_core(
+        original_content: &str,
+        chapters: &[RawChapter],
+        cleaner: Option<&ContentCleaner>,
+        file_path: Option<&std::path::Path>,
+    ) -> Result<CleanedChapterCache> {
+        // 1. 应用内容净化
+        let cleaned_content = if let Some(cleaner) = cleaner {
+            cleaner.clean(original_content)?
         } else {
-            // 如果没有净化器，直接使用原始内容
-            original_content
+            original_content.to_string()
         };
 
-        // 3. 在净化后的内容上重新计算章节边界
+        // 2. 在净化后的内容上重新计算章节边界
         //
         // 关键：净化（智能分段、去广告、去空行等）会改变行结构，
         // 原始内容上的行号/字节偏移在净化后全部失效，
         // 必须在净化后的文本上重新识别章节位置。
-        let chapter_offsets = self.compute_cleaned_offsets(&cleaned_content)?;
+        let chapter_offsets = Self::compute_cleaned_offsets(chapters, &cleaned_content)?;
 
-        // 4. 计算配置哈希（配置变更时用于失效重建）
-        let config_hash = self.calculate_cleaning_config_hash();
+        // 3. 计算配置哈希（配置变更时用于失效重建）
+        let config_hash = match cleaner {
+            Some(c) => c.config_hash(),
+            None => 0,
+        };
 
-        // 5. 缓存结果（大文本落临时文件 mmap，避免净化副本长期驻留堆）
+        // 4. 缓存结果（大文本落临时文件 mmap，避免净化副本长期驻留堆）
         let cache = if cleaned_content.len() > CLEANED_MMAP_THRESHOLD_BYTES {
-            // mmap 模式：写入临时文件并创建 mmap
-            let temp_path = self.create_cleaned_temp_file(&cleaned_content, config_hash)?;
-            let cleaned_mmap = self.create_mmap_from_temp_file(&temp_path)?;
+            let temp_path = Self::create_cleaned_temp_file(&cleaned_content, config_hash, file_path)?;
+            let cleaned_mmap = Self::create_mmap_from_temp_file(&temp_path)?;
 
             CleanedChapterCache {
                 config_hash,
@@ -270,7 +339,6 @@ impl TxtParser {
                 cleaned_content: None,
             }
         } else {
-            // 内存模式：直接存储
             CleanedChapterCache {
                 config_hash,
                 chapters: chapter_offsets,
@@ -278,16 +346,17 @@ impl TxtParser {
                 cleaned_content: Some(cleaned_content),
             }
         };
-
-        self.cleaned_chapter_cache = Some(cache);
-        Ok(())
+        Ok(cache)
     }
 
     /// 在净化后的内容上计算每章的字节边界
     ///
     /// 首选：用 JS 引擎在净化后文本上重新识别章节（与导入时同一套规则）。
     /// 回退：按标题顺序在净化后文本中逐行对齐。
-    fn compute_cleaned_offsets(&self, cleaned_content: &str) -> Result<Vec<CleanedChapterOffset>> {
+    fn compute_cleaned_offsets(
+        chapters: &[RawChapter],
+        cleaned_content: &str,
+    ) -> Result<Vec<CleanedChapterOffset>> {
         #[cfg(feature = "js-engine")]
         {
             let extractor = ChapterExtractor::new();
@@ -298,40 +367,40 @@ impl TxtParser {
                     Ok(rt) => rt.block_on(async { extractor.extract_chapters(cleaned_content).await }),
                     Err(e) => {
                         log::warn!("创建 tokio runtime 失败: {}，回退到标题对齐", e);
-                        return Self::align_offsets_by_title(cleaned_content, &self.chapters);
+                        return Self::align_offsets_by_title(cleaned_content, chapters);
                     }
                 }
             };
 
             match result {
-                Ok(chapters) if chapters.len() == self.chapters.len() => {
-                    log::info!("净化后重新识别 {} 个章节，与原始章节一一对应", chapters.len());
-                    Ok(chapters
+                Ok(ch) if ch.len() == chapters.len() => {
+                    log::info!("净化后重新识别 {} 个章节，与原始章节一一对应", ch.len());
+                    Ok(ch
                         .into_iter()
-                        .map(|ch| CleanedChapterOffset {
-                            start_pos: ch.start_offset,
-                            end_pos: ch.end_offset,
+                        .map(|c| CleanedChapterOffset {
+                            start_pos: c.start_offset,
+                            end_pos: c.end_offset,
                         })
                         .collect())
                 }
-                Ok(chapters) => {
+                Ok(ch) => {
                     log::warn!(
                         "净化后识别出 {} 章，与原始 {} 章不一致，回退到标题对齐",
-                        chapters.len(),
-                        self.chapters.len()
+                        ch.len(),
+                        chapters.len()
                     );
-                    Self::align_offsets_by_title(cleaned_content, &self.chapters)
+                    Self::align_offsets_by_title(cleaned_content, chapters)
                 }
                 Err(e) => {
                     log::warn!("净化后章节识别失败: {}，回退到标题对齐", e);
-                    Self::align_offsets_by_title(cleaned_content, &self.chapters)
+                    Self::align_offsets_by_title(cleaned_content, chapters)
                 }
             }
         }
 
         #[cfg(not(feature = "js-engine"))]
         {
-            Self::align_offsets_by_title(cleaned_content, &self.chapters)
+            Self::align_offsets_by_title(cleaned_content, chapters)
         }
     }
 
@@ -493,21 +562,25 @@ impl TxtParser {
     }
 
     /// 创建净化后内容的临时文件
-    /// 
+    ///
     /// 路径格式：{temp_dir}/legado_cleaned/{book_id}_{config_hash}.txt
-    fn create_cleaned_temp_file(&self, cleaned_content: &str, config_hash: u64) -> Result<std::path::PathBuf> {
+    fn create_cleaned_temp_file(
+        cleaned_content: &str,
+        config_hash: u64,
+        file_path: Option<&std::path::Path>,
+    ) -> Result<std::path::PathBuf> {
         use std::io::Write;
-        
+
         // 获取系统临时目录
         let temp_dir = std::env::temp_dir();
         let cleaned_dir = temp_dir.join("legado_cleaned");
-        
+
         // 创建目录（如果不存在）
         std::fs::create_dir_all(&cleaned_dir)
             .with_context(|| format!("创建临时目录失败: {:?}", cleaned_dir))?;
-        
+
         // 生成唯一的文件名（基于文件路径哈希 + 配置哈希）
-        let book_id = if let Some(ref path) = self.file_path {
+        let book_id = if let Some(path) = file_path {
             // 使用文件路径的哈希作为 book_id
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
@@ -517,25 +590,25 @@ impl TxtParser {
         } else {
             "unknown".to_string()
         };
-        
+
         let temp_path = cleaned_dir.join(format!("{}_{:x}.txt", book_id, config_hash));
-        
+
         // 写入净化后的内容
         let mut file = File::create(&temp_path)
             .with_context(|| format!("创建临时文件失败: {:?}", temp_path))?;
         file.write_all(cleaned_content.as_bytes())
             .with_context(|| "写入临时文件失败")?;
-        
+
         log::info!("创建净化后临时文件: {:?}", temp_path);
-        
+
         Ok(temp_path)
     }
 
     /// 从临时文件创建 mmap
-    fn create_mmap_from_temp_file(&self, temp_path: &std::path::Path) -> Result<Mmap> {
+    fn create_mmap_from_temp_file(temp_path: &std::path::Path) -> Result<Mmap> {
         let file = File::open(temp_path)
             .with_context(|| format!("打开临时文件失败: {:?}", temp_path))?;
-        
+
         unsafe {
             Mmap::map(&file)
                 .with_context(|| "创建临时文件的内存映射失败")

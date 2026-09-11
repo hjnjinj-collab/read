@@ -47,6 +47,7 @@ impl Default for CleanOptions {
 }
 
 /// 内容净化器
+#[derive(Clone)]
 pub struct ContentCleaner {
     convert_mode: ConvertMode,
     paragraph_mode: ParagraphMode,

@@ -64,7 +64,8 @@ pub trait BookParser: Send + Sync {
     ///
     /// 对于 TXT 格式，始终返回错误（TXT 不支持资源）。
     /// 对于 EPUB 格式，从 ZIP 中提取指定资源。
-    fn get_resource(&mut self, _resource_id: &str) -> Result<Vec<u8>> {
+    /// &self：EPUB archive 已内部互斥，资源读取无需 &mut（锁纪律热点 4）。
+    fn get_resource(&self, _resource_id: &str) -> Result<Vec<u8>> {
         anyhow::bail!("当前格式不支持资源获取")
     }
 

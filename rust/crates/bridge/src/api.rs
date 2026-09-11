@@ -543,6 +543,7 @@ fn parse_txt_file_inner(
                 source_path: Some(file_path.clone()),
                 epub_cleaned: None,
                 structured: None,
+                clean_rebuild_gate: Arc::new(Mutex::new(())),
             }
         }
         BookFormat::Epub => {
@@ -576,6 +577,7 @@ fn parse_txt_file_inner(
                 source_path: Some(file_path.clone()),
                 epub_cleaned: None,
                 structured: Some(crate::StructuredEpubHandle { parser }),
+                clean_rebuild_gate: Arc::new(Mutex::new(())),
             }
         }
         other => anyhow::bail!(
@@ -1243,18 +1245,69 @@ fn get_chapter_content_impl(
 
     // 2. 如果有 parser，使用净化缓存机制
     if has_parser {
-        // 2.1 确保缓存存在且与当前净化配置一致（配置变更时自动重建，写锁）
+        // 2.1 快路径：读锁校验 hash，相符直接切片——稳态翻页不取写锁
         {
-            // ⚠ 锁竞争热点（非死锁）：配置变更时持写锁做磁盘重建，
-            // 会阻塞并发读——优化时先缩锁内工作再动结构。见 lib.rs BOOKS 审计清单。
+            let books = BOOKS.read().unwrap();
+            let handle = books.get(&book_id)
+                .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+            if let Some(ref parser) = handle.parser {
+                if parser.cleaned_cache_current() {
+                    let content = parser.get_chapter_content_from_cache(chapter_index)?;
+                    drop(books);
+                    if trigger_preload {
+                        trigger_preload_async(book_id, chapter_index);
+                    }
+                    return Ok(content);
+                }
+            }
+        }
+
+        // 2.2 慢路径（hash 不符/首次）：读锁取门+快照 → 锁外 singleflight
+        // 重建 → 短写锁装回。重建（全书 clean + 章节重识别）不占 BOOKS 锁。
+        let (gate, snapshot) = {
+            let books = BOOKS.read().unwrap();
+            let handle = books.get(&book_id)
+                .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+            let gate = handle.clean_rebuild_gate.clone();
+            let snapshot = handle
+                .parser
+                .as_ref()
+                .and_then(|p| p.cleaned_cache_build_snapshot())
+                .ok_or_else(|| anyhow::anyhow!("Parser not available"))?;
+            (gate, snapshot)
+        };
+        let _rebuild_guard = gate.lock().unwrap();
+        // 门内复查：等待期间他人可能已完成重建
+        {
+            let books = BOOKS.read().unwrap();
+            let handle = books.get(&book_id)
+                .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+            if let Some(ref parser) = handle.parser {
+                if parser.cleaned_cache_current() {
+                    let content = parser.get_chapter_content_from_cache(chapter_index)?;
+                    drop(books);
+                    if trigger_preload {
+                        trigger_preload_async(book_id, chapter_index);
+                    }
+                    return Ok(content);
+                }
+            }
+        }
+        let built = TxtParser::build_cleaned_cache_from_snapshot(&snapshot)?;
+        {
             let mut books = BOOKS.write().unwrap();
             let handle = books.get_mut(&book_id)
                 .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-
             if let Some(ref mut parser) = handle.parser {
-                parser.ensure_cleaned_chapter_cache()?;
+                if !parser.install_cleaned_cache(built) {
+                    log::warn!("净化配置在重建期间再次变更，本轮重建作废");
+                }
             }
         }
+        // 装回后必须失效下游缓存：PREPROCESSED_CACHE 键不含净化
+        // config_hash，不失效会把旧配置的预处理结果污染分页
+        PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
+        invalidate_preprocessed_cache(Some(book_id.as_str()));
 
         // 2.3 从缓存读取章节内容（只读锁）
         let content = {
@@ -1271,7 +1324,7 @@ fn get_chapter_content_impl(
 
         // 去重标题逻辑已移至 ContentPreprocessor::process（Stage 1），
         // 预处理缓存会包含去重后的内容，避免缓存命中时去重被跳过。
-        
+
         // 异步触发预加载（非阻塞；quiet 路径跳过以打断自激级联）
         if trigger_preload {
             trigger_preload_async(book_id, chapter_index);
@@ -1282,23 +1335,80 @@ fn get_chapter_content_impl(
         // 3. 无 parser（工厂已拒绝其他格式，此分支必为 EPUB）
         let options_snapshot = CONTENT_CLEANING_OPTIONS.lock().unwrap().clone();
 
-        // 3.1 已设置净化选项：懒构建/重建净化缓存后直接切片（不再逐读净化）
+        // 3.1 已设置净化选项：两阶段懒构建/重建净化缓存后直接切片
         if let Some(options) = options_snapshot {
-            let ensured: anyhow::Result<String> = {
-                // ⚠ 锁竞争热点（非死锁）：首次构建时持写锁做全书净化缓存
-                // 磁盘重建。见 lib.rs BOOKS 审计清单。
-                let mut books = BOOKS.write().unwrap();
-                let handle = books.get_mut(&book_id)
+            let cleaner = build_epub_cleaner_from_options(&options);
+            let current_hash = cleaner.config_hash();
+
+            // 快路径：读锁校验 hash，相符直接切片
+            {
+                let books = BOOKS.read().unwrap();
+                let handle = books.get(&book_id)
                     .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                if let Some(ref cache) = handle.epub_cleaned {
+                    if cache.config_hash == current_hash {
+                        let (start, end) = *cache.offsets.get(chapter_index)
+                            .ok_or_else(|| anyhow::anyhow!("Chapter not found"))?;
+                        let cleaned = slice_utf8_safe(&cache.content, start, end);
+                        drop(books);
+                        if trigger_preload {
+                            trigger_preload_async(book_id, chapter_index);
+                        }
+                        return Ok(cleaned);
+                    }
+                }
+            }
 
-                ensure_epub_cleaned_cache(handle, &options)?;
-
-                let cache = handle.epub_cleaned.as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("EPUB 净化缓存缺失"))?;
-                let (start, end) = *cache.offsets.get(chapter_index)
+            // 慢路径：读锁取门+快照 → 锁外 load_or_build（磁盘优先）→ 短写锁装回
+            let (gate, source, book_snapshot) = {
+                let books = BOOKS.read().unwrap();
+                let handle = books.get(&book_id)
+                    .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                let gate = handle.clean_rebuild_gate.clone();
+                let source = handle.source_path.clone()
+                    .ok_or_else(|| anyhow::anyhow!("缺少源文件路径，无法定位 EPUB 净化缓存"))?;
+                let book_snapshot = handle.book.clone();
+                (gate, source, book_snapshot)
+            };
+            let _rebuild_guard = gate.lock().unwrap();
+            let ensured: anyhow::Result<String> = {
+                // 门内复查：等待期间他人可能已完成重建
+                {
+                    let books = BOOKS.read().unwrap();
+                    let handle = books.get(&book_id)
+                        .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                    if let Some(ref cache) = handle.epub_cleaned {
+                        if cache.config_hash == current_hash {
+                            let (start, end) = *cache.offsets.get(chapter_index)
+                                .ok_or_else(|| anyhow::anyhow!("Chapter not found"))?;
+                            return Ok(slice_utf8_safe(&cache.content, start, end));
+                        }
+                    }
+                }
+                // 锁外构建（磁盘 load 或全书 clean，不占 BOOKS 锁）
+                let cleaned_cache = book_parser::EpubCleanedBook::load_or_build(
+                    std::path::Path::new(&source),
+                    &book_snapshot,
+                    &cleaner,
+                )?;
+                let (start, end) = *cleaned_cache.offsets.get(chapter_index)
                     .ok_or_else(|| anyhow::anyhow!("Chapter not found"))?;
-
-                Ok(slice_utf8_safe(&cache.content, start, end))
+                let cleaned = slice_utf8_safe(&cleaned_cache.content, start, end);
+                // 短写锁装回（配置仍一致才装；期间他人已装更新的则直接用）
+                {
+                    let mut books = BOOKS.write().unwrap();
+                    let handle = books.get_mut(&book_id)
+                        .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+                    let outdated = handle.epub_cleaned.as_ref()
+                        .map(|c| c.config_hash != current_hash)
+                        .unwrap_or(true);
+                    if outdated {
+                        handle.epub_cleaned = Some(cleaned_cache);
+                    }
+                }
+                PAGINATION_CACHE.lock().unwrap().clear_book(&book_id);
+                invalidate_preprocessed_cache(Some(book_id.as_str()));
+                Ok(cleaned)
             };
 
             match ensured {
@@ -1375,34 +1485,6 @@ fn build_epub_cleaner_from_options(options: &ContentCleaningOptions) -> ContentC
 
 /// EPUB 净化缓存的懒构建与配置变更检测
 /// （与 TXT `ensure_cleaned_chapter_cache` 同构：hash 不符即重建）
-fn ensure_epub_cleaned_cache(
-    handle: &mut crate::BookHandle,
-    options: &ContentCleaningOptions,
-) -> anyhow::Result<()> {
-    let cleaner = build_epub_cleaner_from_options(options);
-    let current_hash = cleaner.config_hash();
-
-    let needs_rebuild = match &handle.epub_cleaned {
-        None => true,
-        Some(cache) => cache.config_hash != current_hash,
-    };
-    if !needs_rebuild {
-        return Ok(());
-    }
-    if handle.epub_cleaned.is_some() {
-        log::info!("净化配置变更，重建 EPUB 净化缓存 (hash={:x})", current_hash);
-    }
-
-    let source = handle
-        .source_path
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("缺少源文件路径，无法定位 EPUB 净化缓存"))?;
-    let cleaned =
-        book_parser::EpubCleanedBook::load_or_build(std::path::Path::new(&source), &handle.book, &cleaner)?;
-    handle.epub_cleaned = Some(cleaned);
-    Ok(())
-}
-
 /// 异步触发预加载（在泄漏的共享 Runtime 上提交任务，无新建线程/运行时）
 fn trigger_preload_async(book_id: String, current_chapter: usize) {
     // M9.3 测试探针：级联打断回归测试用（仅测试构建）
@@ -2777,34 +2859,23 @@ pub fn prefetch_structured_chapter(
 
 /// 读取书内资源字节（EPUB 图片；ZIP 全路径，与 IR resource_href 同基准）
 ///
-/// 快路径：read 锁内窥探 parser 资源缓存，命中（渲染重复图/预热去重后
-/// 的图）直接返回，不与前台分页（BOOKS.write）争写锁；未命中才落写锁
-/// 慢路径（ZIP 读取 + 写缓存，仅每资源首次）。
+/// 快路径：read 锁内窥探 parser 资源缓存，命中直接返回。
+/// 慢路径：EpubParser.archive 已内部互斥（&self），ZIP 读取同样只取
+/// BOOKS.read()——不与前台分页（BOOKS.write）争写锁。
 pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Result<Vec<u8>> {
-    // 快路径：读锁窥探缓存
-    {
-        let books = BOOKS.read().unwrap();
-        let handle = books
-            .get(&book_id)
-            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-        let structured = handle
-            .structured
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("非结构化书籍，无资源句柄"))?;
-        if let Some(data) = structured.parser.peek_resource_cache(&resource_href) {
-            return Ok(data);
-        }
-    }
-    // 慢路径：写锁内 ZIP 读取 + 写缓存（只读快路径未命中才到达）
-    // ⚠ 锁竞争热点（非死锁）：写锁内做 ZIP IO。见 lib.rs BOOKS 审计清单。
-    let mut books = BOOKS.write().unwrap();
+    let books = BOOKS.read().unwrap();
     let handle = books
-        .get_mut(&book_id)
+        .get(&book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
     let structured = handle
         .structured
-        .as_mut()
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("非结构化书籍，无资源句柄"))?;
+    // 快路径：缓存命中
+    if let Some(data) = structured.parser.peek_resource_cache(&resource_href) {
+        return Ok(data);
+    }
+    // 慢路径：ZIP 读取 + 写缓存（archive 内部互斥，读锁内安全）
     structured.parser.get_resource_cached(&resource_href)
 }
 

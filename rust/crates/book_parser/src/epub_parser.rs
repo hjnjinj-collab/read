@@ -148,7 +148,12 @@ pub struct EpubParser {
     /// 文件路径
     file_path: PathBuf,
     /// ZIP 归档（保持打开状态以按需读取章节）
-    archive: Option<ZipArchive<File>>,
+    ///
+    /// 内部互斥：by_name/by_index 需 &mut，包 Mutex 后资源读取可走
+    /// &self——bridge 侧 get_book_resource 慢路径不再需要 BOOKS 写锁
+    /// （见 lib.rs BOOKS 审计清单热点 4）。锁序：archive 锁与
+    /// resource_cache 锁从不同时持有。
+    archive: Mutex<Option<ZipArchive<File>>>,
     /// 元信息（parse 后填充）
     metadata: Option<BookMetadata>,
     /// 章节列表（parse 后填充）
@@ -181,7 +186,7 @@ impl EpubParser {
 
         Ok(Self {
             file_path: path.to_path_buf(),
-            archive: Some(archive),
+            archive: Mutex::new(Some(archive)),
             metadata: None,
             chapters: Vec::new(),
             opf_base_path: String::new(),
@@ -196,8 +201,10 @@ impl EpubParser {
     }
 
     /// 读取 ZIP 中指定文件的内容为字符串
-    fn read_entry_as_string(&mut self, index: usize) -> Result<String> {
-        let archive = self.archive.as_mut()
+    fn read_entry_as_string(&self, index: usize) -> Result<String> {
+        let mut guard = self.archive.lock().unwrap();
+        let archive = guard
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("ZIP 归档已关闭"))?;
 
         let mut entry = archive.by_index(index)
@@ -228,8 +235,10 @@ impl EpubParser {
     /// resource_href 已是 ZIP 全路径，二次拼接反而语义错误（:626 既有缺陷）。
     /// EPUB 规范要求路径大小写规范，但真实书籍偶有出入，故保留一次
     /// 大小写不敏感遍历作兜底。
-    fn get_zip_entry(&mut self, zip_path: &str) -> Result<Vec<u8>> {
-        let archive = self.archive.as_mut()
+    fn get_zip_entry(&self, zip_path: &str) -> Result<Vec<u8>> {
+        let mut guard = self.archive.lock().unwrap();
+        let archive = guard
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("ZIP 归档已关闭"))?;
 
         if let Ok(mut entry) = archive.by_name(zip_path) {
@@ -543,7 +552,8 @@ impl EpubParser {
     /// 精确名优先；其次任意目录下的同名尾段（旧版宽松行为的保留）。
     /// 返回实际条目名是为了让键解析使用**命中文件**的目录。
     fn read_toc_candidate(&mut self, name: &str) -> Option<(String, String)> {
-        let archive = self.archive.as_mut()?;
+        let mut guard = self.archive.lock().unwrap();
+        let archive = guard.as_mut()?;
         let suffix_tail = format!("/{}", name);
         let mut fallback: Option<(String, String)> = None;
         for i in 0..archive.len() {
@@ -572,7 +582,8 @@ impl EpubParser {
     fn find_nav_content(&mut self) -> Option<(String, String)> {
         // 先查找文件名
         let nav_filename = {
-            let archive = self.archive.as_mut()?;
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard.as_mut()?;
             let mut found = None;
             for i in 0..archive.len() {
                 if let Ok(entry) = archive.by_index(i) {
@@ -1682,8 +1693,9 @@ impl EpubParser {
         cache.get(resource_id)
     }
 
-    /// 获取资源（带缓存）
-    pub fn get_resource_cached(&mut self, resource_id: &str) -> Result<Vec<u8>> {
+    /// 获取资源（带缓存）。&self：archive 内部互斥，bridge 可在
+    /// BOOKS.read() 内调用，不再与前台分页争写锁。
+    pub fn get_resource_cached(&self, resource_id: &str) -> Result<Vec<u8>> {
         // 先检查缓存
         {
             let mut cache = self.resource_cache.lock().unwrap();
@@ -1837,7 +1849,7 @@ impl BookParser for EpubParser {
         vec![ResourceType::Image, ResourceType::Font, ResourceType::Stylesheet]
     }
 
-    fn get_resource(&mut self, resource_id: &str) -> Result<Vec<u8>> {
+    fn get_resource(&self, resource_id: &str) -> Result<Vec<u8>> {
         // resource_id 视为 ZIP 内完整路径直读（结构化 IR 的 resource_href
         // 即全路径；旧的 opf_base_path 拼接语义已废弃）
         self.get_zip_entry(resource_id)
@@ -1875,7 +1887,9 @@ impl BookParser for EpubParser {
     fn parse(&mut self) -> Result<BookMetadata> {
         // 1. 读取 container.xml
         let container_index = {
-            let archive = self.archive.as_mut()
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard
+                .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("ZIP 归档不可用"))?;
             Self::find_entry_index(archive, "META-INF/container.xml")
                 .or_else(|| Self::find_entry_index(archive, "META-INF/Container.xml"))
@@ -1883,7 +1897,8 @@ impl BookParser for EpubParser {
         };
 
         let container_xml = {
-            let archive = self.archive.as_mut().unwrap();
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard.as_mut().unwrap();
             let mut entry = archive.by_index(container_index)?;
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
@@ -1897,13 +1912,15 @@ impl BookParser for EpubParser {
 
         // 3. 读取并解析 OPF
         let opf_index = {
-            let archive = self.archive.as_mut().unwrap();
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard.as_mut().unwrap();
             Self::find_entry_index(archive, &opf_path)
                 .ok_or_else(|| anyhow::anyhow!("无法找到 OPF 文件: {}", opf_path))?
         };
 
         let opf_xml = {
-            let archive = self.archive.as_mut().unwrap();
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard.as_mut().unwrap();
             let mut entry = archive.by_index(opf_index)?;
             let mut content = String::new();
             entry.read_to_string(&mut content)?;
@@ -1915,7 +1932,8 @@ impl BookParser for EpubParser {
         // 4. 建立 href → ZIP 索引映射
         let mut href_to_index = HashMap::new();
         {
-            let archive = self.archive.as_mut().unwrap();
+            let mut guard = self.archive.lock().unwrap();
+            let archive = guard.as_mut().unwrap();
             for href in &opf_data.spine_hrefs {
                 if let Some(idx) = Self::find_entry_index(archive, href) {
                     href_to_index.insert(href.clone(), idx);
@@ -2088,7 +2106,7 @@ impl BookParser for EpubParser {
     }
 
     fn cleanup(&mut self) {
-        self.archive = None;
+        *self.archive.lock().unwrap() = None;
         self.metadata = None;
         self.chapters.clear();
         self.href_to_index.clear();
@@ -2494,7 +2512,8 @@ mod tests {
 
         // 列出 ZIP 内与目录相关的真实条目名（大小写敏感！）
         {
-            let archive = parser.archive.as_mut().unwrap();
+            let mut guard = parser.archive.lock().unwrap();
+            let archive = guard.as_mut().unwrap();
             println!("=== ZIP 条目（含 toc/ncx/opf）===");
             for i in 0..archive.len() {
                 let name = archive.by_index(i).unwrap().name().to_string();
