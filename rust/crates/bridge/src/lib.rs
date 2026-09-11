@@ -430,9 +430,9 @@ impl From<book_source_engine::BookSource> for FfiBookSource {
 //      + invalidate 下游缓存（PREPROCESSED_CACHE 键不含净化 config_hash）
 //   ✅ get_book_resource（原热点4）：EpubParser.archive 内部互斥，慢路径
 //      ZIP IO 也只取 BOOKS.read()
-//   ⚠ 搜索逐章 IR 提取：仍持写锁做 parser 独占提取（竞争隐患，待结构性改造）
-//   ✅ 2361 process_structured_chapter：写锁仅覆盖 IR 提取（2382 即 drop），
-//      风险在调用方——现调用方 2607/2654/2679/2716/2771 均未持锁
+//   ✅ 搜索/分页 IR 提取（原热点3）：css_cache 内部互斥后
+//      get_chapter_content_structured_ex 为 &self，search_epub_chapter 与
+//      process_structured_chapter 均只取 BOOKS.read（预取 try_read 让路）
 //   ✅ 855 batch_locate_notes：探测后放锁（唯一发生过死锁处，已修）
 lazy_static::lazy_static! {
     pub static ref BOOKS: Arc<RwLock<HashMap<String, BookHandle>>> = Arc::new(RwLock::new(HashMap::new()));

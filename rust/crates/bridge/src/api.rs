@@ -2495,21 +2495,22 @@ fn process_structured_chapter(
         _ => book_parser::content_cleaner::ConvertMode::None,
     };
 
-    // 提取 IR（锁内：parser 独占可变状态；预取抢不到写锁即让路）
-    let mut books = if prefer_try_lock {
-        match BOOKS.try_write() {
+    // 提取 IR（读锁：archive/css_cache 已内部互斥，structured_ex 为 &self；
+    // 预取抢不到读锁即让路——写者如 release_book/install 缓存时短暂让路）
+    let books = if prefer_try_lock {
+        match BOOKS.try_read() {
             Ok(guard) => guard,
             Err(_) => return Ok(None),
         }
     } else {
-        BOOKS.write().unwrap()
+        BOOKS.read().unwrap()
     };
     let handle = books
-        .get_mut(book_id)
+        .get(book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
     let structured = handle
         .structured
-        .as_mut()
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("非结构化书籍（TXT 请走旧分页 API）"))?;
     let content = structured
         .parser
@@ -3256,17 +3257,17 @@ fn search_epub_chapter(
         2 => book_parser::content_cleaner::ConvertMode::TraditionalToSimplified,
         _ => book_parser::content_cleaner::ConvertMode::None,
     };
-    // IR 提取（写锁内，parser 独占可变状态——与分页路径同模式）。
-    // ⚠ 锁竞争热点（非死锁）：搜索逐章循环取写锁做 IR 提取。见 lib.rs BOOKS 审计清单。
+    // IR 提取（读锁：archive/css_cache 已内部互斥，structured_ex 为 &self，
+    // 搜索逐章循环不再与前台分页争写锁——原热点 3 已消除）。
     // font_size 仅影响 IR 的图片尺寸提示，与文本锚点无关——搜索取默认基准。
     let (content, raw_title) = {
-        let mut books = BOOKS.write().unwrap();
+        let books = BOOKS.read().unwrap();
         let handle = books
-            .get_mut(book_id)
+            .get(book_id)
             .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
         let structured = handle
             .structured
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("非结构化书籍"))?;
         let content = structured
             .parser

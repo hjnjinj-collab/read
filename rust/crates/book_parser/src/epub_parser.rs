@@ -171,7 +171,11 @@ pub struct EpubParser {
     /// NCX href（OPF media-type 声明，相对 OPF 目录）
     ncx_href: Option<String>,
     /// 已解析样式表缓存（键=ZIP 内路径；parser 生命周期=书会话）
-    css_cache: HashMap<String, std::sync::Arc<crate::css_lite::CssStylesheet>>,
+    ///
+    /// 内部互斥：与 archive 同模式——get_chapter_content_structured_ex
+    /// 降为 &self 后，搜索/分页的 IR 提取不再需要 BOOKS 写锁。
+    /// 锁序：css_cache 锁与 archive 锁分段持有，从不嵌套。
+    css_cache: Mutex<HashMap<String, std::sync::Arc<crate::css_lite::CssStylesheet>>>,
     /// duokan-page-fullscreen 全屏页集合（ZIP 内完整路径）
     fullscreen_hrefs: HashSet<String>,
 }
@@ -195,7 +199,7 @@ impl EpubParser {
             resource_cache: Arc::new(Mutex::new(ResourceCache::new(150))),  // 阶段1优化：50→150
             nav_href: None,
             ncx_href: None,
-            css_cache: HashMap::new(),
+            css_cache: Mutex::new(HashMap::new()),
             fullscreen_hrefs: HashSet::new(),
         })
     }
@@ -720,7 +724,7 @@ impl EpubParser {
     /// 不做阅读级文本转换（诊断/探针语义：原始 IR）；
     /// 阅读路径用 [`Self::get_chapter_content_structured_ex`]。
     pub fn get_chapter_content_structured(
-        &mut self,
+        &self,
         chapter_index: usize,
     ) -> Result<crate::content_ir::StructuredContent> {
         self.get_chapter_content_structured_ex(
@@ -734,9 +738,10 @@ impl EpubParser {
     ///
     /// 转换发生在 DOM 文本节点层（JS 提取/哨兵回收之前）——runs 字符区间
     /// 在转换后文本上计算，天然对齐，不破坏 D10 契约（IR→布局零文本变换）。
-    /// `base_font_px` 为 px/pt 字号 CSS 换算基准（当前排版字号）
+    /// `base_font_px` 为 px/pt 字号 CSS 换算基准（当前排版字号）。
+    /// &self：archive/css_cache 均已内部互斥，搜索/分页只需 BOOKS.read。
     pub fn get_chapter_content_structured_ex(
-        &mut self,
+        &self,
         chapter_index: usize,
         convert_mode: crate::content_cleaner::ConvertMode,
         base_font_px: f32,
@@ -921,8 +926,9 @@ impl EpubParser {
     ///
     /// 返回 (解析后的样式表, 该 CSS 文件所在 ZIP 目录)——目录用于解析
     /// CSS 内 url(...) 相对地址。解析结果按书缓存。
+    /// &self：css_cache 内部互斥；查/插分段持锁，不与 archive 锁嵌套。
     fn collect_stylesheets(
-        &mut self,
+        &self,
         html: &str,
         content_dir: &str,
     ) -> Vec<(std::sync::Arc<crate::css_lite::CssStylesheet>, String)> {
@@ -939,8 +945,13 @@ impl EpubParser {
                 continue;
             };
             let css_path = resolve_zip_path(content_dir, href);
-            let sheet = if let Some(cached) = self.css_cache.get(&css_path) {
-                cached.clone()
+            // 缓存命中：短锁克隆 Arc 后立即放锁
+            let cached = {
+                let cache = self.css_cache.lock().unwrap();
+                cache.get(&css_path).cloned()
+            };
+            let sheet = if let Some(cached) = cached {
+                cached
             } else {
                 let Ok(bytes) = self.get_zip_entry(&css_path) else {
                     continue;
@@ -948,7 +959,10 @@ impl EpubParser {
                 let sheet = std::sync::Arc::new(crate::css_lite::CssStylesheet::parse(
                     &String::from_utf8_lossy(&bytes),
                 ));
-                self.css_cache.insert(css_path.clone(), sheet.clone());
+                self.css_cache
+                    .lock()
+                    .unwrap()
+                    .insert(css_path.clone(), sheet.clone());
                 sheet
             };
             out.push((sheet, zip_parent_dir(&css_path)));
@@ -1632,7 +1646,8 @@ impl EpubParser {
     }
 
     /// 递归探测全部图片块的原始像素尺寸（探测失败留 None，布局按默认比）
-    fn fill_intrinsic_sizes(&mut self, blocks: &mut [crate::content_ir::ContentBlock]) {
+    /// &self：内部仅 get_resource_cached（archive 已内部互斥）
+    fn fill_intrinsic_sizes(&self, blocks: &mut [crate::content_ir::ContentBlock]) {
         use crate::content_ir::ContentBlock;
         // 探测只需头部字节；读全量是为复用 LRU 资源缓存（渲染预热）
         const PROBE_PREFIX_BYTES: usize = 64 * 1024;
@@ -2113,7 +2128,7 @@ impl BookParser for EpubParser {
         self.spine_hrefs.clear();
         self.nav_href = None;
         self.ncx_href = None;
-        self.css_cache.clear();
+        self.css_cache.lock().unwrap().clear();
         self.fullscreen_hrefs.clear();
         self.clear_resource_cache();
     }
