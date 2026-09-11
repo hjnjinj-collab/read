@@ -1,14 +1,22 @@
 ---
 feature: epub-layout-measure-parity
-status: in-progress
+status: delivered
 updated: 2026-09-12
 branch: master
-commits: # filled at delivery
+commits: 57cc008..96561e6
 ---
 
 # EPUB 断行对齐 MeasureCache 行级精度
 
 ## Report
+
+**What was built** — EPUB `layout_styled_paragraph` 改为 MeasureCache 优先判宽（贪心行前缀扫描，与 Dart `feedPageTextsWithPrefixes` key 对齐）；Dart 首翻两遍 warm（喂前缀 → flush → 清 structured 缓存 → 同参再取页）。约束：热路径不同步 Skia、不合并 layout_text/items。
+
+**Verification** — layout_engine/bridge 既有回归 PASS；随 A33 一并 `fix_sync` 构建 PASS。
+
+**Journey log** —
+1. 贪心而非二分：只查行前缀集合，二次布局命中率最高。
+2. 不拼整段喂前缀：贪心下每行前缀即查询集。
 
 ## [S1] Problem
 
