@@ -523,6 +523,14 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
         child: FutureBuilder<List<NoteListItem>>(
           future: _future,
           builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError) {
+              return Center(
+                child: Text('笔记加载失败\n${snap.error}'),
+              );
+            }
             final items = snap.data ?? const [];
             if (items.isEmpty) {
               return const Center(child: Text('暂无笔记\n长按文字可添加'));

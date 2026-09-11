@@ -659,8 +659,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return true;
   }
 
+  /// openBook 会话序号：过期的 open 不得再写 state（退出再进/连点防卡死）
+  int _openBookSeq = 0;
+
   /// Open a book file
   Future<void> openBook(String filePath, String bookName) async {
+    final openSeq = ++_openBookSeq;
     ++_requestGeneration;
     _invalidateFrames(reason: 'open-book');
     _rawCurrentPage = null;
@@ -676,6 +680,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
     );
     // 发布 loading 占位（无 frame；会话已推进，旧集合全部作废）
     _renderStore.publishEmpty(isLoading: true, message: '正在打开书籍…');
+    readerTrace('openBook.start', {
+      'seq': openSeq,
+      'file': filePath,
+      'generation': _requestGeneration,
+    });
 
     try {
       // 构建导入级净化选项（结构净化在导入时一次完成，
@@ -694,11 +703,23 @@ class ReaderNotifier extends Notifier<ReadingState> {
         bookName,
         cleaningOptions: cleaningOptions,
       );
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-parse'});
+        return;
+      }
       final title = await _bookService.getBookTitle(bookId);
       final chapters = await _bookService.getChapters(bookId);
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-meta'});
+        return;
+      }
 
       // 格式分流：EPUB 走结构化分页，TXT 走旧文本路径
       final format = await _bookService.getBookFormat(bookId);
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-format'});
+        return;
+      }
       _isEpub = format == 'epub';
       if (_isEpub) {
         BookImageStore.instance.bind(_bookService, bookId);
@@ -718,11 +739,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
       // 书架登记
       await _db.upsertBook(filePath, title);
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-upsert'});
+        return;
+      }
 
       // 跨启动进度恢复（债#2/#3）：章节 + 字符锚点精确定位；
       // 锚点机制同时覆盖「改字号/净化配置后位置漂移」的迁移场景。
       // 无进度或索引失效时自然落到第 1 章第 1 页。
       final saved = await _db.progressOf(filePath);
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-progress'});
+        return;
+      }
       if (saved != null &&
           saved.chapterIndex > 0 &&
           saved.chapterIndex < chapters.length) {
@@ -731,12 +760,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
       } else {
         await _loadCurrentPage();
       }
+      if (openSeq != _openBookSeq) {
+        readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-load'});
+        return;
+      }
 
       // A31 布局层单轨：加载页后刷本章笔记（内部会从 _rawCurrentPage re-enrich）
       await _refreshCurrentChapterNotes(force: true);
       unawaited(refreshCurrentChapterPageCount());
+      readerTrace('openBook.done', {'seq': openSeq});
     } catch (e) {
+      if (openSeq != _openBookSeq) return;
       state = state.copyWith(isLoading: false, error: e.toString());
+      readerTrace('openBook.error', {'seq': openSeq, 'error': e.toString()});
     }
   }
 
@@ -1641,33 +1677,40 @@ class ReaderNotifier extends Notifier<ReadingState> {
       final chapterNotes = entry.value;
       final offsets = chapterNotes.map((n) => n.startCharOffset).toList();
       try {
-        final pages = await _bookService.batchLocateNotes(
-          bookId,
-          chapterIndex,
-          offsets: offsets,
-          width: _screenWidth,
-          height: _screenHeight,
-          fontSize: _fontSize,
-          lineHeightMultiplier: _lineHeight,
-          paddingLeft: _paddingHorizontal,
-          paddingTop: _paddingVertical,
-          paddingRight: _paddingHorizontal,
-          paddingBottom: _paddingVertical,
-          fontName: ReaderFont.family,
-          removeDuplicateTitle: _removeDuplicateTitle,
-          chineseConvert: _chineseConvert == ChineseConvertType.s2t
-              ? 1
-              : _chineseConvert == ChineseConvertType.t2s
-                  ? 2
-                  : 0,
-          replaceRules: _replaceRules,
-          pageFillThreshold: _pageFillThreshold,
-          showComments: _showComments,
-        );
+        // 页码是增强信息：FFI 挂起/超时不得挡住列表本身
+        final pages = await _bookService
+            .batchLocateNotes(
+              bookId,
+              chapterIndex,
+              offsets: offsets,
+              width: _screenWidth,
+              height: _screenHeight,
+              fontSize: _fontSize,
+              lineHeightMultiplier: _lineHeight,
+              paddingLeft: _paddingHorizontal,
+              paddingTop: _paddingVertical,
+              paddingRight: _paddingHorizontal,
+              paddingBottom: _paddingVertical,
+              fontName: ReaderFont.family,
+              removeDuplicateTitle: _removeDuplicateTitle,
+              chineseConvert: _chineseConvert == ChineseConvertType.s2t
+                  ? 1
+                  : _chineseConvert == ChineseConvertType.t2s
+                      ? 2
+                      : 0,
+              replaceRules: _replaceRules,
+              pageFillThreshold: _pageFillThreshold,
+              showComments: _showComments,
+            )
+            .timeout(const Duration(seconds: 2));
         for (var i = 0; i < chapterNotes.length; i++) {
           result[chapterNotes[i].id] = i < pages.length ? pages[i] : null;
         }
-      } catch (_) {
+      } catch (e) {
+        readerTrace('note.list.locate.skip', {
+          'chapter': chapterIndex,
+          'error': e.toString(),
+        });
         for (final n in chapterNotes) {
           result[n.id] = null;
         }
@@ -2453,17 +2496,23 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// Close current book
   Future<void> closeBook() async {
+    // 使进行中的 openBook 全部过期
+    ++_openBookSeq;
     ++_requestGeneration;
-    
+
     // 2026-09-02 清理资源监控定时器
     _resourceMonitorTimer?.cancel();
     _resourceMonitorTimer = null;
-    
+
     if (state.bookId != null) {
       await _bookService.releaseBook(state.bookId!);
     }
     BookImageStore.instance.clear();
     _invalidatePageCountCache(); // M8-P4：关书清页数缓存
+    _rawCurrentPage = null;
+    _rawPageCache.clear();
+    _cachedNotesChapterIndex = null;
+    _pageCountForChapter = -1;
     state = const ReadingState();
     readerTrace('session.close', {'generation': _requestGeneration});
     // 清空渲染状态：会话作废 + 无 frame 占位
