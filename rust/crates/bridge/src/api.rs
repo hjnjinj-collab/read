@@ -1245,6 +1245,8 @@ fn get_chapter_content_impl(
     if has_parser {
         // 2.1 确保缓存存在且与当前净化配置一致（配置变更时自动重建，写锁）
         {
+            // ⚠ 锁竞争热点（非死锁）：配置变更时持写锁做磁盘重建，
+            // 会阻塞并发读——优化时先缩锁内工作再动结构。见 lib.rs BOOKS 审计清单。
             let mut books = BOOKS.write().unwrap();
             let handle = books.get_mut(&book_id)
                 .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
@@ -1283,6 +1285,8 @@ fn get_chapter_content_impl(
         // 3.1 已设置净化选项：懒构建/重建净化缓存后直接切片（不再逐读净化）
         if let Some(options) = options_snapshot {
             let ensured: anyhow::Result<String> = {
+                // ⚠ 锁竞争热点（非死锁）：首次构建时持写锁做全书净化缓存
+                // 磁盘重建。见 lib.rs BOOKS 审计清单。
                 let mut books = BOOKS.write().unwrap();
                 let handle = books.get_mut(&book_id)
                     .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
@@ -2792,6 +2796,7 @@ pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Resu
         }
     }
     // 慢路径：写锁内 ZIP 读取 + 写缓存（只读快路径未命中才到达）
+    // ⚠ 锁竞争热点（非死锁）：写锁内做 ZIP IO。见 lib.rs BOOKS 审计清单。
     let mut books = BOOKS.write().unwrap();
     let handle = books
         .get_mut(&book_id)
@@ -3123,6 +3128,7 @@ fn search_epub_chapter(
         _ => book_parser::content_cleaner::ConvertMode::None,
     };
     // IR 提取（写锁内，parser 独占可变状态——与分页路径同模式）。
+    // ⚠ 锁竞争热点（非死锁）：搜索逐章循环取写锁做 IR 提取。见 lib.rs BOOKS 审计清单。
     // font_size 仅影响 IR 的图片尺寸提示，与文本锚点无关——搜索取默认基准。
     let (content, raw_title) = {
         let mut books = BOOKS.write().unwrap();

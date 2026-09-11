@@ -406,6 +406,27 @@ impl From<book_source_engine::BookSource> for FfiBookSource {
 }
 
 // Global book storage (使用 RwLock 支持读写分离)
+//
+// ⚠ 锁纪律（2026-09-11 死锁审计后立规，新增锁点必须遵守）：
+// std RwLock **非可重入**——持任何 BOOKS 锁期间调用会再取 BOOKS 锁的函数
+// 必然死锁（实证：batch_locate_notes 曾持 read 调 get_page_count_structured，
+// 后者缓存未命中路径经 process_structured_chapter:2361 取 write）。
+//
+// 铁律：持 BOOKS.read()/write() 期间禁止调用：
+//   get_page_* / get_chapter_content* / process_and_layout_chapter /
+//   process_structured_chapter / get_book_resource 等任何内部再取 BOOKS 的函数。
+// 跨锁取数据一律「作用域内探测 → 立即放锁 → 再调用」（参照 api.rs
+// batch_locate_notes 的 is_structured 探测块）。
+//
+// 审计清单（2026-09-11，api.rs 全部 26 处锁点）：
+//   ✅ 纯读/写、作用域内不再取锁：591/678/1033/1190/1199/1238/1259/1314/
+//      1412/1462/2808/2820/2906/3060/3232(release_book)/3695/3927/4077
+//   ⚠ 持写锁做重活（锁**竞争**隐患，非死锁，待优化）：
+//      1248 ensure_cleaned_chapter_cache、1286/1397 ensure_epub_cleaned_cache
+//      （磁盘重建全书净化缓存）、3128 搜索逐章写锁、2795 资源慢路径
+//   ✅ 2361 process_structured_chapter：写锁仅覆盖 IR 提取（2382 即 drop），
+//      风险在调用方——现调用方 2607/2654/2679/2716/2771 均未持锁
+//   ✅ 855 batch_locate_notes：探测后放锁（唯一发生过死锁处，已修）
 lazy_static::lazy_static! {
     pub static ref BOOKS: Arc<RwLock<HashMap<String, BookHandle>>> = Arc::new(RwLock::new(HashMap::new()));
 }
