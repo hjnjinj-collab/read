@@ -1,12 +1,17 @@
 ---
 feature: long-press-selection-collapse
-status: delivered
+status: abandoned
 updated: 2026-09-11
 branch: master
-commits: 7e1fa48..2d559a8
+commits: 2d559a8（已由 e279f22 revert）
 ---
 
 # 长按选区按住期间抖动塌缩为单字
+
+> **⚠ 已回滚（e279f22）**：真机验证锚定门控导致选择光标不跟手，且摘录仍为
+> 1 字——证明微抖塌缩并非首字问题的根因。真根因指向 `expandToWordBoundary`
+> 以单条 entry 为界扩展（若 entry 为逐字粒度则恒返回 1 字），待另行修复。
+> 本文档保留作死因记录。
 
 ## Report
 
