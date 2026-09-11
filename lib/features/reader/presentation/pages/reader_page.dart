@@ -406,6 +406,46 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     }
   }
 
+  /// A31-bugfix: 系统接管指针（来电、手势导航、通知横幅）时 PointerUp
+  /// 不会到来——缺 onPointerCancel 会残留 _isDragging/_isNoteMode/在途
+  /// 翻页动画，之后所有手势失灵。复位语义镜像 _onPointerUp，但绝不
+  /// 触发翻页/菜单。
+  void _onPointerCancel(PointerCancelEvent event) {
+    _longPressTimer?.cancel();
+    if (!_isDragging) return;
+    _isDragging = false;
+
+    final notifier = ref.read(readerProvider.notifier);
+
+    // 长按选区模式下被系统打断 → 退出笔记模式，保留选区供工具条操作
+    if (_longPressTriggered) {
+      _longPressTriggered = false;
+      _isNoteMode = false;
+      return;
+    }
+
+    // 有选区：镜像 Up 的单击清除分支（cancel 时位移判定用最后触点）
+    final dx = _dragLastX - _dragStartX;
+    final dy = _dragLastY - _dragStartY;
+    final moveDist = (dx.abs() + dy.abs());
+    if (notifier.hasSelection) {
+      if (moveDist < 8.0) {
+        notifier.clearSelection();
+        _isNoteMode = false;
+        notifier.clearDragCache();
+      }
+      return;
+    }
+
+    // composer 在途翻页 → 收尾但不翻页（回弹到原页），避免冻结半翻页
+    if (_composerKey.currentState?.isIdle == false) {
+      _composerKey.currentState?.endDrag(
+        shouldTurn: false,
+        direction: PageDirection.next,
+      );
+    }
+  }
+
   /// 坍塌模式点击分区（2026-09-04 v2：2D 中心区域，用户反馈修正）
   ///
   /// - 中心矩形（x∈[30%,70%] 且 y∈[30%,70%]）→ null = 菜单意图。
@@ -585,6 +625,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               onPointerDown: _onPointerDown,
               onPointerMove: _onPointerMove,
               onPointerUp: _onPointerUp,
+              onPointerCancel: _onPointerCancel,
               child: Container(
                 color: Colors.transparent,
                 child: state.isLoading
