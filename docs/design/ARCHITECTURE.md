@@ -733,8 +733,13 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 | A23 | P3 动画域清理：v15 fallback 删除 + buildSimulation 家族/PageFlipSession/viewport 只写链清退 | ✅ 2026-09-05 |
 | A24 | 字体设置批次（字号/行距滑杆 + 字体选择持久化）+ EPUB 分页碎片化回归修复 | ✅ 2026-09-05 |
 | A25 | 统一行级分页精度：EPUB 场景 A/B 退役 + fill_threshold 语义重定义（双路径统一消费） | ✅ 2026-09-05 |
+| A26 | TXT 章节标题去重修复（ContentPreprocessor 统一口径） | ✅ 2026-09-06 |
+| A27 | 智能分段增强（A35-L1） | ✅ 2026-09-06 |
+| A28 | 用户自定义分段规则 + 合并式分段引擎重构（A35-L2） | ✅ 2026-09-06 |
+| A29 | 翻页手势接管：动画在途快进 + 连点排队治理 | ✅ 2026-09-07 |
 | A30 | 书内全文搜索（Rust 统一 API + 锚点对齐单测 + UI 跳转） | ✅ 2026-09-07 |
 | A30b | EPUB 替换规则接入（块级应用 + rules_hash 缓存键）+ 搜索键盘/跳转闪帧修复 | ✅ 2026-09-07 |
+| A31 | 笔记与划线（长按选区、行级字符区间、高亮渲染、备注、批量定位页码、移动端弹窗适配、页尾空选区防御、onPointerCancel 复位、BOOKS 锁纪律审计） | ✅ 2026-09-11 |
 | APK | Android 构建管线（libbridge.so + cargo ndk + rustls + bindgen + compileSdk 36 + sqlite3 source + file_picker 12） | ✅ 2026-08-29 |
 
 **A18 详细说明（M10-B/M11/M12 三阶段修复）**：
