@@ -195,11 +195,18 @@ pub fn is_closing_glue(c: char) -> bool {
 }
 
 fn is_open_quote(c: char) -> bool {
-    matches!(c, '\u{201C}' | '\u{300C}' | '\u{300E}')
+    // 简体弯引号 / 繁体直角引号「」『』/ 繁体双直角 〝 / 竖排﹁
+    matches!(
+        c,
+        '\u{201C}' | '\u{300C}' | '\u{300E}' | '\u{301D}' | '\u{FE41}'
+    )
 }
 
 fn is_close_quote(c: char) -> bool {
-    matches!(c, '\u{201D}' | '\u{300D}' | '\u{300F}')
+    matches!(
+        c,
+        '\u{201D}' | '\u{300D}' | '\u{300F}' | '\u{301E}' | '\u{301F}' | '\u{FE42}'
+    )
 }
 
 /// 章节标题行：第X章/回/卷/节/集/部/篇（独立成段硬边界）
@@ -323,14 +330,14 @@ pub fn segment_lines(content: &str, config: &SmartSegConfig) -> Vec<String> {
             if count <= config.threshold {
                 continue;
             }
-            if config.quote_unclosed && quote_depth > 0 {
-                continue;
-            }
+            // 引号吸附：未闭合时不打软终结构切分；
+            // 但不得永久压制——硬上限兜底仍生效（防「」未闭合导致整章不切）
+            let quote_blocks_soft = config.quote_unclosed && quote_depth > 0;
             if user_merge {
                 continue;
             }
 
-            if is_terminal_punct(ch) {
+            if !quote_blocks_soft && is_terminal_punct(ch) {
                 let mut j = k;
                 while j < chars.len()
                     && (is_closing_glue(chars[j]) || is_terminal_punct(chars[j]))
@@ -431,11 +438,10 @@ pub fn split_paragraph_ranges(text: &str, config: &SmartSegConfig) -> Vec<(usize
         if count <= config.threshold {
             continue;
         }
-        if config.quote_unclosed && quote_depth > 0 {
-            continue;
-        }
+        // 引号吸附仅压制软终结构；硬上限仍强制切开
+        let quote_blocks_soft = config.quote_unclosed && quote_depth > 0;
 
-        if is_terminal_punct(ch) {
+        if !quote_blocks_soft && is_terminal_punct(ch) {
             let mut j = k;
             while j < total && (is_closing_glue(chars[j]) || is_terminal_punct(chars[j])) {
                 j += 1;
@@ -714,10 +720,33 @@ mod tests {
     }
 
     #[test]
-    fn quote_open_still_suppresses_hard_limit() {
-        // 引号未闭合时硬上限也不得切开
-        let text = format!("\u{201C}{}", "甲".repeat(120));
+    fn quote_open_still_suppresses_soft_but_not_hard_limit() {
+        // 引号未闭合：压制软终结构，但硬上限必须切开（A33.1：防整章不切）
+        let text = format!("\u{300C}{}", "甲".repeat(120));
         let paras = segment_lines(&text, &cfg50());
-        assert_eq!(paras.len(), 1, "未闭合引号内禁止硬切");
+        assert!(
+            paras.len() >= 2,
+            "未闭合直角引号下硬上限仍应切开: {}",
+            paras.len()
+        );
+        assert_eq!(paras.concat(), text, "切分不得丢字");
+    }
+
+    #[test]
+    fn traditional_corner_quotes_tracked() {
+        // 繁体「」：闭合前不软切；闭合后累积超阈值再遇终结构可切
+        let text = format!(
+            "{}「{}。」{}。",
+            "前".repeat(20),
+            "话".repeat(40),
+            "后".repeat(55)
+        );
+        let paras = segment_lines(&text, &cfg50());
+        assert!(
+            paras.len() >= 2,
+            "闭合后应恢复软切: {:?}",
+            paras.iter().map(|p| p.chars().count()).collect::<Vec<_>>()
+        );
+        assert!(paras.iter().any(|p| p.contains('「')));
     }
 }

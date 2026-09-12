@@ -756,10 +756,11 @@ impl LayoutEngine {
                     for (line_idx, line) in laid.into_iter().enumerate() {
                         // A33：逐行真实行高（scale / comment）
                         let line_h_i = line_h_of(line.scale);
-                        // P4 修复：0.5px 容差——cap 用乘法（start + fit×line_h）、
-                        // current_y 用逐行累加，浮点 ULP 漂移会让「整段恰好 fit」
-                        // 的段落末行被判越界甩到下页（分页碎片化回归根因）
-                        if current_y + line_h_i > para_bottom_limit + 0.5
+                        // A33.1：能放下一行就放下——容差 1px + 3% 行高，
+                        // 消除「肉眼还有一行空间却提前换页」的观感
+                        //（浮点 ULP + 行高微差导致 0.5px 容差不够）
+                        let fit_eps = 1.0 + line_h_i * 0.03;
+                        if current_y + line_h_i > para_bottom_limit + fit_eps
                             && text_lines_on_page >= MIN_LINES_PER_PAGE
                         {
                             break_page!();
