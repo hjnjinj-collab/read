@@ -502,6 +502,21 @@ impl EpubParser {
                 }
             }
         }
+        // scraper 可能丢掉 xlink:href 命名空间属性——正则兜底
+        for pat in [
+            r#"xlink:href\s*=\s*["']([^"']+)["']"#,
+            r#"href\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|webp|gif))["']"#,
+            r#"src\s*=\s*["']([^"']+)["']"#,
+        ] {
+            if let Ok(re) = regex::Regex::new(pat) {
+                if let Some(m) = re.captures(html).and_then(|c| c.get(1)) {
+                    let s = m.as_str().trim();
+                    if !s.is_empty() {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
         None
     }
 
@@ -2157,8 +2172,9 @@ impl BookParser for EpubParser {
 
         let opf_path = Self::parse_container(&container_xml)?;
 
-        // 2. 确定 OPF 目录
+        // 2. 确定 OPF 目录（必须先落 opf_base_path——封面 join_opf_dir 依赖）
         let opf_dir = opf_path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+        self.opf_base_path = opf_dir.to_string();
 
         // 3. 读取并解析 OPF
         let opf_index = {

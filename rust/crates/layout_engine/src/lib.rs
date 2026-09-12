@@ -892,11 +892,11 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 画廊：最大高度 = 内容区 × 0.85（留图说空间）
+                    // 画廊：最大高度 = 内容区（尽量占满页，图说可叠在同页底部）
                     let max_height = if *bleed {
                         bottom_limit
                     } else if *gallery {
-                        content_height * 0.85
+                        content_height
                     } else {
                         content_height
                     };

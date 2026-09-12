@@ -2083,7 +2083,7 @@ fn apply_paragraph_format_settings(
             runs,
             anc,
             is_comment: _,
-            indent_first_line_em: _,
+            indent_first_line_em: css_indent,
             spacing_after_em,
             line_height,
         } = block
@@ -2092,7 +2092,17 @@ fn apply_paragraph_format_settings(
         };
 
         // P3：用户缩进覆盖（设置优先于 CSS 物化值）
-        let indent_first_line_em = indent_override;
+        // A35.1：Right/Center 段不加用户缩进——右对齐再加 2em 会整体右偏
+        // （大奉打更人 p.foot1 诗词 text-align:right + CSS indent=0）
+        let user_indent_wanted = !matches!(
+            align,
+            Some(book_parser::Align::Right) | Some(book_parser::Align::Center)
+        );
+        let indent_first_line_em = if user_indent_wanted {
+            indent_override
+        } else {
+            css_indent
+        };
 
         // 统一智能分段：A35 块内切分（阈值+终结构+引号吸附；D10 同步重写 runs）
         let mut pieces: Vec<String> = Vec::new();

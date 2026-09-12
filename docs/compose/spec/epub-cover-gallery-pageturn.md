@@ -10,14 +10,16 @@ commits: 52f5173..HEAD
 
 ## Report
 
-**What was built** — ① 封面兜底：`meta name=coverpage`、manifest `id/href cover*` 图片、cover-like spine 章取首图（瓦尔登湖 `id=cover Cover.jpg` 命中）；多候选循环用 `continue` 不短路。② 画廊：JS 标 `Image.gallery`，布局非空页强制断页（每图一页 + 图说同页），点按全屏 `ImageZoomViewer`（捏合缩放）。③ 翻页：`nextPage` 请求页被钳回原页时视为章末，清 pageCount 缓存并进下一章（日志 `page.next.clamp-to-end`），破 `not-adjacent` 死循环。
+**What was built** — ① 封面兜底：`meta name=coverpage`、manifest `id/href cover*`、cover-like spine 章取首图（含 SVG `xlink:href` 正则兜底）；**A35.1**：`opf_base_path` 须在封面提取前赋值，否则 `join_opf_dir` 丢 OPF 目录（剑来回归）。② 画廊：`Image.gallery` 每图一页，max 高=内容区（A35.1 自 0.85 放宽）；点按全屏缩放。③ 翻页钳回原页视为章末进下一章。**A35.1**：Right/Center 段不套用户缩进（诗词 `text-align:right` 不再被 2em 推偏）。
 
-**Verification** — layout_engine 92 / book_parser 127 / reader_core 173 / bridge 17 PASS；`fix_sync.ps1` PASS；flutter analyze 0 error。独立审查 0 critical；封面 `?` 短路已改为 continue。
+**Verification** — probe_cover：剑来 1122964 / 瓦尔登湖 13827270 均 Some；layout 92 / book_parser 127 / reader_core 173 / bridge 17 PASS；`fix_sync.ps1` PASS。
 
 **Journey log** —
-1. 瓦尔登湖 OPF 是非标 `meta name="coverpage"`，不能只认 `name="cover"`。
-2. 封面多候选必须逐个 continue，首候选失败不能整函数放弃。
-3. 大奉打更人单页短章 pageCount 虚高时，钳制回写 + 章末兜底才能解卡死。
+1. 瓦尔登湖 OPF 是非标 `meta name="coverpage"`。
+2. 封面提取必须在 `opf_base_path` 赋值之后——否则 join 丢目录。
+3. scraper 常丢 `xlink:href`，SVG 封面需正则兜底。
+4. pageCount 虚高时钳回原页 + 章末兜底解卡死。
+5. 用户缩进不得覆盖 CSS `text-align:right/center` 段（诗词页）。
 4. 画廊复用 Image.gallery 字段 + 布局强制分页，避免新 IR 块类型。
 
 ## [S1] Problem
