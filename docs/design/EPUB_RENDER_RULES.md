@@ -1,8 +1,8 @@
 # EPUB 统一渲染规则（路线2：结构化 IR + CSS 物化 + 原生绘制）
 
-> 更新: 2026-08-24（M5：粗斜体字形/列表符号/ruby 注音/表格线框/px·rgb）；2026-08-24（M4：阅读级简繁转换）；2026-08-23（M3：文字样式/行内富文本/表格排版）
+> 更新: 2026-09-12（A34–A35：章末注/封面兜底/画廊/border-bottom/right 回落正文）
 > 地位: EPUB 富内容渲染管线的**权威规则描述**，以代码实际状态为准。
-> 验收基准: 《剑来》（Duokan 制作，474 spine，416 章头出血图 + ~19 整页背景 + ~40 卷首页）
+> 验收基准: 《剑来》（Duokan 制作，474 spine）+ 《瓦尔登湖》（章末注/封面）+ 《大奉打更人》（画廊/装饰诗词页）
 > 关联: ARCHITECTURE.md §A8 / css_lite.rs / content_ir.rs / extract_rules.rs / layout_engine::layout_items
 
 ---
@@ -50,7 +50,8 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
 |---|---|---|---|---|
 | `<p>` | 段落；行内子元素累积文本；`<br>`→软换行 `\n`；样式行内元素产出 runs | Paragraph{align,color,font_scale,runs} | 逐行断行绘制；颜色/字号缩放/对齐生效（见 §5） | ✅ |
 | `<h1>`–`<h6>` | 标题，level=1..6；空标题丢弃 | Heading{align,color,font_scale} | CSS 颜色/字号倍率/对齐生效；**标题独立字号体系未做**（仅 CSS 倍率） | ◐ |
-| `<img src alt>` | 独立图块；src 由 Rust 按内容目录解析为 ZIP 全路径 | Image | 见 §3 图片规则 | ✅ |
+| `<img src alt>` | 独立图块；src 由 Rust 按内容目录解析为 ZIP 全路径；`gallery` 标记见 §3.3 | Image | 见 §3 图片规则 | ✅ |
+| `div.duokan-image-gallery-cell` | 画廊单元：图 + 图说；Image 标 gallery=true | Image+Paragraph | 每图一页；点按全屏缩放（§3.3） | ✅ |
 | `<svg><image xlink:href></svg>` | SVG 包裹图片（《剑来》封面页形态）：svg 容器透明下沉，image 同 img 提取（href 读 src→xlink:href→href）；配合 duokan-page-fullscreen 转整页背景（见 §3.1） | Image | 同 img 规则；全屏页转背景铺满裁切 | ✅ |
 | `div.logo>img`（包裹容器） | anc 链携带祖先 class | Image | CSS 物化 width%/align/bleed 后绘制 | ✅ |
 | `<ul>`/`<ol>`/`<li>` | 列表；li 内嵌套 ul/ol 递归；li 内 p/img 混排 | List{ordered,items} | 前序展平为段/图序列；**项目符号「• 」/编号「N. 」前缀渲染**（M5：bridge 层合成，见 §8；悬挂缩进不做、ol start 属性忽略恒从 1 起） | ✅ |
@@ -155,20 +156,53 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
 - OPF spine itemref `properties` 含 `duokan-page-fullscreen` 的文档（Duokan
   全屏页语义，《剑来》封面页形态：SVG 100%×100% 包裹封面图）在解析期收集为
   全屏页集合
-- 结构化提取后，若全屏页**恰好产出唯一 Image 块**（href 已解析为 ZIP 全路径），
+- **封面启发式（A34.1）**：href 文件名以 `cover` 开头 或 章标题含「封面」，
+  且过滤空段后**恰为单张 Image** → 同样转整页背景（`starts_with` 避免
+  `uncover` 误伤；瓦尔登湖 `coverpage.html` 形态）
+- 结构化提取后，若全屏页/封面页**恰好产出唯一 Image 块**（href 已解析为 ZIP 全路径），
   转为 `PageBackground{size: Cover}` + 清空 blocks——与 body class 装饰页
   （§2.5）走同一整页背景渲染通道，等比铺满、溢出裁切
 - 防御约束：非单图全屏页不转换（防丢文本）；body CSS 背景与全屏图并存时
   全屏图胜出（它是页面的内容本体）
 
+### 3.2 书架封面提取兜底链（A35 / A35.1）
+
+优先级（任一命中即停；`opf_base_path` 须在提取前赋值）：
+
+1. EPUB3 `properties="cover-image"`
+2. EPUB2 `meta name="cover"` → manifest id
+3. `meta name="coverpage"`（非标，瓦尔登湖）→ manifest id；xhtml 则取首图
+4. manifest `id/href` 文件名以 `cover` 开头的图片（剑来 `id="cover.jpg"`）
+5. spine 首个 cover-like 章解析首个 `img` / `svg>image`（`xlink:href` 正则兜底）
+
+### 3.3 画廊（A35，duokan-image-gallery）
+
+- JS：`duokan-image-gallery-cell` 内 Image 标 `gallery=true` + 图说 Paragraph
+- 布局：非空页强制断页（每图一页）；max 高 = 内容区
+- 交互：点按 `hitImage` → 全屏 `ImageZoomViewer`（捏合缩放）；先于翻页手势
+
+### 3.4 章末注 / 脚注（A34）
+
+- `p.note`/`note1`/footnote 类 → `is_comment`（注释通道：可隐藏、可配色/字号）
+- 正文 `<a href="#mN"><sup>[N]</sup></a>` → `StyledRun.footnote_ref` 上标可点
+- 点按走 `_handleTapGesture` 优先级：脚注 > 图片放大 > 翻页/菜单
+
+### 3.5 标题 border-bottom（A34.3）
+
+- CSS `border-bottom: solid 2px #color` 物化为 `Heading.border_bottom`
+- 布局：`LayoutItem::Hr` → 内容区宽填充 `RectEntry{filled:true}`（Dart 按色填充）
+
 ## 4. 分页与进度锚点
 
 - 输入：LayoutItem[]（Text(TextItem{align,color,font_scale,runs}) |
-  Image{href,aspect,width_percent,align,bleed} | Table(TableInput)）
+  Image{href,aspect,width_percent,align,bleed,gallery} | Table(TableInput) | Hr）
 - 文本分页镜像 layout_text 约定：段落完整性优先、MIN_LINES_PER_PAGE=3、
   段间距 paragraph_spacing；char_index 只随文本字符累加（每段末尾 +1 换行）。
   样式化路径的软换行 `\n` 不落入任何行区间，锚点按
   `行区间长度 + 行前换行数` 累计，与旧口径保持一致
+- **普通段落 `text-align:right` 回落正文默认（A35.2）**：装饰诗词页
+  （大奉打更人 `p.foot1`）右对齐在重排阅读器中观感破碎；Right→None +
+  用户缩进。Center 保留（标题/短署名）。对齐×缩进：`x = align(w, cw−ind)+ind`
 - 表格为原子块（见 §6）：整表放不下当前页则推至次页；锚点消耗 =
   单元格全部字符 + 每个单元格段落 +1
 - 纯背景装饰页：blocks 为空 + 有 background ⇒ 单张空页（page_count=1，
@@ -180,6 +214,8 @@ Page[] = entries[(样式化 Text 行 | Image 矩形 | Rect 单元格线框)] + �
   与 hr→「────」同类，二分定位容错无损
 - TXT 路径（layout_text）与本矩阵无关，其字符偏移语义被进度库精确依赖，
   两套分页核心有意分离、禁止合并重构
+- **pageCount 钳制章末兜底（A35）**：Dart `nextPage` 请求页被 getPage 钳回
+  原页时视为章末，清 pageCount 缓存并进下一章（破 not-adjacent 死循环）
 
 ## 5. 文字样式与行内富文本专项
 
@@ -301,8 +337,9 @@ EPUB 结构化路径此前完全跳过阅读级预处理。M4 起支持**仅简�
    列表悬挂缩进与 ol start 起始编号
 7. px/em/pt 绝对尺寸的图片宽度；rem 字号；合成粗体不参与 Rust 断行测量
    （拉丁字符行尾可能轻微挤压，见 §5.3）
-8. 脚注（ol.duokan-footnote）交互
+8. ~~脚注交互~~ **已支持（A34）**：`p.note`/`footnote` 注释通道 + 正文 [N] 上标点按弹层
 9. 表格 margin 的非 top 方向（右对齐 auto 忽略，表格整体左置）
+10. 普通段落 `text-align:right` 在正文流中回落左对齐（A35.2；装饰诗词页钦定）
 
 ## 10. 新元素接入涉及文件速查
 

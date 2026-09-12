@@ -10,22 +10,24 @@
 ## ✨ 特性
 
 - 🚀 **高性能**: Rust 核心引擎，多级缓存 + 锁纪律，大文本秒开
-- 📖 **双格式**: TXT（多编码）+ EPUB（结构化 IR 渲染：图片/表格/富文本/样式）
+- 📖 **双格式**: TXT（多编码）+ EPUB（结构化 IR：图片/表格/富文本/脚注/画廊/封面）
 - 🎨 **四种翻页动画**: 仿真卷曲 / 上下滚动 / 水波纹粉碎 / 方块坍塌溶解
 - 📝 **笔记与划线**: 长按词边界选区、双端手柄、高亮渲染、备注、页码定位
 - 🔍 **书内全文搜索**: Rust 线程池计算，章节+摘录+跳转，TXT/EPUB 同口径
 - 🔖 **书签与进度**: 章节+字符锚点，跨启动恢复
-- ⚙️ **深度阅读设置**: 字号/行距/字体/简繁/净化/替换规则/分段规则/两端对齐/标点压缩
+- 📕 **EPUB 深化**: 章末注点按弹层 / 封面提取兜底 / 画廊分页放大 / 标题分割线 / 统一智能分段
+- ⚙️ **深度阅读设置**: 字号/行距/字体/简繁/净化/替换/分段/注释样式/两端对齐/标点压缩
 - 📱 **跨平台**: Windows 桌面 + Android 真机（分 ABI 打包）
 
 ## 🎯 当前状态
 
-**版本 1.0.4+5**（2026-09-11）
+**版本 1.0.4+5**（2026-09-12）
 
 | 方向 | 状态 |
 |------|------|
 | TXT 阅读全链路 | ✅ 完成 |
-| EPUB 结构化渲染 | ✅ 完成（图片/表格/富文本/CSS 物化） |
+| EPUB 结构化渲染 | ✅ 完成（图片/表格/富文本/脚注/画廊/封面/CSS 物化） |
+| 统一智能分段 | ✅ 完成（TXT 行流 + EPUB 块内同核） |
 | 笔记/划线/书签/搜索 | ✅ 完成 |
 | 阅读设置体系 | ✅ 完成（持久化 + 即时生效） |
 | 性能架构（缓存/锁纪律） | ✅ 完成（四个锁竞争热点全部闭环） |
@@ -39,10 +41,13 @@
 | 能力 | TXT | EPUB |
 |------|-----|------|
 | 解析 | 编码探测（UTF-8/GBK/GB2312/GB18030）+ JS 章节识别 | roxmltree + DOM JSON + JS 规则提取 |
-| 分页 | 行级布局 | 混合布局（图片原子/表格单元格） |
-| 图片 / 表格 / 富文本 | — | ✅ StyledRun / Image / Table / List / Quote |
+| 分页 | 行级布局 | 混合布局（图片原子/表格单元格/画廊强制分页） |
+| 图片 / 表格 / 富文本 | — | ✅ StyledRun / Image / Table / List / Quote / Hr |
+| 章末注 / 脚注 | — | ✅ p.note 灰字 + 正文 [N] 上标点按弹层 |
+| 画廊 | — | ✅ duokan-image-gallery 每图一页 + 点按缩放 |
+| 封面提取 | — | ✅ cover-image / meta cover / coverpage / cover* 兜底链 |
 | 内容净化 | ✅ 整章（净化缓存） | ✅ 落盘缓存（跨启动复用） |
-| CSS 物化 | — | ✅ 对齐/颜色/字号倍率/缩进/行距 |
+| CSS 物化 | — | ✅ 对齐/颜色/字号/缩进/行距/border-bottom 分割线 |
 | 简繁转换 | ✅ | ✅（DOM 文本节点层，锚点同源） |
 | 书内搜索 | ✅ | ✅（同一 IR 字符流锚点） |
 | 笔记 / 书签 | ✅ | ✅（同源锚点） |
@@ -90,13 +95,13 @@ adb install -r build\app\outputs\flutter-apk\app-arm64-v8a-release.apk
 ### 测试
 
 ```powershell
-flutter test              # Dart 单元测试（105 项）
+flutter test              # Dart 单元测试
 cd rust
-cargo test -p book_parser --lib    # 123 项
-cargo test -p reader_core --lib    # 154 项
-cargo test -p layout_engine --lib  # 85 项
-cargo test -p bridge --lib         # 17 项
-cargo test -p bridge --test epub_flow  # 9 项集成
+cargo test -p book_parser --lib    # 127 项
+cargo test -p reader_core --lib    # 173 项
+cargo test -p layout_engine --lib  # 92 项
+cargo test -p bridge --lib         # 18 项
+cargo test -p bridge --test epub_flow  # 集成
 ```
 
 ## 📖 使用说明
@@ -226,9 +231,18 @@ flutter_rust_bridge_codegen generate
 
 ## 🎯 路线图
 
-### 已完成（A1–A31）
+### 已完成（A1–A35）
 
-核心阅读 → EPUB 结构化渲染 → 翻页动画家族 → 排版精度 → 搜索 → 笔记划线 → 性能架构治理。详见 [ARCHITECTURE.md §13](./docs/design/ARCHITECTURE.md)。
+核心阅读 → EPUB 结构化渲染 → 翻页动画家族 → 排版精度 → 搜索 → 笔记划线 → 性能架构治理 → 统一智能分段 → 章末注/封面/画廊。详见 [ARCHITECTURE.md §13](./docs/design/ARCHITECTURE.md)。
+
+近期（A32–A35，2026-09-12）：
+
+| 批次 | 内容 |
+|------|------|
+| A32 | 统一智能分段：TXT/EPUB 同核双路径，M9 三选一退役 |
+| A33 | EPUB 分页精度：首翻 MeasureCache 两遍 + 页底行级填满 |
+| A34–A34.3 | 章末注点按弹层 / 注释样式可配 / 页内标题保留 / border-bottom 分割线 |
+| A35–A35.2 | 封面提取兜底链 / 画廊分页放大 / 翻页章末兜底 / 诗词回落正文排版 |
 
 ### 下一步候选（基于架构盘点）
 
@@ -246,12 +260,14 @@ flutter_rust_bridge_codegen generate
 - `PREPROCESSED_CACHE` 键不含净化 config_hash（装回时靠显式 invalidate 兜底）
 - `EpubParser` 导入期 `parse(&mut self)` 与运行期 `&self` 读路径生命周期不重叠，无竞争
 - bridge 集成测试存在 A35-L2 签名漂移（PRE-EXISTING，待修复）
+- 普通段落 `text-align:right` 统一回落正文排版（装饰诗词页；A35.2 钦定）
 
 ## 📚 文档
 
 - [开发者指南](./AGENTS.md) — 构建、架构注意事项（必读）
 - [详细架构 + 路线图](./docs/design/ARCHITECTURE.md)
-- [特性文档](./docs/compose/spec/) — 11 份 compose-next 交付记录
+- [EPUB 渲染规则](./docs/design/EPUB_RENDER_RULES.md)
+- [特性文档](./docs/compose/spec/) — compose-next 交付记录
 - [变更日志](./CHANGELOG.md)
 - [Bug 索引](./docs/BUGFIX_INDEX.md)
 
