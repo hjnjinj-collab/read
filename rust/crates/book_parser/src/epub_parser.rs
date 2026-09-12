@@ -912,6 +912,7 @@ impl EpubParser {
             background,
             body_classes: std::mem::take(&mut content.body_classes),
             blocks,
+            footnotes: std::mem::take(&mut content.footnotes),
         })
     }
 
@@ -1322,6 +1323,13 @@ impl EpubParser {
                     r.bold = Self::resolved_font_weight(sheet, &ctx).unwrap_or(tag_bold);
                     r.italic = Self::resolved_font_style(sheet, &ctx).unwrap_or(tag_italic);
                     r.underline = tag_underline;
+                    // A34：脚注引用不上链、默认小字号上标（spec S2）
+                    if r.footnote_ref.is_some() {
+                        r.underline = false;
+                        if r.font_scale.is_none() {
+                            r.font_scale = Some(0.7);
+                        }
+                    }
                 }
                 r
             })
@@ -1362,9 +1370,12 @@ impl EpubParser {
                     }
                     let item_lower = item.to_lowercase();
                     if item_lower.contains("footnote")
+                        || item_lower.contains("endnote")
                         || item_lower.contains("sidenote")
                         || item_lower.contains("annotation")
-                        || item_lower == "note" {
+                        || item_lower == "note"
+                        || item_lower == "note1"
+                    {
                         return true;
                     }
                 }
@@ -1464,11 +1475,15 @@ impl EpubParser {
                 // 2. 类名包含 footnote/sidenote/annotation
                 // 3. 居中或右对齐的小块（孤立注释的典型布局）
                 let char_count = text.chars().count();
-                let is_potential_comment = font_scale.unwrap_or(1.0) < 0.75
-                    && char_count < 150
-                    && (Self::has_aside_ancestor(&anc)
-                        || Self::has_note_class(&anc)
-                        || Self::is_isolated_small_block(&align));
+                // A34：class note/note1（章末注）不要求 <0.75——瓦尔登湖 .note=0.85em
+                let note_cls = Self::has_note_class(&anc);
+                let is_potential_comment = char_count < 200
+                    && ((note_cls && font_scale.unwrap_or(1.0) < 1.0)
+                        || (font_scale.unwrap_or(1.0) < 0.75
+                            && char_count < 150
+                            && (Self::has_aside_ancestor(&anc)
+                                || note_cls
+                                || Self::is_isolated_small_block(&align))));
                 let is_comment = is_comment || is_potential_comment;
                 ContentBlock::Paragraph {
                     text,
@@ -2640,9 +2655,9 @@ mod tests {
             color: None,
             font_scale: None,
             runs: vec![
-                StyledRun { start: 0, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu".into()]]) },
-                StyledRun { start: 1, end: 2, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu2".into()]]) },
-                StyledRun { start: 2, end: 3, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into()]]) },
+                StyledRun { start: 0, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu".into()]]), footnote_ref: None },
+                StyledRun { start: 1, end: 2, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into(), "txtu2".into()]]), footnote_ref: None },
+                StyledRun { start: 2, end: 3, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: Some(vec![vec!["body".into()], vec!["p".into()], vec!["span".into()]]), footnote_ref: None },
             ],
             anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
             is_comment: false,
@@ -2661,8 +2676,8 @@ mod tests {
         // 越界/空区间防御
         assert!(EpubParser::resolve_runs(
             vec![
-                StyledRun { start: 99, end: 100, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None },
-                StyledRun { start: 1, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None },
+                StyledRun { start: 99, end: 100, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None, footnote_ref: None },
+                StyledRun { start: 1, end: 1, color: None, font_scale: None, bold: false, italic: false, underline: false, anc: None, footnote_ref: None },
             ],
             &sheet,
             3,
@@ -2751,6 +2766,7 @@ mod tests {
                         .map(|e| e.into_iter().map(String::from).collect())
                         .collect(),
                 ),
+                footnote_ref: None,
             }
         };
 
@@ -2868,6 +2884,7 @@ mod tests {
                         .map(|e| e.into_iter().map(String::from).collect())
                         .collect(),
                 ),
+                footnote_ref: None,
             }
         };
 
@@ -2972,6 +2989,7 @@ mod tests {
                         e
                     },
                 ]),
+                footnote_ref: None,
             }
         };
 

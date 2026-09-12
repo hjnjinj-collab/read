@@ -71,6 +71,8 @@ pub struct PageInfo {
     /// 背景位置关键字原文（"bottom center"/"left top"...），
     /// 决定 cover 裁切锚点方位；None=居中
     pub background_position: Option<String>,
+    /// A34：章末脚注表（id → 正文；每页重复携带，量小）
+    pub footnotes: std::collections::HashMap<String, String>,
 }
 
 /// 页面内容项：文本行或图片
@@ -124,6 +126,8 @@ pub struct PageSegInfo {
     pub underline: bool,
     /// P2 justify 拉丁词保护段（Some(0)=该区间不加间隙；None=继承行级）
     pub letter_spacing: Option<f32>,
+    /// A34：脚注引用 id（点按弹层）
+    pub footnote_ref: Option<String>,
 }
 
 impl From<Page> for PageInfo {
@@ -157,6 +161,7 @@ impl From<Page> for PageInfo {
                                 italic: s.italic,
                                 underline: s.underline,
                                 letter_spacing: s.letter_spacing,
+                                footnote_ref: s.footnote_ref,
                             })
                             .collect(),
                         letter_gap: line.letter_gap,
@@ -207,6 +212,7 @@ impl From<Page> for PageInfo {
             background_href: None,
             background_size: None,
             background_position: None,
+            footnotes: Default::default(),
         }
     }
 }

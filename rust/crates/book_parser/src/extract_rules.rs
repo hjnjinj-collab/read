@@ -134,11 +134,11 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             push(chunk) { buf += sanitize(chunk); },
             // 行内元素文本：哨兵包裹（嵌套行内元素被 inlineText 展平，
             // 天然「最外层胜出」）
-            markInline(text, ancChain) {
+            markInline(text, ancChain, footnoteRef) {
                 text = sanitize(text);
                 if (!text.length) return;
                 const id = (styleChains.length).toString(36);
-                styleChains.push(ancChain);
+                styleChains.push({ anc: ancChain, ref: footnoteRef || null });
                 buf += MARK_OPEN + id + MARK_SEP + text + MARK_OPEN + "/" + id + MARK_SEP;
             },
             flush() {
@@ -159,14 +159,31 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 if (!t.length) return;
                 const decoded = decodeMarks(t);
                 const para = { type: "paragraph", text: decoded.text, anc: chain };
+                // A34：p.note/note1 直接标本章说（瓦尔登湖章末注）
+                var noteCls = false;
+                for (var ci = 0; ci < chain.length; ci++) {
+                    var path = chain[ci] || [];
+                    for (var cj = 1; cj < path.length; cj++) {
+                        var cn = String(path[cj]).toLowerCase();
+                        if (cn === "note" || cn === "note1" || /footnote|endnote/.test(cn)) {
+                            noteCls = true;
+                            break;
+                        }
+                    }
+                    if (noteCls) break;
+                }
+                if (noteCls) para.is_comment = true;
                 const runs = decoded.marks
                     .filter(function (m) { return m.end > m.start; })
                     .map(function (m) {
-                        return {
+                        const sc = styleChains[parseInt(m.id, 36)] || null;
+                        const r = {
                             start: m.start,
                             end: m.end,
-                            anc: styleChains[parseInt(m.id, 36)] || null,
+                            anc: sc ? sc.anc : null,
                         };
+                        if (sc && sc.ref) r.footnote_ref = sc.ref;
+                        return r;
                     });
                 if (runs.length) para.runs = runs;
                 out.push(para);
@@ -188,15 +205,23 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
             if (tag === "rp") continue;
             if (tag === "rt") {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             if (tag === "ruby") {
                 rubyContent(child, depth + 1, chain.concat([selfEntry(child)]), f, out);
                 continue;
             }
+            // A34: footnote ref anchors (href hash mN)
+            if (tag === "a") {
+                const href = (child.a && child.a.href) || "";
+                const fm = href.match(/#(m\d+)$/);
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]),
+                    fm ? fm[1] : null);
+                continue;
+            }
             if (INLINE.has(tag)) {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             // 段内出现块级元素（脏 HTML 容错）：先封段，再按块处理
@@ -225,7 +250,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
             if (tag === "rp") continue;
             if (tag === "rt") {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             if (tag === "ruby") {
@@ -233,7 +258,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 continue;
             }
             if (INLINE.has(tag)) {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             if (tag === "p") {
@@ -275,13 +300,13 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
             const tag = child.t;
             if (tag === "rp") continue;
             if (tag === "rt") {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             if (tag === "br") { f.push("\n"); continue; }
             if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, chain)); continue; }
             if (INLINE.has(tag)) {
-                f.markInline(inlineText(child), chain.concat([selfEntry(child)]));
+                f.markInline(inlineText(child), chain.concat([selfEntry(child)]), null);
                 continue;
             }
             f.flush();
@@ -309,7 +334,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 if (tag === "img" || tag === "image") { f.flush(); out.push(imgBlock(child, cellChain)); continue; }
                 if (tag === "rp") continue;
                 if (tag === "rt") {
-                    f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]));
+                    f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]), null);
                     continue;
                 }
                 if (tag === "ruby") {
@@ -317,7 +342,7 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                     continue;
                 }
                 if (INLINE.has(tag)) {
-                    f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]));
+                    f.markInline(inlineText(child), cellChain.concat([selfEntry(child)]), null);
                     continue;
                 }
                 if (tag === "p") {
@@ -411,10 +436,12 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                 out.push(tableBlock(child, childChain));
             } else {
                 // div/section/article/body/figure 等：透明容器
-                // 本章说检测：aside / footnote 语义元素
+                // 本章说：aside / footnote 语义 + class note/note1（瓦尔登湖式章末注）
+                var cls = (child.a && child.a["class"]) || "";
                 var isComment = (tag === "aside")
-                    || (/footnote|note|annotation|remark/.test(child.a && (child.a["epub:type"] || child.a.type || "")))
-                    || (/footnote/.test(child.a && child.a["class"] || ""));
+                    || (/footnote|endnote|sidenote|annotation|remark/.test(child.a && (child.a["epub:type"] || child.a.type || "")))
+                    || (/footnote|endnote|sidenote/.test(cls))
+                    || (/(^|\s)note1?(\s|$)/.test(cls));
                 if (isComment) {
                     // 本章说段落：透明递归产出块后逐块标记 is_comment
                     var innerBlocks = [];
@@ -434,12 +461,37 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
 
     const root = JSON.parse(domJson);
     const blocks = [];
+    const footnotes = {};
+    // A34: harvest chapter-end notes (class note/note1 or footnote)
+    function harvestNotes(node) {
+        if (!node || typeof node === "string") return;
+        if (node.t === "p" || node.t === "div" || node.t === "li") {
+            const cls = (node.a && node.a.class) || "";
+            if (/(^|\s)note1?(\s|$)/.test(cls) || /footnote|endnote/.test(cls)) {
+                let id = null;
+                const kids = node.c || [];
+                for (let i = 0; i < kids.length; i++) {
+                    const k = kids[i];
+                    if (k && typeof k !== "string" && k.t === "a" && k.a && k.a.id && /^m\d+$/.test(k.a.id)) {
+                        id = k.a.id;
+                        break;
+                    }
+                }
+                const raw = inlineText(node).replace(/^\s*\[\d+\]\s*/, "").trim();
+                if (id && raw.length) footnotes[id] = raw;
+            }
+        }
+        const kids = node.c || [];
+        for (let i = 0; i < kids.length; i++) harvestNotes(kids[i]);
+    }
+    harvestNotes(root);
     walkBlocks(root, 0, blocks, [selfEntry(root)]);
     return {
         body_tag: root.t,
         body_classes: classArrayOf(root),
         body_style: (root.a && root.a.style) || "",
         blocks: blocks,
+        footnotes: footnotes,
     };
 })()
 "#;
@@ -462,6 +514,9 @@ pub struct ExtractedContent {
     pub body_classes: Vec<String>,
     pub body_style: String,
     pub blocks: Vec<crate::content_ir::ContentBlock>,
+    /// A34：章末脚注表
+    #[serde(default)]
+    pub footnotes: std::collections::BTreeMap<String, String>,
 }
 
 #[cfg(feature = "js-engine")]
@@ -588,6 +643,44 @@ mod tests {
 
     #[cfg(feature = "js-engine")]
     #[test]
+    fn walden_style_endnotes() {
+        // 瓦尔登湖式：正文 <a href="#m1"><sup>[1]</sup></a> + 章末 <p class="note">
+        let html = r#"<html><body>
+            <p>康科德<a id="w1"></a><a href="chapter001.html#m1"><sup>[1]</sup></a>的瓦尔登湖。</p>
+            <p class="note"><a id="m1"></a><a href="chapter001.html#w1">[1]</a> 地名注释正文。</p>
+        </body></html>"#;
+        let content = extract_html(html);
+
+        assert!(
+            content.footnotes.contains_key("m1"),
+            "应采集章末注 m1，实得 {:?}",
+            content.footnotes.keys().collect::<Vec<_>>()
+        );
+        let body = content.footnotes.get("m1").unwrap();
+        assert!(body.contains("地名注释正文"), "注释正文应去掉 [N] 前缀: {body}");
+        assert!(!body.trim_start().starts_with("[1]"), "不应含 [1] 前缀: {body}");
+
+        // note 段应标 is_comment
+        let note_para = content.blocks.iter().find_map(|b| match b {
+            ContentBlock::Paragraph { text, is_comment, .. } if text.contains("地名") => {
+                Some(*is_comment)
+            }
+            _ => None,
+        });
+        assert_eq!(note_para, Some(true), "class=note 段应为本章说");
+
+        // 正文引用 run 应带 footnote_ref=m1
+        let has_ref = content.blocks.iter().any(|b| match b {
+            ContentBlock::Paragraph { runs, .. } => runs
+                .iter()
+                .any(|r| r.footnote_ref.as_deref() == Some("m1")),
+            _ => false,
+        });
+        assert!(has_ref, "正文 [1] 应产出 footnote_ref=m1 的 run");
+    }
+
+    #[cfg(feature = "js-engine")]
+    #[test]
     fn heading_paragraph_rule_image() {
         let html = r#"<html><head><title></title></head><body>
             <h2 class="head">天行健</h2>
@@ -706,6 +799,7 @@ mod tests {
                             vec!["p".to_string()],
                             vec!["b".to_string()],
                         ]),
+                        footnote_ref: None,
                     },
                     StyledRun {
                         start: 5,
@@ -720,6 +814,7 @@ mod tests {
                             vec!["p".to_string()],
                             vec!["span".to_string()],
                         ]),
+                        footnote_ref: None,
                     },
                 ],
                 anc: Some(vec![
@@ -870,6 +965,7 @@ mod tests {
                         vec!["p".to_string()],
                         vec!["span".to_string(), "txtu".to_string()],
                     ]),
+                    footnote_ref: None,
                 },
                 StyledRun {
                     start: 5,
@@ -884,6 +980,7 @@ mod tests {
                         vec!["p".to_string()],
                         vec!["em".to_string()],
                     ]),
+                    footnote_ref: None,
                 },
             ]
         );

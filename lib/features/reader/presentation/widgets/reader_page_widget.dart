@@ -92,6 +92,9 @@ class PagePainter extends CustomPainter {
   /// 新 painter 携带新 revision → shouldRepaint 命中重绘）
   final int themeRevision = PageContentRenderer.themeRevision;
 
+  /// A34：本页脚注引用命中框（paint 时填充；点按查询）
+  final List<({String ref, Rect rect})> footnoteHits = [];
+
   // 纸色底常量已公开到 PageContentRenderer.paperColor（v16.9.3：快照同源使用）
 
   PagePainter(
@@ -105,8 +108,17 @@ class PagePainter extends CustomPainter {
     this.baseLineHeight = 1.5,
   }) : super(repaint: repaint);
 
+  /// 点按命中脚注引用则返回目标 id
+  String? hitFootnote(Offset local) {
+    for (final h in footnoteHits) {
+      if (h.rect.inflate(8).contains(local)) return h.ref;
+    }
+    return null;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
+    footnoteHits.clear();
     readerTrace('page.paint', {
       'page': '${pageInfo.chapterIndex}/${pageInfo.pageIndex}',
       'pageId': readerPageId(pageInfo),
@@ -130,6 +142,7 @@ class PagePainter extends CustomPainter {
       applyTitleBold: applyTitleBold,
       baseFontSize: baseFontSize,
       baseLineHeight: baseLineHeight,
+      footnoteHits: footnoteHits,
     );
     // M12 修复：paint 后同步 flush（阻塞式），确保下一页 layout 时能命中 cache
     // ignore: unawaited_futures
@@ -230,6 +243,83 @@ class PageContentRenderer {
   /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）
   static Color get paperColor => theme.paperColor;
 
+  /// A34：按当前页数据命中脚注引用（不依赖 paint 缓存；
+  /// 与绘制同一套 TextPainter 几何，供外层 Listener 消费）
+  static String? hitFootnote(
+    PageInfo page,
+    Offset local, {
+    double baseFontSize = 18.0,
+    double baseLineHeight = 1.5,
+  }) {
+    if (page.footnotes.isEmpty) return null;
+    for (final entry in page.entries) {
+      if (entry.text == null || entry.isTableFrame) continue;
+      final rect = Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height);
+      if (!rect.inflate(12).contains(local)) continue;
+      final hasFn = entry.segments.any((s) => s.footnoteRef != null);
+      if (!hasFn) continue;
+      final text = entry.text!;
+      final baseScale = entry.fontScale ?? 1.0;
+      final baseStyle = TextStyle(
+        fontSize: baseFontSize * baseScale,
+        height: baseLineHeight,
+        fontFamily: ReaderFont.family,
+        letterSpacing: entry.letterGap,
+      );
+      final children = <InlineSpan>[];
+      var cursor = 0;
+      for (final seg in entry.segments) {
+        final s = seg.start.clamp(0, text.length);
+        final e = seg.end.clamp(s, text.length);
+        if (s > cursor) children.add(TextSpan(text: text.substring(cursor, s)));
+        if (e > s) {
+          children.add(
+            TextSpan(
+              text: text.substring(s, e),
+              style: TextStyle(
+                fontSize: baseFontSize * (seg.fontScale ?? baseScale),
+                height: baseLineHeight,
+                fontFamily: ReaderFont.family,
+                letterSpacing: seg.letterSpacing ?? entry.letterGap,
+                fontFeatures: seg.footnoteRef != null
+                    ? const [FontFeature.superscripts()]
+                    : null,
+              ),
+            ),
+          );
+          cursor = e;
+        }
+      }
+      if (cursor < text.length) {
+        children.add(TextSpan(text: text.substring(cursor)));
+      }
+      final tp = TextPainter(
+        text: TextSpan(style: baseStyle, children: children),
+        textAlign: TextAlign.left,
+        textDirection: TextDirection.ltr,
+      )..layout(minWidth: 0, maxWidth: double.infinity);
+      for (final seg in entry.segments) {
+        final ref = seg.footnoteRef;
+        if (ref == null) continue;
+        final s = seg.start.clamp(0, text.length);
+        final e = seg.end.clamp(s, text.length);
+        if (e <= s) continue;
+        final boxes = tp.getBoxesForSelection(
+          TextSelection(baseOffset: s, extentOffset: e),
+        );
+        for (final box in boxes) {
+          final r = box.toRect().shift(Offset(entry.x, entry.y)).inflate(8);
+          if (r.contains(local)) {
+            tp.dispose();
+            return ref;
+          }
+        }
+      }
+      tp.dispose();
+    }
+    return null;
+  }
+
   /// 绘制背景与 entries（不含纸色底——调用方按需自绘）
   static void paintPage(
     Canvas canvas,
@@ -241,6 +331,7 @@ class PageContentRenderer {
     bool applyTitleBold = false,
     double baseFontSize = 18.0,
     double baseLineHeight = 1.5,
+    List<({String ref, Rect rect})>? footnoteHits,
   }) {
     // P0- 防回归/根因定位：绘制层首次进入时输出 entry.x + canvas 当前
     // 变换矩阵 + 调用栈。若 entry.x=20 但视觉贴左边，必有 canvas 平移
@@ -346,6 +437,7 @@ class PageContentRenderer {
             children.add(TextSpan(text: text.substring(cursor, s)));
           }
           if (e > s) {
+            final isFn = seg.footnoteRef != null;
             children.add(
               TextSpan(
                 text: text.substring(s, e),
@@ -366,6 +458,10 @@ class PageContentRenderer {
                   // P2 justify 拉丁词保护段：Some(0) 压制该区间拉伸；
                   // null 继承行级 letterGap
                   letterSpacing: seg.letterSpacing ?? entry.letterGap,
+                  // A34：脚注引用上标（不参与 Rust 断行测量）
+                  fontFeatures: isFn
+                      ? const [FontFeature.superscripts()]
+                      : null,
                 ),
               ),
             );
@@ -401,6 +497,26 @@ class PageContentRenderer {
       // 与下一行重叠/页尾截断」（内容跨页丢失重复的直接来源）
       textPainter.layout(minWidth: 0, maxWidth: double.infinity);
       final naturalWidth = textPainter.maxIntrinsicWidth;
+
+      // A34：收集脚注引用命中框（几何与绘制原点一致）
+      if (footnoteHits != null) {
+        for (final seg in entry.segments) {
+          final ref = seg.footnoteRef;
+          if (ref == null) continue;
+          final s = seg.start.clamp(0, text.length);
+          final e = seg.end.clamp(s, text.length);
+          if (e <= s) continue;
+          final boxes = textPainter.getBoxesForSelection(
+            TextSelection(baseOffset: s, extentOffset: e),
+          );
+          for (final box in boxes) {
+            footnoteHits.add((
+              ref: ref,
+              rect: box.toRect().shift(Offset(entry.x, entry.y)),
+            ));
+          }
+        }
+      }
 
       if (naturalWidth <= entry.width * 1.02 || entry.width <= 0) {
         // 正常或轻微超宽（≤2%，epsilon 已把概率压到极低）：原样绘制，

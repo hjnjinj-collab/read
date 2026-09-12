@@ -483,6 +483,37 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   void _handleTapGesture(double dx, double dy, Offset tapPos) {
     const microGestureThreshold = 3.0; // 3px 微手势阈值
 
+    // A34：脚注引用优先——命中则弹层，不翻页/不开菜单
+    final page = ref.read(readerProvider).currentPage;
+    if (page != null) {
+      final n = ref.read(readerProvider.notifier);
+      final fnRef = PageContentRenderer.hitFootnote(
+        page,
+        tapPos,
+        baseFontSize: n.fontSize,
+        baseLineHeight: n.lineHeight,
+      );
+      if (fnRef != null) {
+        final body = page.footnotes[fnRef];
+        if (body != null && body.isNotEmpty) {
+          showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: Text('注释 [$fnRef]'),
+              content: SingleChildScrollView(child: Text(body)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('关闭'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
+    }
+
     if (_pageTurnMode == PageTurnMode.collapse) {
       final notifier = ref.read(readerProvider.notifier);
       final dir = _collapseTapZone(

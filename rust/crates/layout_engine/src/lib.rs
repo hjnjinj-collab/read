@@ -138,6 +138,9 @@ pub struct LineSeg {
     /// P2 两端对齐：拉丁词保护段（Some(0)=该区间不参与空隙拉伸）
     #[serde(default)]
     pub letter_spacing: Option<f32>,
+    /// A34：脚注引用 id（点按弹层）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footnote_ref: Option<String>,
 }
 
 /// 图片项的绘制参数（坐标已由布局引擎折算）
@@ -216,6 +219,8 @@ pub struct RunSpan {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    /// A34：脚注引用 id
+    pub footnote_ref: Option<String>,
 }
 
 /// 样式化排版的单行产物（layout_styled_paragraph 内部使用）
@@ -1517,6 +1522,7 @@ impl LayoutEngine {
                     bold: r.bold,
                     italic: r.italic,
                     underline: r.underline,
+                    footnote_ref: r.footnote_ref.clone(),
                     // P2 justify 拉丁词保护：段内以 ASCII 字母/数字为主 → 不参与空隙拉伸
                     letter_spacing: if line.letter_gap > 0.0 {
                         let seg: String = item.text.chars().skip(s).take(e - s).collect();
@@ -2378,8 +2384,8 @@ mod tests {
             color: None,
             font_scale: None,
             runs: vec![
-                RunSpan { start: 0, end: 2, color: Some("#ff0000".into()), font_scale: None, bold: false, italic: false, underline: false },
-                RunSpan { start: 3, end: 5, color: Some("#00ff00".into()), font_scale: None, bold: false, italic: false, underline: false },
+                RunSpan { start: 0, end: 2, color: Some("#ff0000".into()), font_scale: None, bold: false, italic: false, underline: false, footnote_ref: None },
+                RunSpan { start: 3, end: 5, color: Some("#00ff00".into()), font_scale: None, bold: false, italic: false, underline: false, footnote_ref: None },
             ],
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
@@ -2425,6 +2431,7 @@ mod tests {
                 bold: true,
                 italic: true,
                 underline: true,
+                footnote_ref: None,
             }],
             spacing_before_em: 0.0,
             spacing_after_em: 0.0,
@@ -3754,6 +3761,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 underline: false,
+                footnote_ref: None,
             }],
             ..Default::default()
         };

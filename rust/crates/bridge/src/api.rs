@@ -2144,6 +2144,7 @@ fn clip_runs(
                 italic: r.italic,
                 underline: r.underline,
                 anc: r.anc.clone(),
+                footnote_ref: r.footnote_ref.clone(),
             })
         })
         .collect()
@@ -2408,6 +2409,7 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
         bold: r.bold,
         italic: r.italic,
         underline: r.underline,
+        footnote_ref: r.footnote_ref.clone(),
     }
 }
 
@@ -2584,6 +2586,12 @@ fn process_structured_chapter(
     // M9.1：EPUB 段落格式化（超长段切短 + 用户缩进覆盖 CSS）。
     // 设置经 para_format_hash 入缓存键——变更即换键重排，此处读全局即可。
     let mut content = content;
+    // A34：章末脚注表随页下发（量小，每页重复携带）
+    let footnotes: std::collections::HashMap<String, String> = content
+        .footnotes
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
 
     // A30c：去重标题（TXT 预处理 Stage1 同口径，先于替换规则——规则可能
     // 改写标题文本）。IR 块文本是转换后文本，标题按同方向转换后比对。
@@ -2651,6 +2659,7 @@ fn process_structured_chapter(
                 );
                 info.background_position = bg.position.clone();
             }
+            info.footnotes = footnotes.clone();
             info
         })
         .collect();
@@ -4801,6 +4810,7 @@ mod tests {
             bold: false,
             italic: false,
             underline: false,
+            footnote_ref: None,
             anc: None,
         }];
         let mut blocks = vec![ContentBlock::Paragraph {

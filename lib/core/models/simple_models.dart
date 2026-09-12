@@ -148,6 +148,9 @@ class EntrySegment {
   /// P2 justify 拉丁词保护（null=继承行级 letterGap；0=该区间不加间隙）
   final double? letterSpacing;
 
+  /// A34：脚注引用目标 id（如 m1）；上标绘制 + 点按弹层
+  final String? footnoteRef;
+
   const EntrySegment({
     required this.start,
     required this.end,
@@ -158,6 +161,7 @@ class EntrySegment {
     this.italic = false,
     this.underline = false,
     this.letterSpacing,
+    this.footnoteRef,
   });
 }
 
@@ -191,6 +195,9 @@ class PageInfo {
   final int startCharIndex;
   final int endCharIndex;
 
+  /// A34：章末脚注表（id → 正文；每页重复携带）
+  final Map<String, String> footnotes;
+
   const PageInfo({
     required this.pageIndex,
     this.chapterIndex = 0,
@@ -200,6 +207,7 @@ class PageInfo {
     this.backgroundPosition,
     required this.startCharIndex,
     required this.endCharIndex,
+    this.footnotes = const {},
   });
 }
 

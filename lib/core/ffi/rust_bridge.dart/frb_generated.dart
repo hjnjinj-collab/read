@@ -2948,6 +2948,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Map<String, String> dco_decode_Map_String_String_None(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return Map.fromEntries(dco_decode_list_record_string_string(raw).map((e) => MapEntry(e.$1, e.$2)));
+  }
+
+  @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as String;
@@ -3224,6 +3230,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, String)> dco_decode_list_record_string_string(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_record_string_string).toList();
+  }
+
+  @protected
   List<SearchHit> dco_decode_list_search_hit(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_search_hit).toList();
@@ -3287,7 +3299,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageInfo dco_decode_page_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8) throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9) throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return PageInfo(
       pageIndex: dco_decode_usize(arr[0]),
       chapterIndex: dco_decode_usize(arr[1]),
@@ -3297,6 +3309,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       backgroundHref: dco_decode_opt_String(arr[5]),
       backgroundSize: dco_decode_opt_String(arr[6]),
       backgroundPosition: dco_decode_opt_String(arr[7]),
+      footnotes: dco_decode_Map_String_String_None(arr[8]),
     );
   }
 
@@ -3304,7 +3317,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PageSegInfo dco_decode_page_seg_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9) throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10) throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return PageSegInfo(
       start: dco_decode_usize(arr[0]),
       end: dco_decode_usize(arr[1]),
@@ -3315,7 +3328,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       italic: dco_decode_bool(arr[6]),
       underline: dco_decode_bool(arr[7]),
       letterSpacing: dco_decode_opt_box_autoadd_f_32(arr[8]),
+      footnoteRef: dco_decode_opt_String(arr[9]),
     );
+  }
+
+  @protected
+  (String, String) dco_decode_record_string_string(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (dco_decode_String(arr[0]), dco_decode_String(arr[1]));
   }
 
   @protected
@@ -3366,6 +3390,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_String(deserializer);
     return AnyhowException(inner);
+  }
+
+  @protected
+  Map<String, String> sse_decode_Map_String_String_None(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_list_record_string_string(deserializer);
+    return Map.fromEntries(inner.map((e) => MapEntry(e.$1, e.$2)));
   }
 
   @protected
@@ -3728,6 +3759,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<(String, String)> sse_decode_list_record_string_string(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <(String, String)>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_record_string_string(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<SearchHit> sse_decode_list_search_hit(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3842,6 +3885,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_backgroundHref = sse_decode_opt_String(deserializer);
     var var_backgroundSize = sse_decode_opt_String(deserializer);
     var var_backgroundPosition = sse_decode_opt_String(deserializer);
+    var var_footnotes = sse_decode_Map_String_String_None(deserializer);
     return PageInfo(
       pageIndex: var_pageIndex,
       chapterIndex: var_chapterIndex,
@@ -3851,6 +3895,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       backgroundHref: var_backgroundHref,
       backgroundSize: var_backgroundSize,
       backgroundPosition: var_backgroundPosition,
+      footnotes: var_footnotes,
     );
   }
 
@@ -3866,6 +3911,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_italic = sse_decode_bool(deserializer);
     var var_underline = sse_decode_bool(deserializer);
     var var_letterSpacing = sse_decode_opt_box_autoadd_f_32(deserializer);
+    var var_footnoteRef = sse_decode_opt_String(deserializer);
     return PageSegInfo(
       start: var_start,
       end: var_end,
@@ -3876,7 +3922,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       italic: var_italic,
       underline: var_underline,
       letterSpacing: var_letterSpacing,
+      footnoteRef: var_footnoteRef,
     );
+  }
+
+  @protected
+  (String, String) sse_decode_record_string_string(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 = sse_decode_String(deserializer);
+    var var_field1 = sse_decode_String(deserializer);
+    return (var_field0, var_field1);
   }
 
   @protected
@@ -3933,6 +3988,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_AnyhowException(AnyhowException self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_Map_String_String_None(Map<String, String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_record_string_string(self.entries.map((e) => (e.key, e.value)).toList(), serializer);
   }
 
   @protected
@@ -4195,6 +4256,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_record_string_string(List<(String, String)> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_record_string_string(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_search_hit(List<SearchHit> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
@@ -4284,6 +4354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.backgroundHref, serializer);
     sse_encode_opt_String(self.backgroundSize, serializer);
     sse_encode_opt_String(self.backgroundPosition, serializer);
+    sse_encode_Map_String_String_None(self.footnotes, serializer);
   }
 
   @protected
@@ -4298,6 +4369,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.italic, serializer);
     sse_encode_bool(self.underline, serializer);
     sse_encode_opt_box_autoadd_f_32(self.letterSpacing, serializer);
+    sse_encode_opt_String(self.footnoteRef, serializer);
+  }
+
+  @protected
+  void sse_encode_record_string_string((String, String) self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.$1, serializer);
+    sse_encode_String(self.$2, serializer);
   }
 
   @protected

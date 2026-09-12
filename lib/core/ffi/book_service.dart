@@ -559,6 +559,7 @@ class BookService {
                       italic: s.italic,
                       underline: s.underline,
                       letterSpacing: s.letterSpacing,
+                      footnoteRef: s.footnoteRef,
                     ),
                   )
                   .toList(),
@@ -576,6 +577,7 @@ class BookService {
       backgroundPosition: page.backgroundPosition,
       startCharIndex: page.startCharIndex.toInt(),
       endCharIndex: page.endCharIndex.toInt(),
+      footnotes: Map<String, String>.from(page.footnotes),
     );
   }
 

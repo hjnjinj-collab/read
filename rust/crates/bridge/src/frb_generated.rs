@@ -3211,6 +3211,14 @@ impl SseDecode for flutter_rust_bridge::for_generated::anyhow::Error {
     }
 }
 
+impl SseDecode for std::collections::HashMap<String, String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <Vec<(String, String)>>::sse_decode(deserializer);
+        return inner.into_iter().collect();
+    }
+}
+
 impl SseDecode for String {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3567,6 +3575,18 @@ impl SseDecode for Vec<usize> {
     }
 }
 
+impl SseDecode for Vec<(String, String)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<(String, String)>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::SearchHit> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3685,6 +3705,8 @@ impl SseDecode for crate::PageInfo {
         let mut var_backgroundHref = <Option<String>>::sse_decode(deserializer);
         let mut var_backgroundSize = <Option<String>>::sse_decode(deserializer);
         let mut var_backgroundPosition = <Option<String>>::sse_decode(deserializer);
+        let mut var_footnotes =
+            <std::collections::HashMap<String, String>>::sse_decode(deserializer);
         return crate::PageInfo {
             page_index: var_pageIndex,
             chapter_index: var_chapterIndex,
@@ -3694,6 +3716,7 @@ impl SseDecode for crate::PageInfo {
             background_href: var_backgroundHref,
             background_size: var_backgroundSize,
             background_position: var_backgroundPosition,
+            footnotes: var_footnotes,
         };
     }
 }
@@ -3710,6 +3733,7 @@ impl SseDecode for crate::PageSegInfo {
         let mut var_italic = <bool>::sse_decode(deserializer);
         let mut var_underline = <bool>::sse_decode(deserializer);
         let mut var_letterSpacing = <Option<f32>>::sse_decode(deserializer);
+        let mut var_footnoteRef = <Option<String>>::sse_decode(deserializer);
         return crate::PageSegInfo {
             start: var_start,
             end: var_end,
@@ -3720,7 +3744,17 @@ impl SseDecode for crate::PageSegInfo {
             italic: var_italic,
             underline: var_underline,
             letter_spacing: var_letterSpacing,
+            footnote_ref: var_footnoteRef,
         };
+    }
+}
+
+impl SseDecode for (String, String) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <String>::sse_decode(deserializer);
+        let mut var_field1 = <String>::sse_decode(deserializer);
+        return (var_field0, var_field1);
     }
 }
 
@@ -4194,6 +4228,7 @@ impl flutter_rust_bridge::IntoDart for crate::PageInfo {
             self.background_href.into_into_dart().into_dart(),
             self.background_size.into_into_dart().into_dart(),
             self.background_position.into_into_dart().into_dart(),
+            self.footnotes.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4217,6 +4252,7 @@ impl flutter_rust_bridge::IntoDart for crate::PageSegInfo {
             self.italic.into_into_dart().into_dart(),
             self.underline.into_into_dart().into_dart(),
             self.letter_spacing.into_into_dart().into_dart(),
+            self.footnote_ref.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4250,6 +4286,13 @@ impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(format!("{:?}", self), serializer);
+    }
+}
+
+impl SseEncode for std::collections::HashMap<String, String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<(String, String)>>::sse_encode(self.into_iter().collect(), serializer);
     }
 }
 
@@ -4503,6 +4546,16 @@ impl SseEncode for Vec<usize> {
     }
 }
 
+impl SseEncode for Vec<(String, String)> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <(String, String)>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::SearchHit> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4595,6 +4648,7 @@ impl SseEncode for crate::PageInfo {
         <Option<String>>::sse_encode(self.background_href, serializer);
         <Option<String>>::sse_encode(self.background_size, serializer);
         <Option<String>>::sse_encode(self.background_position, serializer);
+        <std::collections::HashMap<String, String>>::sse_encode(self.footnotes, serializer);
     }
 }
 
@@ -4610,6 +4664,15 @@ impl SseEncode for crate::PageSegInfo {
         <bool>::sse_encode(self.italic, serializer);
         <bool>::sse_encode(self.underline, serializer);
         <Option<f32>>::sse_encode(self.letter_spacing, serializer);
+        <Option<String>>::sse_encode(self.footnote_ref, serializer);
+    }
+}
+
+impl SseEncode for (String, String) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.0, serializer);
+        <String>::sse_encode(self.1, serializer);
     }
 }
 

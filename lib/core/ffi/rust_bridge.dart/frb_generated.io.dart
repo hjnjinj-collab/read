@@ -23,6 +23,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
+  Map<String, String> dco_decode_Map_String_String_None(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -113,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint64List dco_decode_list_prim_usize_strict(dynamic raw);
 
   @protected
+  List<(String, String)> dco_decode_list_record_string_string(dynamic raw);
+
+  @protected
   List<SearchHit> dco_decode_list_search_hit(dynamic raw);
 
   @protected
@@ -140,6 +146,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PageSegInfo dco_decode_page_seg_info(dynamic raw);
 
   @protected
+  (String, String) dco_decode_record_string_string(dynamic raw);
+
+  @protected
   SearchHit dco_decode_search_hit(dynamic raw);
 
   @protected
@@ -159,6 +168,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  Map<String, String> sse_decode_Map_String_String_None(SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -251,6 +263,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint64List sse_decode_list_prim_usize_strict(SseDeserializer deserializer);
 
   @protected
+  List<(String, String)> sse_decode_list_record_string_string(SseDeserializer deserializer);
+
+  @protected
   List<SearchHit> sse_decode_list_search_hit(SseDeserializer deserializer);
 
   @protected
@@ -278,6 +293,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PageSegInfo sse_decode_page_seg_info(SseDeserializer deserializer);
 
   @protected
+  (String, String) sse_decode_record_string_string(SseDeserializer deserializer);
+
+  @protected
   SearchHit sse_decode_search_hit(SseDeserializer deserializer);
 
   @protected
@@ -300,6 +318,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_AnyhowException(AnyhowException self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_Map_String_String_None(Map<String, String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -392,6 +413,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_prim_usize_strict(Uint64List self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_record_string_string(List<(String, String)> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_search_hit(List<SearchHit> self, SseSerializer serializer);
 
   @protected
@@ -417,6 +441,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_page_seg_info(PageSegInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_record_string_string((String, String) self, SseSerializer serializer);
 
   @protected
   void sse_encode_search_hit(SearchHit self, SseSerializer serializer);

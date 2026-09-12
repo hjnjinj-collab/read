@@ -28,6 +28,9 @@ pub struct StructuredContent {
     /// 内容块流
     #[serde(default)]
     pub blocks: Vec<ContentBlock>,
+    /// A34：章末脚注表（id → 注释正文，不含 [N] 前缀）
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub footnotes: std::collections::BTreeMap<String, String>,
 }
 
 impl StructuredContent {
@@ -38,6 +41,7 @@ impl StructuredContent {
             background: None,
             body_classes: Vec::new(),
             blocks: ContentBlock::fallback_from_text(text),
+            footnotes: Default::default(),
         }
     }
 }
@@ -81,7 +85,7 @@ pub enum Align {
 ///
 /// 区间为 `[start, end)` 半开区间，按 Rust char 计数；提取层以私有区
 /// 标记锚定边界，空白折叠与去广告改写不影响正确性。空区间在物化时过滤。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StyledRun {
     pub start: usize,
     pub end: usize,
@@ -101,6 +105,9 @@ pub struct StyledRun {
     /// JS 层中间字段：行内元素自身+祖先链；CSS 匹配后剥离
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anc: Option<Vec<Vec<String>>>,
+    /// A34：脚注引用目标 id（如 m1）；上标绘制 + 点按弹层
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footnote_ref: Option<String>,
 }
 
 /// 内容块（递归模型：List/Quote/Table 的子结构复用 ContentBlock）
@@ -309,6 +316,7 @@ impl ContentBlock {
                         italic: r.italic,
                         underline: r.underline,
                         anc: r.anc,
+                        footnote_ref: r.footnote_ref,
                     })
                     .collect(),
                 anc,
@@ -433,6 +441,7 @@ impl ContentBlock {
                         italic: r.italic,
                         underline: r.underline,
                         anc: None,
+                        footnote_ref: r.footnote_ref,
                     })
                     .collect(),
                 anc: None,
@@ -532,6 +541,7 @@ mod tests {
                 position: Some("bottom center".to_string()),
             }),
             body_classes: vec!["qmp2".to_string()],
+            footnotes: Default::default(),
             blocks: vec![
                 ContentBlock::Image {
                     resource_href: "OEBPS/Images/logo.png".to_string(),
@@ -557,6 +567,7 @@ mod tests {
                         italic: false,
                         underline: false,
                         anc: Some(vec![vec!["p".into()], vec!["span".into(), "txtu2".into()]]),
+                        footnote_ref: None,
                     }],
                     anc: Some(vec![vec!["body".into()], vec!["p".into()]]),
                     is_comment: false,
@@ -637,6 +648,7 @@ mod tests {
             italic: true,
             underline: true,
             anc: None,
+            footnote_ref: None,
         };
         let json = serde_json::to_string(&run).unwrap();
         assert!(json.contains("\"bold\":true"));
@@ -655,6 +667,7 @@ mod tests {
             italic: false,
             underline: false,
             anc: None,
+            footnote_ref: None,
         };
         let plain_json = serde_json::to_string(&plain).unwrap();
         assert!(!plain_json.contains("bold"));

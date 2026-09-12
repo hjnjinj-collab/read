@@ -252,6 +252,9 @@ class PageInfo {
   /// 决定 cover 裁切锚点方位；None=居中
   final String? backgroundPosition;
 
+  /// A34：章末脚注表（id → 正文；每页重复携带，量小）
+  final Map<String, String> footnotes;
+
   const PageInfo({
     required this.pageIndex,
     required this.chapterIndex,
@@ -261,6 +264,7 @@ class PageInfo {
     this.backgroundHref,
     this.backgroundSize,
     this.backgroundPosition,
+    required this.footnotes,
   });
 
   @override
@@ -272,7 +276,8 @@ class PageInfo {
       endCharIndex.hashCode ^
       backgroundHref.hashCode ^
       backgroundSize.hashCode ^
-      backgroundPosition.hashCode;
+      backgroundPosition.hashCode ^
+      footnotes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -286,7 +291,8 @@ class PageInfo {
           endCharIndex == other.endCharIndex &&
           backgroundHref == other.backgroundHref &&
           backgroundSize == other.backgroundSize &&
-          backgroundPosition == other.backgroundPosition;
+          backgroundPosition == other.backgroundPosition &&
+          footnotes == other.footnotes;
 }
 
 /// 文本行内样式分段
@@ -311,6 +317,9 @@ class PageSegInfo {
   /// P2 justify 拉丁词保护段（Some(0)=该区间不加间隙；None=继承行级）
   final double? letterSpacing;
 
+  /// A34：脚注引用 id（点按弹层）
+  final String? footnoteRef;
+
   const PageSegInfo({
     required this.start,
     required this.end,
@@ -321,6 +330,7 @@ class PageSegInfo {
     required this.italic,
     required this.underline,
     this.letterSpacing,
+    this.footnoteRef,
   });
 
   @override
@@ -333,7 +343,8 @@ class PageSegInfo {
       bold.hashCode ^
       italic.hashCode ^
       underline.hashCode ^
-      letterSpacing.hashCode;
+      letterSpacing.hashCode ^
+      footnoteRef.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -348,5 +359,6 @@ class PageSegInfo {
           bold == other.bold &&
           italic == other.italic &&
           underline == other.underline &&
-          letterSpacing == other.letterSpacing;
+          letterSpacing == other.letterSpacing &&
+          footnoteRef == other.footnoteRef;
 }
