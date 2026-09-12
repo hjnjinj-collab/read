@@ -157,13 +157,19 @@ pub struct ImageEntry {
     pub height: f32,
 }
 
-/// 矩形项（表格单元格线框）：坐标为页面绝对值，绘制层描边不填充
+/// 矩形项（表格单元格线框 / 标题分割线）：坐标为页面绝对值
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RectEntry {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// 填充色（#rrggbb；None=主题表格线框色）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// true=填充（分割线）；false=描边（表格框）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub filled: bool,
 }
 
 /// 水平对齐（CSS text-align 的布局层镜像；与 book_parser 解耦的独立定义）
@@ -278,6 +284,13 @@ pub enum LayoutItem {
         bleed: bool,
     },
     Table(TableInput),
+    /// 水平装饰线（标题 border-bottom / 未来的 hr 视觉升级）
+    Hr {
+        /// #rrggbb；None=主题默认
+        color: Option<String>,
+        /// 线宽 px（默认 2）
+        thickness: f32,
+    },
 }
 
 impl LayoutItem {
@@ -964,6 +977,24 @@ impl LayoutEngine {
                     current_y += total_h + self.config.paragraph_spacing;
                     char_index += chars; // 锚点由 layout_table 统一累计（含段落分隔）
                 }
+                LayoutItem::Hr { color, thickness } => {
+                    let th = (*thickness).clamp(1.0, 8.0);
+                    // 线前留少量呼吸空间（与段间距一半）
+                    let gap = self.config.paragraph_spacing * 0.35;
+                    if current_y + gap + th > bottom_limit && !entries.is_empty() {
+                        break_page!();
+                    }
+                    current_y += gap;
+                    entries.push(PageEntry::Rect(RectEntry {
+                        x: self.config.padding.left,
+                        y: current_y,
+                        width: content_width,
+                        height: th,
+                        color: color.clone(),
+                        filled: true,
+                    }));
+                    current_y += th + gap;
+                }
             }
         }
 
@@ -1023,6 +1054,10 @@ impl LayoutEngine {
                     return None; // 表格布局失败，保守不预留
                 }
                 LayoutItem::Text { .. } => return None, // 下一个是文本，不预留
+                LayoutItem::Hr { thickness, .. } => {
+                    let th = (*thickness).clamp(1.0, 8.0);
+                    return Some(th + self.config.paragraph_spacing * 0.7);
+                }
             }
         }
         None // 无后续元素
@@ -1919,6 +1954,8 @@ impl LayoutEngine {
                     y: table_h,
                     width: col_widths[ci.min(col_count - 1)],
                     height: row_h,
+                    color: None,
+                    filled: false,
                 });
             }
             table_h += row_h;
@@ -3068,6 +3105,43 @@ mod tests {
                 line.x
             );
         }
+    }
+
+    /// A34.3：标题分割线 Hr → 内容区宽填充 Rect
+    #[test]
+    fn items_hr_emits_filled_rect() {
+        let (engine, config) = create_test_engine();
+        let items = vec![
+            LayoutItem::Text(TextItem {
+                text: "省俭有方".into(),
+                font_scale: Some(1.5),
+                align: Some(LayoutAlign::Center),
+                color: Some("#2c7938".into()),
+                spacing_before_em: 0.6,
+                spacing_after_em: 0.15,
+                ..Default::default()
+            }),
+            LayoutItem::Hr {
+                color: Some("#2c7938".into()),
+                thickness: 2.0,
+            },
+        ];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let rect = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Rect(r) if r.filled => Some(r),
+                _ => None,
+            })
+            .expect("应有填充分割线");
+        let content_w = config.width - config.padding.left - config.padding.right;
+        assert!(
+            (rect.width - content_w).abs() < 0.5,
+            "分割线应占满内容宽"
+        );
+        assert!((rect.height - 2.0).abs() < 0.05);
+        assert_eq!(rect.color.as_deref(), Some("#2c7938"));
     }
 
     /// A34.1：Right 对齐 + 首行缩进——短行仍贴右缘，不得溢出

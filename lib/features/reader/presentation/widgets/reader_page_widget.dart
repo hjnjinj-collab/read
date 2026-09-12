@@ -401,14 +401,19 @@ class PageContentRenderer {
         continue;
       }
 
-      // 表格单元格线框：细灰描边（不填充；几何由布局引擎折算）
+      // 表格单元格线框 / 标题分割线：
+      // - 有 color 且高度很小 → 填充色横线（border-bottom）
+      // - 否则细灰描边（表格框）
       if (entry.isTableFrame) {
+        final rect = Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height);
+        final lineColor = _parseHexColor(entry.color);
+        final isFillLine = lineColor != null && entry.height <= 12.0;
         canvas.drawRect(
-          Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height),
+          rect,
           Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.0
-            ..color = theme.tableFrameColor,
+            ..style = isFillLine ? PaintingStyle.fill : PaintingStyle.stroke
+            ..strokeWidth = isFillLine ? 0 : 1.0
+            ..color = lineColor ?? theme.tableFrameColor,
         );
         continue;
       }

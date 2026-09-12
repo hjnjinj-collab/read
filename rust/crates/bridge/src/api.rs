@@ -2249,6 +2249,7 @@ fn blocks_to_layout_items_inner(
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 ..
             } => {
                 if text.trim().is_empty() {
@@ -2269,11 +2270,23 @@ fn blocks_to_layout_items_inner(
                     font_scale: final_scale,
                     runs: Vec::new(),
                     spacing_before_em: space_before,
-                    spacing_after_em: space_after,
+                    // 有 border 时线自带 gap，段后距略收
+                    spacing_after_em: if border_bottom.is_some() {
+                        space_after * 0.5
+                    } else {
+                        space_after
+                    },
                     indent_first_line_em: None,
                     is_comment: false,
                     line_height: None,
                 }));
+                // A34.3：标题 border-bottom → 内容区宽装饰线
+                if let Some(b) = border_bottom {
+                    out.push(layout_engine::LayoutItem::Hr {
+                        color: Some(b.color.clone()),
+                        thickness: b.width_px,
+                    });
+                }
             }
             ContentBlock::Image {
                 resource_href,
@@ -3462,6 +3475,7 @@ fn search_epub_chapter(
                 accumulated += text_chars.len() + 1;
             }
             layout_engine::LayoutItem::Image { .. } => {}
+            layout_engine::LayoutItem::Hr { .. } => {}
             layout_engine::LayoutItem::Table(table) => {
                 for row in &table.rows {
                     for cell in row {

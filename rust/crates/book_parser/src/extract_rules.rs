@@ -702,6 +702,7 @@ mod tests {
                 align: None,
                 color: None,
                 font_scale: None,
+                border_bottom: None,
                 anc: Some(vec![
                     vec!["body".to_string()],
                     vec!["h2".to_string(), "head".to_string()],

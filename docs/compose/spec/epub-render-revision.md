@@ -6,20 +6,20 @@ branch: master
 commits: 1399748..HEAD
 ---
 
-# EPUB 渲染真机修订（A34.1 / A34.2）
+# EPUB 渲染真机修订（A34.1 / A34.2 / A34.3）
 
 ## Report
 
-**What was built** — A34.1 真机反馈四件套：① UI「显示本章说」→「显示注释」；② 注释默认蓝灰 `#5A6B7A` / 0.82 倍，设置三色预设 + 字号滑杆，字号进三路缓存键，颜色绘制期覆盖；③ 封面启发式 `cover*` / 标题含「封面」+ 单图 → 整页背景；④ Right/Center×indent 短行贴右缘。A34.2 修订：EPUB 结构化路径**不再**执行「去除重复标题」——阅读页无独立章节头，与目录同文的 `h1` 被剥离后页面标题完全消失（瓦尔登湖 `chapter001`「省俭有方」真机回归）。TXT 仍走原逻辑；设置副标题标明仅 TXT 生效。
+**What was built** — A34.1 真机反馈四件套：注释可配样式、封面全屏启发式、右对齐缩进修复、UI 改名「显示注释」。A34.2：EPUB 不再剥离页内章节标题（无独立章节头时去重即丢失）。A34.3：适配 `h1.zw-text1 { border-bottom: solid 2px #2C7938 }`——CSS border-bottom 物化为标题下内容区宽填充分割线（`LayoutItem::Hr` → `RectEntry` filled，Dart 按色填充）。`LAYOUT_REVISION=5`。
 
-**Verification** — `cargo test -p layout_engine --lib` 90 PASS；`book_parser` 125 PASS（含 `test_is_cover_like_names`）；`reader_core` 173 PASS；`bridge` 17 PASS；`fix_sync.ps1` PASS；`flutter analyze` 0 error。A34.2：探针确认 IR 保留 `H1「省俭有方」`，分页路径不再调用 `remove_duplicate_title_blocks`。
+**Verification** — layout_engine 91 / book_parser 126 / reader_core 173 / bridge 17 PASS；含 `test_heading_border_bottom_css`、`items_hr_emits_filled_rect`。`fix_sync.ps1` PASS。
 
 **Journey log** —
-1. `text-indent` 与 `text-align:right` 不能「先对齐再加 indent」——CSS 语义是 indent 只缩首行可用宽。
-2. 封面识别用 `starts_with("cover")` 而非 `contains`，避免 uncover 等误伤。
-3. 注释色与字号分通道：色不进缓存键，字号必须进键。
-4. `CacheKey.config_hash` 亦应含 `show_comments`/`comment_scale`。
-5. A34.2：`remove_duplicate_title` 对 EPUB 是「删掉页内唯一标题」——无页头时不能剥离。
+1. `text-indent` 与 `text-align:right` 不能「先对齐再加 indent」。
+2. 封面识别用 `starts_with("cover")`。
+3. 注释色不进缓存键，字号必须进键。
+4. EPUB 页内标题是唯一标题源，不能去重剥离。
+5. border-bottom 复用 `isTableFrame`+`color`+小高度填充，避免 FRB 枚举。
 
 ## [S1] Problem
 

@@ -195,7 +195,8 @@ impl From<Page> for PageInfo {
                         y: rect.y,
                         width: rect.width,
                         height: rect.height,
-                        color: None,
+                        // 分割线携带填充色；表格框无色（Dart 用主题线框色）
+                        color: rect.color.clone(),
                         font_scale: None,
                         segments: Vec::new(),
                         letter_gap: 0.0,

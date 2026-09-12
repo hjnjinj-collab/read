@@ -81,6 +81,15 @@ pub enum Align {
     Justify,
 }
 
+/// CSS border-bottom 物化（标题下装饰分割线）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BorderLine {
+    /// #rrggbb 小写规范形
+    pub color: String,
+    /// 线宽 px（CSS 2px / 1.5px 等；缺省 2.0）
+    pub width_px: f32,
+}
+
 /// 行内富文本段：段落 `text` 的字符区间样式（span/em 等）
 ///
 /// 区间为 `[start, end)` 半开区间，按 Rust char 计数；提取层以私有区
@@ -159,6 +168,9 @@ pub enum ContentBlock {
         color: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         font_scale: Option<f32>,
+        /// CSS border-bottom 物化（章节标题装饰分割线；None=无）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        border_bottom: Option<BorderLine>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anc: Option<Vec<Vec<String>>>,
     },
@@ -256,6 +268,7 @@ impl ContentBlock {
             align: None,
             color: None,
             font_scale: None,
+            border_bottom: None,
             anc: None,
         }
     }
@@ -331,6 +344,7 @@ impl ContentBlock {
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 anc,
             } => ContentBlock::Heading {
                 level,
@@ -338,6 +352,7 @@ impl ContentBlock {
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 anc,
             },
             ContentBlock::Image {
@@ -456,6 +471,7 @@ impl ContentBlock {
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 ..
             } => ContentBlock::Heading {
                 level,
@@ -463,6 +479,7 @@ impl ContentBlock {
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 anc: None,
             },
             ContentBlock::Image {

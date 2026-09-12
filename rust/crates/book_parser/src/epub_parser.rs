@@ -1203,6 +1203,71 @@ impl EpubParser {
             .map(|(_, v)| v.to_string())
     }
 
+    /// CSS border-bottom 简写解析 → 标题装饰分割线
+    ///
+    /// 真实书形态：`solid 2px #2C7938` / `2px solid #2c7938` / `1.5px dashed #D2691E`。
+    /// 只提取 px 线宽与 #hex 色；dashed/dotted 仍按实线绘制（损失仅线型）。
+    /// `none` / `0` 明确关闭。
+    fn resolved_border_bottom(
+        sheet: &crate::css_lite::CssStylesheet,
+        ctx: &crate::css_lite::NodeCtx,
+        base_font_px: f32,
+    ) -> Option<crate::content_ir::BorderLine> {
+        use crate::content_ir::BorderLine;
+        use crate::css_lite::DeclValue;
+
+        let raw = match Self::self_or_inherited(sheet, ctx, "border-bottom")? {
+            DeclValue::Keyword(k) => k,
+            DeclValue::Px(p) => format!("{p}px"),
+            DeclValue::None => return None,
+            _ => return None,
+        };
+        let lower = raw.to_ascii_lowercase();
+        if lower.contains("none") || lower == "0" || lower == "0px" {
+            return None;
+        }
+        // 线宽：首个 `Npx`；无 px 时找 em（×基准字号）
+        let mut width_px = None;
+        for tok in lower.split_whitespace() {
+            if let Some(v) = tok.strip_suffix("px") {
+                if let Ok(n) = v.parse::<f32>() {
+                    if n > 0.0 {
+                        width_px = Some(n);
+                        break;
+                    }
+                }
+            }
+        }
+        if width_px.is_none() {
+            for tok in lower.split_whitespace() {
+                if let Some(v) = tok.strip_suffix("em") {
+                    if let Ok(n) = v.parse::<f32>() {
+                        if n > 0.0 && base_font_px > 0.0 {
+                            width_px = Some(n * base_font_px);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        let width_px = width_px.unwrap_or(2.0).clamp(1.0, 8.0);
+        // 颜色：#rgb / #rrggbb
+        let mut color = None;
+        for tok in lower.split_whitespace() {
+            if tok.starts_with('#') {
+                if let Some(c) = Self::normalize_hex_color(tok) {
+                    color = Some(c);
+                    break;
+                }
+            } else if let Some(c) = Self::named_color(tok) {
+                color = Some(c);
+                break;
+            }
+        }
+        let color = color?;
+        Some(BorderLine { color, width_px })
+    }
+
     /// 块级 font-size 相对倍率物化：em/% 直接为倍率；px/pt 以当前
     /// 排版基准字号换算（rem 维持忽略——脱离根字号上下文）
     fn resolved_font_scale(
@@ -1545,6 +1610,7 @@ impl EpubParser {
                 align,
                 color,
                 font_scale,
+                border_bottom,
                 anc,
             } => {
                 let ctx = Self::node_ctx_from_anc(anc.as_ref());
@@ -1552,12 +1618,17 @@ impl EpubParser {
                 let color = color.or_else(|| Self::resolved_color(sheet, &ctx));
                 let font_scale =
                     font_scale.or_else(|| Self::resolved_font_scale(sheet, &ctx, base_font_px));
+                // A34.3：CSS border-bottom → 标题下装饰分割线
+                // （瓦尔登湖 h1.zw-text1 { border-bottom: solid 2px #2C7938 }）
+                let border_bottom =
+                    border_bottom.or_else(|| Self::resolved_border_bottom(sheet, &ctx, base_font_px));
                 ContentBlock::Heading {
                     level,
                     text,
                     align,
                     color,
                     font_scale,
+                    border_bottom,
                     anc,
                 }
             }
@@ -2330,6 +2401,35 @@ mod tests {
     }
 
     #[test]
+    fn test_heading_border_bottom_css() {
+        use crate::content_ir::ContentBlock;
+        let sheet = crate::css_lite::CssStylesheet::parse(
+            "h1.zw-text1 { border-bottom: solid 2px #2C7938; color: #2C7938; }",
+        );
+        let heading = ContentBlock::Heading {
+            level: 1,
+            text: "省俭有方".into(),
+            align: None,
+            color: None,
+            font_scale: None,
+            border_bottom: None,
+            anc: Some(vec![
+                vec!["body".into()],
+                vec!["h1".into(), "zw-text1".into()],
+            ]),
+        };
+        let ContentBlock::Heading { border_bottom, color, .. } =
+            EpubParser::apply_css_to_block(heading, &sheet, DEFAULT_BASE_FONT_PX)
+        else {
+            panic!("结构不应改变");
+        };
+        let b = border_bottom.expect("应解析出 border-bottom");
+        assert_eq!(b.color, "#2c7938");
+        assert!((b.width_px - 2.0).abs() < 0.01);
+        assert_eq!(color.as_deref(), Some("#2c7938"));
+    }
+
+    #[test]
     fn test_is_cover_like_names() {
         // 瓦尔登湖 coverpage.html + 封面
         assert!(EpubParser::is_cover_like_names("OPS/coverpage.html", "封面"));
@@ -2691,6 +2791,7 @@ mod tests {
             align: None,
             color: None,
             font_scale: None,
+            border_bottom: None,
             anc: Some(vec![vec!["body".into()], vec!["h2".into(), "head1".into()]]),
         };
         let ContentBlock::Heading { align, color, font_scale, .. } =
@@ -3056,6 +3157,7 @@ mod tests {
             align: None,
             color: None,
             font_scale: None,
+            border_bottom: None,
             anc: Some(vec![vec!["body".into()], vec!["h2".into()]]),
         };
         let ContentBlock::Heading { font_scale, .. } =

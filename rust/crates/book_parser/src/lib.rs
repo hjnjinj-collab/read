@@ -24,7 +24,7 @@ pub use chapter_recognizer::{ChapterRecognizer, ChapterMatch, LineContext, Patte
 pub use encoding::{EncodingInfo, SmartEncodingDetector};
 pub use chapter_extractor::{ChapterExtractor, ChapterRule, JsChapterInfo};
 pub use content_cleaner::{ContentCleaner, ConvertMode, ParagraphMode, CleanOptions};
-pub use content_ir::{ContentBlock, ListItem, TableCell, StructuredContent, PageBackground, BgSize, Align, StyledRun};
+pub use content_ir::{ContentBlock, ListItem, TableCell, StructuredContent, PageBackground, BgSize, Align, StyledRun, BorderLine};
 pub use epub_clean_cache::EpubCleanedBook;
 pub use chinese_convert::{convert_s2t, convert_t2s};
 // === 向后兼容：旧 API 保留 ===

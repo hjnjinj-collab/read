@@ -8,7 +8,7 @@ use std::num::NonZeroUsize;
 /// 分页缓存条目的数据布局版本。变更缓存值/键的布局时递增，避免复用旧条目。
 pub const CACHE_SCHEMA_REVISION: u32 = 1;
 /// 排版结果版本。影响分页结果的算法或布局语义变更时递增。
-pub const LAYOUT_REVISION: u32 = 4; // A34.1：注释 comment_scale 可配 + 对齐缩进 + 封面全屏启发
+pub const LAYOUT_REVISION: u32 = 5; // A34.3：标题 border-bottom 分割线
 
 /// 缓存条目 TTL（辅助淘汰）。
 ///
