@@ -331,6 +331,7 @@ mod tests {
             aggressive_split_threshold: crate::processing::AGGRESSIVE_THRESHOLD,
             justify: false,
             punctuation_compress: false,
+            comment_scale: 0.82,
         }
     }
 

@@ -90,7 +90,7 @@ class PageEntry {
   /// 表格单元格线框矩形（x/y/width/height 为几何；绘制端描边不填充）
   final bool isTableFrame;
 
-  /// 本章说/注释行标记（小号灰字渲染；开关隐藏时 char_index 照常累计）
+  /// 注释行标记（小号渲染；开关隐藏时 char_index 照常累计）
   final bool isComment;
 
   /// P2 两端对齐：行内字符间隙（px；0=左对齐/豁免行；绘制端转 letterSpacing）

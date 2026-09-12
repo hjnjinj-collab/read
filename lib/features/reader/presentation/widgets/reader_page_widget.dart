@@ -177,7 +177,7 @@ class ReaderTheme {
   /// 正文默认文字色（entry.color 未指定时）
   final Color textColor;
 
-  /// 本章说灰字
+  /// 注释灰字/主题色
   final Color commentColor;
 
   /// 图片解码占位块
@@ -234,6 +234,18 @@ class ReaderTheme {
 class PageContentRenderer {
   /// 当前阅读主题（2026-09-04 P1 暗黑主题：静态可变，启动/切换时赋值）
   static ReaderTheme theme = ReaderTheme.light;
+
+  /// A34.1：注释绘制色（设置预设覆盖；与 theme.commentColor 解耦，纯绘制期）
+  static Color commentColor = const Color(0xFF5A6B7A);
+
+  /// 按预设键 + 主题刷新注释色
+  static void applyCommentColorPreset(String preset, {required bool dark}) {
+    commentColor = switch (preset) {
+      'gray' => dark ? const Color(0xFF6E6E6E) : const Color(0xFF888888),
+      'sepia' => dark ? const Color(0xFFA89078) : const Color(0xFF6B5A4A),
+      _ => dark ? const Color(0xFF8A9BAB) : const Color(0xFF5A6B7A),
+    };
+  }
 
   /// 主题版本号：每次切主题递增——PagePainter.shouldRepaint 以此感知
   /// 静态主题变化（painter 无法监听静态字段，经构造期捕获值比对）
@@ -404,7 +416,7 @@ class PageContentRenderer {
       final text = entry.text;
       if (text == null || text.isEmpty) continue;
       final baseColor = entry.isComment
-          ? theme.commentColor
+          ? commentColor
           : (_parseHexColor(entry.color) ?? theme.textColor);
       final baseScale = entry.fontScale ?? 1.0;
       // TXT 章节标题加粗（与 EPUB 行内粗体同一开关；TextSpan 子段

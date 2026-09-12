@@ -397,6 +397,7 @@ mod tests {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         }

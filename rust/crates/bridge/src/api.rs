@@ -253,8 +253,10 @@ struct StructuredPageKey {
     /// LRU 自然淘汰旧缓存
     convert_mode: u8,
     page_fill_threshold_bits: u32,
-    /// 是否显示本章说（缓存键：不同设置独立缓存）
+    /// 是否显示注释（缓存键：不同设置独立缓存）
     show_comments: bool,
+    /// 注释字号倍率 bits（0.70–1.00；变更即换键）
+    comment_scale_bits: u32,
     /// M9 段落格式化设置哈希（缩进/重分段/间距变更即换键）
     para_format_hash: u64,
     /// A30c：去重标题开关（变更即换键自然重算）
@@ -299,6 +301,7 @@ impl StructuredPageKey {
             convert_mode,
             page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
             show_comments: config.show_comments,
+            comment_scale_bits: config.comment_scale.to_bits(),
             para_format_hash,
             remove_duplicate_title,
             rules_hash,
@@ -366,6 +369,15 @@ fn effective_justify() -> bool {
 /// P3：行尾标点压缩悬挂开关（单源同上）
 fn effective_punct_compress() -> bool {
     PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().punctuation_compress
+}
+
+/// A34.1：注释行字号倍率（单源同上；钳制 [0.70, 1.00]）
+fn effective_comment_scale() -> f32 {
+    PARAGRAPH_FORMAT_SETTINGS
+        .lock()
+        .unwrap()
+        .comment_scale
+        .clamp(0.70, 1.00)
 }
 
 /// P4：字体变更后按新字体重建 GB2312 预热。
@@ -686,6 +698,7 @@ pub fn set_paragraph_format_settings(
     aggressive_split_threshold: u32,
     justify: bool,
     punctuation_compress: bool,
+    comment_scale: f32,
 ) -> anyhow::Result<()> {
     let mut settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap();
     settings.enable_indent = enable_indent;
@@ -700,6 +713,7 @@ pub fn set_paragraph_format_settings(
     settings.aggressive_split_threshold = aggressive_split_threshold.clamp(5, 200) as usize;
     settings.justify = justify;
     settings.punctuation_compress = punctuation_compress;
+    settings.comment_scale = comment_scale.clamp(0.70, 1.00);
     // 阈值变更会改变 TXT 预处理 Stage2 输出：清空预处理缓存，防陈旧命中
     // （分页缓存由 para_format_hash 换键；预处理缓存键已含阈值，此处双保险）
     if old_threshold != settings.smart_split_threshold {
@@ -895,6 +909,7 @@ pub fn batch_locate_notes(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -1726,6 +1741,7 @@ pub fn layout_chapter(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -1771,6 +1787,7 @@ pub fn get_page(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -1826,6 +1843,7 @@ pub fn get_page_count(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -1889,6 +1907,7 @@ pub fn get_page_processed(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -1979,6 +1998,7 @@ pub fn get_page_count_processed(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -2731,6 +2751,7 @@ fn structured_layout_config(
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     }
@@ -3726,6 +3747,7 @@ pub fn get_page_cached(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -3780,6 +3802,7 @@ pub fn get_page_count_cached(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -3834,6 +3857,7 @@ pub fn get_page_cached_processed(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -4017,6 +4041,7 @@ pub fn create_reading_session(
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
+        comment_scale: effective_comment_scale(),
         justify: effective_justify(),
         punctuation_compress: effective_punct_compress(),
     };
@@ -4643,6 +4668,7 @@ mod tests {
             aggressive_split_threshold: reader_core::AGGRESSIVE_THRESHOLD,
             justify: false,
             punctuation_compress: false,
+            comment_scale: 0.82,
         }
     }
 
@@ -5018,6 +5044,7 @@ mod tests {
             paragraph_spacing: 18.0 * 0.8,
             page_fill_threshold: 0.9,
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         };

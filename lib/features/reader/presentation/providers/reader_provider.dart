@@ -53,6 +53,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _boldEnabled = persisted.boldEnabled;
     _italicEnabled = persisted.italicEnabled;
     _showComments = persisted.showComments;
+    _commentScale = persisted.commentScale;
+    _commentColorPreset = persisted.commentColorPreset;
     _enableIndent = persisted.enableIndent;
     _indentSizeChars = persisted.indentSizeChars;
     _paragraphSpacingMultiplier = persisted.paragraphSpacingMultiplier;
@@ -69,6 +71,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _themeDark = persisted.theme == 'dark';
     PageContentRenderer.theme =
         _themeDark ? ReaderTheme.dark : ReaderTheme.light;
+    PageContentRenderer.applyCommentColorPreset(
+      _commentColorPreset,
+      dark: _themeDark,
+    );
     // M9.2：构造期按（持久化）设置计算段落格式哈希——与 Rust 全局（main()
     // 已按同源值同步）对齐，缓存键两侧一致
     _paraFormatHash = _computeParaFormatHash();
@@ -136,8 +142,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _boldEnabled = true;
   bool _italicEnabled = true;
 
-  // 本章说/注释显示开关（切换影响分页缓存键）
+  // 注释显示开关（切换影响分页缓存键）
   bool _showComments = true;
+
+  // A34.1：注释字号倍率（进布局缓存键）与颜色预设（纯绘制）
+  double _commentScale = 0.82;
+  String _commentColorPreset = 'blueGray';
 
   // 2026-09-04 P1: 翻页动画模式与速度（原 reader_page 本地 state 上移——
   // widget state 随 ReaderPage 销毁重置，换书即丢设置；上移后跨书持久）
@@ -207,6 +217,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool get boldEnabled => _boldEnabled;
   bool get italicEnabled => _italicEnabled;
   bool get showComments => _showComments;
+  double get commentScale => _commentScale;
+  String get commentColorPreset => _commentColorPreset;
   bool get enableIndent => _enableIndent;
   int get indentSizeChars => _indentSizeChars;
   double get paragraphSpacingMultiplier => _paragraphSpacingMultiplier;
@@ -340,6 +352,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (_themeDark == dark) return;
     _themeDark = dark;
     PageContentRenderer.theme = dark ? ReaderTheme.dark : ReaderTheme.light;
+    PageContentRenderer.applyCommentColorPreset(
+      _commentColorPreset,
+      dark: dark,
+    );
     PageContentRenderer.themeRevision++;
     _persistSettings();
   }
@@ -380,6 +396,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'boldEnabled': _boldEnabled,
         'italicEnabled': _italicEnabled,
         'showComments': _showComments,
+        'commentScale': _commentScale,
+        'commentColorPreset': _commentColorPreset,
         'enableIndent': _enableIndent,
         'indentSizeChars': _indentSizeChars,
         'paragraphSpacingMultiplier': _paragraphSpacingMultiplier,
@@ -515,6 +533,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     required bool italicEnabled,
     required double pageFillThreshold,
     required bool showComments,
+    required double commentScale,
+    required String commentColorPreset,
     required bool enableIndent,
     required int indentSizeChars,
     required double paragraphSpacingMultiplier,
@@ -562,6 +582,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _italicEnabled = italicEnabled;
     _pageFillThreshold = pageFillThreshold;
     _showComments = showComments;
+    _commentScale = commentScale.clamp(0.70, 1.00);
+    _commentColorPreset = commentColorPreset;
+    PageContentRenderer.applyCommentColorPreset(
+      _commentColorPreset,
+      dark: _themeDark,
+    );
 
     // M9-P4：段落格式设置——同步 Rust 全局设置并计算缓存键哈希
     _enableIndent = enableIndent;
@@ -581,6 +607,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       aggressiveSplitThreshold: aggressiveSplitThreshold,
       justify: justify,
       punctuationCompress: punctuationCompress,
+      commentScale: _commentScale,
     );
     _paraFormatHash = _computeParaFormatHash();
 
@@ -2241,6 +2268,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     h = h * 31 + (_justify ? 1 : 0);
     // P3：标点压缩开关参与哈希（压缩延伸改变断行结果）
     h = h * 31 + (_punctuationCompress ? 1 : 0);
+    // A34.1：注释字号倍率参与哈希（行高变化改变分页）
+    h = h * 31 + (_commentScale * 1000).round();
     return BigInt.from(h & 0x7FFFFFFFFFFFFFFF);
   }
 

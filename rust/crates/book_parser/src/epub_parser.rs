@@ -877,17 +877,49 @@ impl EpubParser {
             .filter(|b| !matches!(b, crate::content_ir::ContentBlock::Image { hidden: true, .. }))
             .collect();
 
-        // duokan-page-fullscreen 全屏页：唯一图片块转为整页背景
-        // （cover 裁切铺满，与装饰页同一渲染通道；《剑来》封面页形态）
-        let is_fullscreen = self
+        // 全屏页判定：① OPF duokan-page-fullscreen 标记
+        // ② 封面启发式：标题含「封面」或 href 文件名含 cover + 过滤后单图
+        //    （cover 裁切铺满；瓦尔登湖 coverpage.html 形态）
+        let (href_opt, title_opt) = self
             .chapters
             .get(chapter_index)
-            .and_then(|c| c.resource_href.as_deref())
+            .map(|c| {
+                (
+                    c.resource_href.clone().unwrap_or_default(),
+                    c.title.clone(),
+                )
+            })
+            .map(|(h, t)| (Some(h), Some(t)))
+            .unwrap_or((None, None));
+        let opf_fullscreen = href_opt
+            .as_deref()
             .map(|h| self.fullscreen_hrefs.contains(h))
             .unwrap_or(false);
+        let cover_names = href_opt
+            .as_deref()
+            .zip(title_opt.as_deref())
+            .map(|(h, t)| Self::is_cover_like_names(h, t))
+            .unwrap_or(false);
+        // 过滤空段后的实质内容（空文本段忽略；hidden 图已在上游滤掉）
+        let content_blocks: Vec<&crate::content_ir::ContentBlock> = blocks
+            .iter()
+            .filter(|b| {
+                !matches!(
+                    b,
+                    crate::content_ir::ContentBlock::Paragraph { text, .. }
+                        if text.trim().is_empty()
+                )
+            })
+            .collect();
+        let single_image = matches!(
+            content_blocks.as_slice(),
+            [crate::content_ir::ContentBlock::Image { .. }]
+        );
+        let cover_like = cover_names && single_image;
+        let is_fullscreen = (opf_fullscreen || cover_like) && single_image;
         if is_fullscreen {
             if let [crate::content_ir::ContentBlock::Image { resource_href, .. }] =
-                blocks.as_slice()
+                content_blocks.as_slice()
             {
                 background = Some(PageBackground {
                     image_href: resource_href.clone(),
@@ -1057,6 +1089,15 @@ impl EpubParser {
             }
             None
         })
+    }
+
+    /// 封面启发式：href 文件名以 cover 开头（ASCII 不区分大小写）或 title 含「封面」
+    /// （starts_with 避免 uncover 等误伤）
+    fn is_cover_like_names(href: &str, title: &str) -> bool {
+        let base = href.rsplit('/').next().unwrap_or(href);
+        let name_hit = base.to_ascii_lowercase().starts_with("cover");
+        let title_hit = title.contains("封面");
+        name_hit || title_hit
     }
 
     /// 十六进制颜色规范化：`#abc`/`#aabbcc` → `#aabbcc` 小写形，其余放弃
@@ -2286,6 +2327,19 @@ mod tests {
         assert_eq!(data.metadata.get("dc:title").map(String::as_str), Some("测试EPUB"));
         assert_eq!(data.ncx_href.as_deref(), Some("toc.ncx"));
         assert_eq!(data.nav_href, None);
+    }
+
+    #[test]
+    fn test_is_cover_like_names() {
+        // 瓦尔登湖 coverpage.html + 封面
+        assert!(EpubParser::is_cover_like_names("OPS/coverpage.html", "封面"));
+        assert!(EpubParser::is_cover_like_names("OEBPS/Text/Cover.xhtml", "Title"));
+        // 仅标题命中
+        assert!(EpubParser::is_cover_like_names("OPS/front001.html", "封面页"));
+        // 正文章节不命中
+        assert!(!EpubParser::is_cover_like_names("OPS/chapter001.html", "经济篇"));
+        // uncover 等不得误伤
+        assert!(!EpubParser::is_cover_like_names("OPS/uncover.html", "序"));
     }
 
     #[test]

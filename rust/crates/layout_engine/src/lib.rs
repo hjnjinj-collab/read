@@ -37,8 +37,10 @@ pub struct LayoutConfig {
     /// 页底按比例统一留白（1.0 填满、0.9 底部收 10%）。
     /// TXT/EPUB 双路径统一消费（对齐行级分页精度批次）
     pub page_fill_threshold: f32,
-    /// 是否显示本章说（注释/旁注段落）；true=渲染、false=跳过绘制但保留锚点
+    /// 是否显示注释（章末注/旁注段落）；true=渲染、false=跳过绘制但保留锚点
     pub show_comments: bool,
+    /// 注释行字号倍率（0.70–1.00）。行高与上报 font_scale 均单次覆盖用此值。
+    pub comment_scale: f32,
     /// P2 两端对齐（2026-09-04）：TXT 全局开关；段落末行/短行豁免。
     /// EPUB 走 TextItem.align==Justify（CSS 或全局开关在 bridge 层重写）
     pub justify: bool,
@@ -74,6 +76,7 @@ impl Default for LayoutConfig {
             paragraph_spacing: 12.0,
             page_fill_threshold: 1.0, // A25：1.0 = 行级填满（旧行为基线）
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         }
@@ -657,13 +660,14 @@ impl LayoutEngine {
                         continue;
                     }
                     // A33：行高基准 = font_size × 书内/全局行高倍率；
-                    // 每行再乘自身 scale。本章说强制 0.7 **覆盖**（不得再乘
-                    // CSS scale——否则与 Dart 绘制 font_scale=0.7 双重缩小）。
+                    // 每行再乘自身 scale。注释行强制 comment_scale **覆盖**
+                    // （不得再乘 CSS scale——否则与 Dart 绘制双缩）。
+                    let comment_scale = self.config.comment_scale.clamp(0.5, 1.2);
                     let line_h_base = self.config.font_size
                         * item.line_height.unwrap_or(self.config.line_height_multiplier);
                     let line_h_of = |scale: f32| {
                         if item.is_comment {
-                            line_h_base * 0.7
+                            line_h_base * comment_scale
                         } else {
                             line_h_base * scale.max(1e-6)
                         }
@@ -781,9 +785,12 @@ impl LayoutEngine {
                             char_index += line.char_end - line.char_start + line.newlines_before;
                             continue;
                         }
-                        // M9 P5：首行 x 偏移 indent_px
-                        let x = self.align_line_x(line.width, content_width, item.align)
-                            + if line_idx == 0 { indent_px } else { 0.0 };
+                        // A34.1：对齐×缩进——首行可用宽先扣 indent，
+                        // 再折算对齐原点并加回 indent（CSS：indent 只缩
+                        // 首行可用宽，Right 短行仍贴右缘，不得溢出）。
+                        let indent_here = if line_idx == 0 { indent_px } else { 0.0 };
+                        let align_w = (content_width - indent_here).max(0.0);
+                        let x = self.align_line_x(line.width, align_w, item.align) + indent_here;
                         let segments = Self::segments_for_line(&line, item);
                         // P2 justify：末行豁免；首行可用宽扣除缩进
                         let gap = if justify_on && line_idx + 1 < para_line_count {
@@ -811,15 +818,15 @@ impl LayoutEngine {
                             y: current_y,
                             width: w_report, // M11+12 实测宽；P3 悬挂行跳过钳制
                             height: line_h_i,
-                            // 本章说：灰色小字；非注释走原始色
+                            // 注释：颜色由 Dart 设置覆盖；此处仅占位灰
                             color: if item.is_comment {
                                 Some("#888888".to_string())
                             } else {
                                 item.color.clone()
                             },
-                            // 本章说：强制固定小字号覆盖；否则上报本行真实 scale
+                            // 注释：强制 comment_scale 覆盖；否则上报本行真实 scale
                             font_scale: if item.is_comment {
-                                Some(0.7)
+                                Some(comment_scale)
                             } else {
                                 (line.scale != 1.0).then_some(line.scale)
                             },
@@ -2056,6 +2063,7 @@ mod tests {
             paragraph_spacing: 8.0,
             page_fill_threshold: 1.0, // A25：1.0 = 行级填满（测试基线，阈值行为单测）
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         };
@@ -3062,6 +3070,46 @@ mod tests {
         }
     }
 
+    /// A34.1：Right 对齐 + 首行缩进——短行仍贴右缘，不得溢出
+    #[test]
+    fn items_right_align_with_indent_stays_in_content() {
+        let (engine, config) = create_test_engine();
+        let indent_em = 2.0f32;
+        let indent_px = indent_em * config.font_size;
+        let content_right = config.padding.left + (config.width - config.padding.left - config.padding.right);
+
+        let item = TextItem {
+            text: "——梭罗".to_string(),
+            align: Some(LayoutAlign::Right),
+            indent_first_line_em: Some(indent_em),
+            ..Default::default()
+        };
+        let pages = engine.layout_items(&[LayoutItem::Text(item)], 0).unwrap();
+        let line = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Text(l) => Some(l),
+                _ => None,
+            })
+            .expect("应有一行");
+        let right_edge = line.x + line.width;
+        assert!(
+            right_edge <= content_right + 0.5,
+            "Right+indent 短行右缘 {:.1} 不得超过内容右缘 {:.1}（indent_px={:.1}）",
+            right_edge,
+            content_right,
+            indent_px
+        );
+        // 右对齐短行应贴近右缘（而非左起点+indent）
+        assert!(
+            right_edge >= content_right - line.width - 1.0,
+            "右缘 {:.1} 应贴近内容右缘 {:.1}",
+            right_edge,
+            content_right
+        );
+    }
+
     /// P5：无缩进时布局与 M8 一致（x = padding.left）
     #[test]
     fn items_no_indent_matches_m8_layout() {
@@ -3155,6 +3203,7 @@ mod tests {
             paragraph_spacing: 8.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         };
@@ -3785,15 +3834,16 @@ mod tests {
         }
     }
 
-    /// 本章说行高：强制 0.7 覆盖，不得与 CSS font_scale 双重相乘（审查 C1）
+    /// 注释行高：强制 comment_scale 覆盖，不得与 CSS font_scale 双重相乘
     #[test]
-    fn items_comment_line_height_single_07_scale() {
+    fn items_comment_line_height_single_scale() {
         let (engine, cfg) = create_test_engine();
         let base = cfg.font_size * cfg.line_height_multiplier;
+        let cs = cfg.comment_scale.clamp(0.5, 1.2);
         let item = TextItem {
-            text: "这是一条本章说注释内容，用于验证行高只乘一次 0.7。".repeat(2),
+            text: "这是一条注释内容，用于验证行高只乘一次 comment_scale。".repeat(2),
             is_comment: true,
-            font_scale: Some(0.7), // CSS 物化常见路径
+            font_scale: Some(0.7), // CSS 物化常见路径——应被覆盖
             ..Default::default()
         };
         let items = vec![LayoutItem::Text(item)];
@@ -3807,12 +3857,13 @@ mod tests {
             })
             .collect();
         assert!(lines.len() >= 2, "应有多行注释");
-        let expected_h = base * 0.7;
+        let expected_h = base * cs;
         for l in &lines {
             assert!(
                 (l.height - expected_h).abs() < 0.05,
-                "注释行高 {:.2} 应为 base×0.7={:.2}（禁止再乘 CSS scale）",
+                "注释行高 {:.2} 应为 base×{:.2}={:.2}（禁止再乘 CSS scale）",
                 l.height,
+                cs,
                 expected_h
             );
         }
@@ -3820,7 +3871,7 @@ mod tests {
         for w in lines.windows(2) {
             assert!(
                 (w[1].y - (w[0].y + w[0].height)).abs() < 0.05,
-                "注释行 y 递进应等于单倍 0.7 行高"
+                "注释行 y 递进应等于单倍 comment_scale 行高"
             );
         }
     }

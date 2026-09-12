@@ -86,6 +86,7 @@ void main() async {
       aggressiveSplitThreshold: settings.aggressiveSplitThreshold,
       justify: settings.justify,
       punctuationCompress: settings.punctuationCompress,
+      commentScale: settings.commentScale,
     );
   } catch (_) {}
 

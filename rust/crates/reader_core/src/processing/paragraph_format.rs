@@ -52,6 +52,8 @@ pub struct ParagraphFormatSettings {
     /// P3：行尾标点压缩悬挂（判满失败且行尾可压缩标点折半宽能放下时
     /// 收进行尾，渲染端全宽绘制自然悬挂出右缘）
     pub punctuation_compress: bool,
+    /// 注释行字号倍率（0.70–1.00；默认 0.82）。进布局行高与分页缓存键。
+    pub comment_scale: f32,
 }
 
 impl Default for ParagraphFormatSettings {
@@ -65,6 +67,7 @@ impl Default for ParagraphFormatSettings {
             aggressive_split_threshold: super::paragraph_splitter::AGGRESSIVE_THRESHOLD,
             justify: false,
             punctuation_compress: false,
+            comment_scale: 0.82,
         }
     }
 }
@@ -95,6 +98,7 @@ impl ParagraphFormatSettings {
         self.aggressive_split_threshold.hash(&mut hasher);
         self.justify.hash(&mut hasher);
         self.punctuation_compress.hash(&mut hasher);
+        self.comment_scale.to_bits().hash(&mut hasher);
         hasher.finish()
     }
 

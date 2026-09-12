@@ -80,6 +80,12 @@ class ReaderSettings {
   final bool italicEnabled;
   final bool showComments;
 
+  /// A34.1：注释字号倍率（0.70–1.00，默认 0.82）
+  final double commentScale;
+
+  /// A34.1：注释颜色预设键（blueGray / gray / sepia）
+  final String commentColorPreset;
+
   final bool enableIndent;
   final int indentSizeChars;
   final double paragraphSpacingMultiplier;
@@ -123,6 +129,8 @@ class ReaderSettings {
     required this.boldEnabled,
     required this.italicEnabled,
     required this.showComments,
+    required this.commentScale,
+    required this.commentColorPreset,
     required this.enableIndent,
     required this.indentSizeChars,
     required this.paragraphSpacingMultiplier,
@@ -156,6 +164,8 @@ class ReaderSettings {
         boldEnabled: true,
         italicEnabled: true,
         showComments: true,
+        commentScale: 0.82,
+        commentColorPreset: 'blueGray',
         enableIndent: true,
         indentSizeChars: 2,
         paragraphSpacingMultiplier: 1.0,
@@ -195,6 +205,8 @@ class ReaderSettings {
         boldEnabled: _b(j, 'boldEnabled', true),
         italicEnabled: _b(j, 'italicEnabled', true),
         showComments: _b(j, 'showComments', true),
+        commentScale: _d(j, 'commentScale', 0.82).clamp(0.70, 1.00),
+        commentColorPreset: _s(j, 'commentColorPreset', 'blueGray'),
         enableIndent: _b(j, 'enableIndent', true),
         indentSizeChars: _i(j, 'indentSizeChars', 2),
         paragraphSpacingMultiplier: _d(j, 'paragraphSpacingMultiplier', 1.0),

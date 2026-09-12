@@ -53,6 +53,9 @@ fn bench_single_chapter_layout(c: &mut Criterion) {
         paragraph_spacing: 12.0,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: false,
+        punctuation_compress: false,
+        comment_scale: 0.82,
     };
     
     // 测试不同长度的文本
@@ -96,6 +99,9 @@ fn bench_parallel_layout(c: &mut Criterion) {
         paragraph_spacing: 12.0,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: false,
+        punctuation_compress: false,
+        comment_scale: 0.82,
     };
     
     // 测试不同数量的章节
@@ -145,6 +151,9 @@ fn bench_glyph_cache(c: &mut Criterion) {
         paragraph_spacing: 12.0,
         page_fill_threshold: 0.9,
         show_comments: true,
+        justify: false,
+        punctuation_compress: false,
+        comment_scale: 0.82,
     };
     
     // 重复字符测试（高缓存命中率）
@@ -196,6 +205,9 @@ fn bench_font_sizes(c: &mut Criterion) {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+        justify: false,
+        punctuation_compress: false,
+        comment_scale: 0.82,
         };
         
         group.bench_with_input(

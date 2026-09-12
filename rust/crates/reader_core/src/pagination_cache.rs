@@ -8,7 +8,7 @@ use std::num::NonZeroUsize;
 /// 分页缓存条目的数据布局版本。变更缓存值/键的布局时递增，避免复用旧条目。
 pub const CACHE_SCHEMA_REVISION: u32 = 1;
 /// 排版结果版本。影响分页结果的算法或布局语义变更时递增。
-pub const LAYOUT_REVISION: u32 = 3; // A33.1：页底放行容差 + 引号硬上限解除压制
+pub const LAYOUT_REVISION: u32 = 4; // A34.1：注释 comment_scale 可配 + 对齐缩进 + 封面全屏启发
 
 /// 缓存条目 TTL（辅助淘汰）。
 ///
@@ -58,6 +58,9 @@ impl CacheKey {
         config.letter_spacing.to_bits().hash(&mut hasher);
         config.paragraph_spacing.to_bits().hash(&mut hasher);
         config.page_fill_threshold.to_bits().hash(&mut hasher);
+        // A34.1：注释显隐/字号影响分页几何，必须进 config_hash
+        config.show_comments.hash(&mut hasher);
+        config.comment_scale.to_bits().hash(&mut hasher);
 
         Self {
             cache_schema_revision: CACHE_SCHEMA_REVISION,
@@ -271,6 +274,7 @@ mod tests {
             paragraph_spacing: 12.0,
             page_fill_threshold: 0.9,
             show_comments: true,
+            comment_scale: 0.82,
             justify: false,
             punctuation_compress: false,
         };

@@ -41,8 +41,18 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
   // 分页填充率（内容区利用率，TXT/EPUB 统一消费）
   double _pageFillThreshold = 1.0;
 
-  // 本章说显示开关
+  // 注释显示开关
   bool _showComments = true;
+
+  // A34.1：注释样式
+  double _commentScale = 0.82;
+  String _commentColorPreset = 'blueGray';
+
+  static const List<({String key, String label, Color swatch})> _commentColorPresets = [
+    (key: 'blueGray', label: '蓝灰', swatch: Color(0xFF5A6B7A)),
+    (key: 'gray', label: '灰', swatch: Color(0xFF888888)),
+    (key: 'sepia', label: '棕灰', swatch: Color(0xFF6B5A4A)),
+  ];
 
   // M9-P4：段落格式设置
   bool _enableIndent = true;
@@ -92,6 +102,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
     _lineHeight = n.lineHeight;
     _pageFillThreshold = n.pageFillThreshold;
     _showComments = n.showComments;
+    _commentScale = n.commentScale;
+    _commentColorPreset = n.commentColorPreset;
     _enableIndent = n.enableIndent;
     _indentSizeChars = n.indentSizeChars;
     _paragraphSpacingMultiplier = n.paragraphSpacingMultiplier;
@@ -272,6 +284,8 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
         italicEnabled: _italicEnabled,
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
+        commentScale: _commentScale,
+        commentColorPreset: _commentColorPreset,
         enableIndent: _enableIndent,
         indentSizeChars: _indentSizeChars,
         paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
@@ -557,13 +571,77 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                   ),
                 ),
                 _buildSwitchTile(
-                  title: '显示本章说',
-                  subtitle: '段落间的注释/脚注内容以灰色小字显示',
+                  title: '显示注释',
+                  subtitle: '章末注/脚注等注释段落以较小字显示；关闭后仅保留正文引用点按',
                   value: _showComments,
                   onChanged: (value) {
                     setState(() => _showComments = value);
                   },
                 ),
+                if (_showComments) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '注释颜色',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            for (final p in _commentColorPresets)
+                              ChoiceChip(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 12,
+                                      height: 12,
+                                      decoration: BoxDecoration(
+                                        color: p.swatch,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(p.label),
+                                  ],
+                                ),
+                                selected: _commentColorPreset == p.key,
+                                onSelected: (_) {
+                                  setState(() => _commentColorPreset = p.key);
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '注释字号倍率 ${(_commentScale * 100).round()}%',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        Slider(
+                          value: _commentScale,
+                          min: 0.70,
+                          max: 1.00,
+                          divisions: 30,
+                          label: '${(_commentScale * 100).round()}%',
+                          onChanged: (v) {
+                            setState(() => _commentScale = v);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 24),
 
