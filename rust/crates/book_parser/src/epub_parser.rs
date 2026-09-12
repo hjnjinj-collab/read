@@ -301,6 +301,7 @@ impl EpubParser {
         // 其余按本地名（与旧实现的 dc:title/title 双键读取习惯兼容）
         let mut metadata = HashMap::new();
         let mut epub2_cover_id: Option<String> = None;
+        let mut epub2_coverpage_id: Option<String> = None;
         if let Some(meta_el) = root.descendants().find(|n| tag_is(*n, "metadata")) {
             for child in meta_el.children().filter(|c| c.is_element()) {
                 // EPUB2 封面声明：<meta name="cover" content="<manifest item id>"/>
@@ -309,6 +310,15 @@ impl EpubParser {
                 {
                     if let Some(content) = attr_local(child, "content") {
                         epub2_cover_id = Some(content.to_string());
+                    }
+                    continue;
+                }
+                // 非标：<meta name="coverpage" content="..."/>（瓦尔登湖）
+                if child.tag_name().name() == "meta"
+                    && attr_local(child, "name") == Some("coverpage")
+                {
+                    if let Some(content) = attr_local(child, "content") {
+                        epub2_coverpage_id = Some(content.to_string());
                     }
                     continue;
                 }
@@ -359,10 +369,41 @@ impl EpubParser {
             }
         }
 
-        // 封面 href 解析优先级：EPUB3 properties > EPUB2 meta[name=cover]
-        let cover_href = epub3_cover_href.or_else(|| {
+        // 封面 href 解析优先级：
+        // EPUB3 properties > EPUB2 meta[name=cover] >
+        // meta[name=coverpage]（非标，瓦尔登湖形） >
+        // manifest id/href 文件名以 cover 开头的图片
+        let mut cover_href = epub3_cover_href.or_else(|| {
             epub2_cover_id.and_then(|id| id_to_href.get(&id).cloned())
         });
+        if cover_href.is_none() {
+            if let Some(pid) = &epub2_coverpage_id {
+                if let Some(h) = id_to_href.get(pid) {
+                    // content 可能是图片 id 或 xhtml id；xhtml 留给 parse() 再取首图
+                    cover_href = Some(h.clone());
+                }
+            }
+        }
+        if cover_href.is_none() {
+            // manifest 图片：id=="cover" 或 文件名 cover*
+            let is_image_href = |h: &str| {
+                let lower = h.to_ascii_lowercase();
+                lower.ends_with(".jpg")
+                    || lower.ends_with(".jpeg")
+                    || lower.ends_with(".png")
+                    || lower.ends_with(".webp")
+                    || lower.ends_with(".gif")
+            };
+            for (id, href) in &id_to_href {
+                let base = href.rsplit('/').next().unwrap_or(href);
+                let name_hit = id.eq_ignore_ascii_case("cover")
+                    || base.to_ascii_lowercase().starts_with("cover");
+                if name_hit && is_image_href(href) {
+                    cover_href = Some(href.clone());
+                    break;
+                }
+            }
+        }
 
         // spine：itemref 的 idref 顺序即阅读顺序；顺带收集全屏页标记
         // （duokan-page-fullscreen：整页背景语义，如封面页）
@@ -403,6 +444,65 @@ impl EpubParser {
             cover_href,
             fullscreen_hrefs,
         })
+    }
+
+    /// 从封面 xhtml / cover-like spine 章提取首个图片字节
+    fn extract_cover_from_coverlike_html(&self, opf: &OpfData) -> Option<Vec<u8>> {
+        let mut candidates: Vec<String> = Vec::new();
+        if let Some(h) = &opf.cover_href {
+            let full = self.join_opf_dir(h);
+            let lower = full.to_ascii_lowercase();
+            if lower.ends_with(".html") || lower.ends_with(".xhtml") || lower.ends_with(".htm") {
+                candidates.push(full);
+            }
+        }
+        for href in &opf.spine_hrefs {
+            let base = href.rsplit('/').next().unwrap_or(href);
+            if base.to_ascii_lowercase().starts_with("cover") {
+                candidates.push(href.clone());
+            }
+        }
+        for href in candidates {
+            let Ok(bytes) = self.get_zip_entry(&href) else {
+                continue;
+            };
+            let Some(html) = String::from_utf8(bytes).ok() else {
+                continue;
+            };
+            let Some(img_href) = Self::first_image_href_from_html(&html) else {
+                continue;
+            };
+            let img_full = resolve_zip_path(&zip_parent_dir(&href), &img_href);
+            if let Ok(bytes) = self.get_zip_entry(&img_full) {
+                return Some(bytes);
+            }
+        }
+        None
+    }
+
+    /// 从 HTML 抽出第一个 img/src 或 svg image/xlink:href（相对路径原文）
+    fn first_image_href_from_html(html: &str) -> Option<String> {
+        let doc = scraper::Html::parse_fragment(html);
+        let sels: Vec<scraper::Selector> = ["img", "image"]
+            .iter()
+            .filter_map(|s| scraper::Selector::parse(s).ok())
+            .collect();
+        for sel in &sels {
+            if let Some(el) = doc.select(sel).next() {
+                if let Some(src) = el
+                    .value()
+                    .attr("src")
+                    .or_else(|| el.value().attr("href"))
+                    .or_else(|| el.value().attr("xlink:href"))
+                {
+                    let s = src.trim();
+                    if !s.is_empty() {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// 从 HTML 内容中提取纯文本
@@ -1520,6 +1620,7 @@ impl EpubParser {
                 intrinsic,
                 bleed,
                 hidden,
+                gallery,
                 anc,
             } => {
                 let ctx = Self::node_ctx_from_anc(anc.as_ref());
@@ -1536,6 +1637,12 @@ impl EpubParser {
                 let bleed = bleed || Self::inherited_bleed(sheet, &ctx);
                 let align =
                     align.or_else(|| Self::inherited_text_align(sheet, &ctx));
+                // 画廊图默认占满内容宽
+                let width_percent = if gallery {
+                    Some(width_percent.unwrap_or(100.0))
+                } else {
+                    width_percent
+                };
                 ContentBlock::Image {
                     resource_href,
                     alt,
@@ -1544,6 +1651,7 @@ impl EpubParser {
                     intrinsic,
                     bleed,
                     hidden,
+                    gallery,
                     anc,
                 }
             }
@@ -2107,7 +2215,27 @@ impl BookParser for EpubParser {
             ));
         }
 
-        // 6. 提取元信息
+        // 6. 封面提取（须在 opf_data 字段 move 之前）
+        // EPUB3 cover-image / EPUB2 meta cover / coverpage / cover* 图片项
+        let mut cover_data = opf_data.cover_href.as_ref().and_then(|href| {
+            let full = self.join_opf_dir(href);
+            let lower = full.to_ascii_lowercase();
+            if lower.ends_with(".html") || lower.ends_with(".xhtml") || lower.ends_with(".htm") {
+                return None;
+            }
+            match self.get_zip_entry(&full) {
+                Ok(bytes) => Some(bytes),
+                Err(e) => {
+                    log::warn!("封面提取失败（{}）: {}", full, e);
+                    None
+                }
+            }
+        });
+        if cover_data.is_none() {
+            cover_data = self.extract_cover_from_coverlike_html(&opf_data);
+        }
+
+        // 7. 提取元信息
         let metadata_map = opf_data.metadata;
         let title = metadata_map.get("dc:title")
             .or_else(|| metadata_map.get("title"))
@@ -2191,18 +2319,7 @@ impl BookParser for EpubParser {
             level_stack.push(i);
         }
 
-        // 9. 封面提取（EPUB2 meta[name=cover] / EPUB3 properties=cover-image）
-        let cover_data = opf_data.cover_href.as_ref().and_then(|href| {
-            let full = self.join_opf_dir(href);
-            match self.get_zip_entry(&full) {
-                Ok(bytes) => Some(bytes),
-                Err(e) => {
-                    log::warn!("封面提取失败（{}）: {}", full, e);
-                    None
-                }
-            }
-        });
-
+        // 9. 封面已在上方提取
         let metadata = BookMetadata {
             title,
             author,
@@ -2427,6 +2544,22 @@ mod tests {
         assert_eq!(b.color, "#2c7938");
         assert!((b.width_px - 2.0).abs() < 0.01);
         assert_eq!(color.as_deref(), Some("#2c7938"));
+    }
+
+    #[test]
+    fn test_first_image_href_and_cover_fallback_names() {
+        let html = r#"<html><body><p><img src="Cover.jpg" alt=""/></p></body></html>"#;
+        assert_eq!(
+            EpubParser::first_image_href_from_html(html).as_deref(),
+            Some("Cover.jpg")
+        );
+        // SVG image：scraper 对 xlink:href 可能不暴露——回退 href
+        let svg = r#"<html><body><svg><image href="../Images/cover.jpg"/></svg></body></html>"#;
+        assert_eq!(
+            EpubParser::first_image_href_from_html(svg).as_deref(),
+            Some("../Images/cover.jpg")
+        );
+        assert!(EpubParser::is_cover_like_names("OPS/coverpage.html", "封面"));
     }
 
     #[test]

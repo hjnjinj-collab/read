@@ -195,6 +195,9 @@ pub enum ContentBlock {
         /// CSS display:none 物化（提取层已过滤，保留字段作防御）
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         hidden: bool,
+        /// duokan-image-gallery-cell：分页画廊（图后强制分页，每图一页）
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        gallery: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anc: Option<Vec<Vec<String>>>,
     },
@@ -283,6 +286,7 @@ impl ContentBlock {
             intrinsic: None,
             bleed: false,
             hidden: false,
+            gallery: false,
             anc: None,
         }
     }
@@ -363,6 +367,7 @@ impl ContentBlock {
                 intrinsic,
                 bleed,
                 hidden,
+                gallery,
                 anc,
             } => ContentBlock::Image {
                 resource_href: crate::epub_parser::resolve_zip_path(content_dir, &resource_href),
@@ -372,6 +377,7 @@ impl ContentBlock {
                 intrinsic,
                 bleed,
                 hidden,
+                gallery,
                 anc,
             },
             ContentBlock::Quote { blocks } => ContentBlock::Quote {
@@ -490,6 +496,7 @@ impl ContentBlock {
                 intrinsic,
                 bleed,
                 hidden,
+                gallery,
                 ..
             } => ContentBlock::Image {
                 resource_href,
@@ -499,6 +506,7 @@ impl ContentBlock {
                 intrinsic,
                 bleed,
                 hidden,
+                gallery,
                 anc: None,
             },
             ContentBlock::Quote { blocks } => ContentBlock::Quote {
@@ -568,6 +576,7 @@ mod tests {
                     intrinsic: Some((600, 200)),
                     bleed: false,
                     hidden: false,
+                    gallery: false,
                     anc: None,
                 },
                 ContentBlock::Paragraph {
@@ -715,6 +724,7 @@ mod tests {
                     intrinsic: None,
                     bleed: false,
                     hidden: false,
+                    gallery: false,
                     anc: Some(vec![vec!["body".into()], vec!["div".into(), "logo".into()]]),
                 }],
             }],
@@ -740,6 +750,7 @@ mod tests {
             align: Some(Align::Right),
             intrinsic: Some((3, 4)),
             bleed: false,
+            gallery: false,
             hidden: false,
             anc: None,
         };

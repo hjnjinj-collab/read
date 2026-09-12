@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart' show Note;
 import '../../../../core/models/simple_models.dart';
+import '../services/book_image_store.dart';
 import '../providers/reader_provider.dart';
+import '../widgets/image_zoom_viewer.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
@@ -484,6 +487,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     const microGestureThreshold = 3.0; // 3px 微手势阈值
 
     // A34：脚注引用优先——命中则弹层，不翻页/不开菜单
+    // A35：图片点按放大（画廊/正文图；次于脚注，先于翻页）
     final page = ref.read(readerProvider).currentPage;
     if (page != null) {
       final n = ref.read(readerProvider.notifier);
@@ -509,6 +513,28 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               ],
             ),
           );
+          return;
+        }
+      }
+      final imgHref = PageContentRenderer.hitImage(page, tapPos);
+      if (imgHref != null) {
+        final img = BookImageStore.instance.get(imgHref);
+        if (img != null) {
+          // 取字节成功才拦截翻页；失败回落手势
+          final opened = img
+              .toByteData(format: ui.ImageByteFormat.png)
+              .then((bd) {
+                if (bd == null || !mounted) return false;
+                ImageZoomViewer.open(
+                  context,
+                  bd.buffer.asUint8List(),
+                  heroTag: imgHref,
+                );
+                return true;
+              })
+              .catchError((_) => false);
+          // 同步占位：命中图默认拦截；异步失败极罕见
+          unawaited(opened);
           return;
         }
       }

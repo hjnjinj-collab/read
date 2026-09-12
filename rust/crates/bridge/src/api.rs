@@ -2295,6 +2295,7 @@ fn blocks_to_layout_items_inner(
                 align,
                 bleed,
                 hidden,
+                gallery,
                 ..
             } => {
                 if *hidden {
@@ -2315,6 +2316,7 @@ fn blocks_to_layout_items_inner(
                         book_parser::Align::Justify => layout_engine::LayoutAlign::Justify,
                     }),
                     bleed: *bleed,
+                    gallery: *gallery,
                 });
             }
             ContentBlock::List { items, ordered, .. } => {

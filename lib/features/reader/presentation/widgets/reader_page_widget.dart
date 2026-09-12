@@ -255,6 +255,18 @@ class PageContentRenderer {
   /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）
   static Color get paperColor => theme.paperColor;
 
+  /// A35：命中图片 entry（画廊/正文图点按放大）
+  static String? hitImage(PageInfo page, Offset local) {
+    for (final entry in page.entries) {
+      if (entry.resourceHref == null) continue;
+      final rect = Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height);
+      if (rect.inflate(8).contains(local)) {
+        return entry.resourceHref;
+      }
+    }
+    return null;
+  }
+
   /// A34：按当前页数据命中脚注引用（不依赖 paint 缓存；
   /// 与绘制同一套 TextPainter 几何，供外层 Listener 消费）
   static String? hitFootnote(

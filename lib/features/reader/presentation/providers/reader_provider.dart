@@ -2406,8 +2406,29 @@ class ReaderNotifier extends Notifier<ReadingState> {
           if (await _adoptPreloadedPage(preloaded, forward: true)) return;
           // adopt 失败 → 回退到 FFI 重载；adopt.reject 已记录原因
         }
+        final beforePage = state.currentPageIndex;
+        final beforeChapter = state.currentChapterIndex;
         state = state.copyWith(currentPageIndex: state.currentPageIndex + 1);
         await _loadCurrentPage();
+        // A35：pageCount 缓存高于实际布局页数时，getPage 会钳制回
+        // 当前页（request page=N → commit page=N-1）。此时视为章末，
+        // 清缓存并进入下一章，避免 not-adjacent 死循环。
+        if (state.currentChapterIndex == beforeChapter &&
+            state.currentPageIndex == beforePage) {
+          readerTrace('page.next.clamp-to-end', {
+            'chapter': beforeChapter,
+            'pageCount': pageCount,
+            'pageIndex': beforePage,
+          });
+          _invalidatePageCountCache();
+          if (beforeChapter < state.chapters.length - 1) {
+            state = state.copyWith(
+              currentChapterIndex: beforeChapter + 1,
+              currentPageIndex: 0,
+            );
+            await _loadCurrentPage();
+          }
+        }
       } else if (state.currentChapterIndex < state.chapters.length - 1) {
         // Next chapter
         if (preloaded != null &&

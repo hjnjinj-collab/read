@@ -282,6 +282,8 @@ pub enum LayoutItem {
         /// 出血图（duokan-bleed）：占满整窗宽、x=0，页首时 y 贴顶，
         /// 忽略水平 padding 与 width_percent/align
         bleed: bool,
+        /// 画廊图：图后强制分页（每图一页）
+        gallery: bool,
     },
     Table(TableInput),
     /// 水平装饰线（标题 border-bottom / 未来的 hr 视觉升级）
@@ -869,6 +871,7 @@ impl LayoutEngine {
                     width_percent,
                     align,
                     bleed,
+                    gallery,
                 } => {
                     let ratio = if *aspect > 0.01 { *aspect } else { 0.75 };
                     let (mut img_width, mut img_x) = if *bleed {
@@ -889,8 +892,14 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 超页高大图：缩至整页内容高内（宽等比收缩）
-                    let max_height = if *bleed { bottom_limit } else { content_height };
+                    // 画廊：最大高度 = 内容区 × 0.85（留图说空间）
+                    let max_height = if *bleed {
+                        bottom_limit
+                    } else if *gallery {
+                        content_height * 0.85
+                    } else {
+                        content_height
+                    };
                     if img_height > max_height {
                         let original_height = img_height;
                         img_height = max_height;
@@ -913,6 +922,10 @@ impl LayoutEngine {
                         }
                     }
 
+                    // 画廊：非空页则新起一页（每图一页；图说跟在同页）
+                    if *gallery && !entries.is_empty() {
+                        break_page!();
+                    }
                     // 当前页放不下且页非空 → 翻页；翻页后仍放不下（整页高）
                     // 则独占新页顶部。出血图在页首贴顶（y=0）
                     if current_y + img_height > bottom_limit && !entries.is_empty() {
@@ -2191,6 +2204,7 @@ mod tests {
             width_percent: None,
             align: Some(LayoutAlign::Center),
             bleed: false,
+            gallery: false,
         }
     }
 
@@ -2216,6 +2230,7 @@ mod tests {
             width_percent: Some(100.0),
             align: Some(LayoutAlign::Center),
             bleed: true,
+            gallery: false,
         }];
         let pages = engine.layout_items(&items, 0).unwrap();
         let e = match &pages[0].entries[0] {
@@ -3105,6 +3120,51 @@ mod tests {
                 line.x
             );
         }
+    }
+
+    /// A35 画廊：每图强制一页
+    #[test]
+    fn items_gallery_forces_one_image_per_page() {
+        let (engine, _) = create_test_engine();
+        let items = vec![
+            LayoutItem::Image {
+                resource_href: "a.jpg".into(),
+                aspect: 1.0,
+                width_percent: Some(100.0),
+                align: Some(LayoutAlign::Center),
+                bleed: false,
+                gallery: true,
+            },
+            LayoutItem::text("图说甲"),
+            LayoutItem::Image {
+                resource_href: "b.jpg".into(),
+                aspect: 1.0,
+                width_percent: Some(100.0),
+                align: Some(LayoutAlign::Center),
+                bleed: false,
+                gallery: true,
+            },
+            LayoutItem::text("图说乙"),
+        ];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert!(pages.len() >= 2, "两张画廊图应至少两页，实际 {}", pages.len());
+        let imgs: Vec<&str> = pages
+            .iter()
+            .flat_map(|p| p.entries.iter())
+            .filter_map(|e| match e {
+                PageEntry::Image(i) => Some(i.resource_href.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(imgs, vec!["a.jpg", "b.jpg"]);
+        // 第二张图不得与第一张同页
+        let first_img_page = pages.iter().position(|p| {
+            p.entries.iter().any(|e| matches!(e, PageEntry::Image(i) if i.resource_href == "a.jpg"))
+        }).unwrap();
+        let second_img_page = pages.iter().position(|p| {
+            p.entries.iter().any(|e| matches!(e, PageEntry::Image(i) if i.resource_href == "b.jpg"))
+        }).unwrap();
+        assert!(second_img_page > first_img_page);
     }
 
     /// A34.3：标题分割线 Hr → 内容区宽填充 Rect

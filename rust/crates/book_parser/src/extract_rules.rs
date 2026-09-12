@@ -453,7 +453,22 @@ pub const BUILTIN_EXTRACT_RULES_JS: &str = r#"
                         out.push(innerBlocks[bi]);
                     }
                 } else {
-                    walkBlocks(child, depth + 1, out, childChain);
+                    // A35 画廊：duokan-image-gallery-cell 内的图标记 gallery
+                    // （布局强制每图一页；点按可放大）
+                    var isGalleryCell = /duokan-image-gallery-cell|gallery-cell/.test(cls);
+                    var isGalleryBox = /duokan-image-gallery/.test(cls);
+                    if (isGalleryCell || isGalleryBox) {
+                        var gBlocks = [];
+                        walkBlocks(child, depth + 1, gBlocks, childChain);
+                        for (var gi = 0; gi < gBlocks.length; gi++) {
+                            if (gBlocks[gi].type === "image") {
+                                gBlocks[gi].gallery = true;
+                            }
+                            out.push(gBlocks[gi]);
+                        }
+                    } else {
+                        walkBlocks(child, depth + 1, out, childChain);
+                    }
                 }
             }
         }
@@ -720,6 +735,7 @@ mod tests {
                 align: None,
                 intrinsic: None,
                 bleed: false,
+                gallery: false,
                 hidden: false,
                 anc: Some(vec![
                     vec!["body".to_string()],
@@ -762,6 +778,7 @@ mod tests {
                 align: None,
                 intrinsic: None,
                 bleed: false,
+                gallery: false,
                 hidden: false,
                 anc: Some(vec![
                     vec!["body".to_string()],
