@@ -537,7 +537,7 @@ class _ReaderSettingsDialogState extends ConsumerState<ReaderSettingsDialog> {
                 const SizedBox(height: 8),
                 _buildSwitchTile(
                   title: '去除重复标题',
-                  subtitle: '自动删除章节内容开头的重复标题',
+                  subtitle: '删除章节内容开头与章名相同的重复标题（仅 TXT；EPUB 页内标题恒保留）',
                   value: _removeDuplicateTitle,
                   onChanged: (value) {
                     setState(() => _removeDuplicateTitle = value);

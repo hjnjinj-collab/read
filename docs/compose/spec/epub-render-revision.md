@@ -6,19 +6,20 @@ branch: master
 commits: 1399748..HEAD
 ---
 
-# EPUB 渲染真机修订（A34.1）
+# EPUB 渲染真机修订（A34.1 / A34.2）
 
 ## Report
 
-**What was built** — A34 真机反馈四件套落地：① UI「显示本章说」→「显示注释」；② 注释默认蓝灰 `#5A6B7A` / 0.82 倍，设置提供三色预设 + 字号滑杆（0.70–1.00），字号经 `comment_scale` 进布局与三路缓存键（`StructuredPageKey` / `ParagraphFormatSettings.hash_value` / Dart `paraFormatHash`），颜色纯绘制期覆盖；③ 封面启发式：href 文件名 `cover*` 或 title 含「封面」+ 过滤空段后单图 → 整页 `PageBackground Cover`（与 OPF `duokan-page-fullscreen` OR）；④ Right/Center 对齐×首行缩进：`x = align(w, cw−ind) + ind`，短行贴右缘不溢出。`LAYOUT_REVISION=4`。
+**What was built** — A34.1 真机反馈四件套：① UI「显示本章说」→「显示注释」；② 注释默认蓝灰 `#5A6B7A` / 0.82 倍，设置三色预设 + 字号滑杆，字号进三路缓存键，颜色绘制期覆盖；③ 封面启发式 `cover*` / 标题含「封面」+ 单图 → 整页背景；④ Right/Center×indent 短行贴右缘。A34.2 修订：EPUB 结构化路径**不再**执行「去除重复标题」——阅读页无独立章节头，与目录同文的 `h1` 被剥离后页面标题完全消失（瓦尔登湖 `chapter001`「省俭有方」真机回归）。TXT 仍走原逻辑；设置副标题标明仅 TXT 生效。
 
-**Verification** — `cargo test -p layout_engine --lib` 90 PASS（含 right+indent 与 comment_scale 回归）；`book_parser` 125 PASS（含 `test_is_cover_like_names`）；`reader_core` 173 PASS；`bridge` 17 PASS；`fix_sync.ps1` PASS；`flutter analyze` 29 issues 0 error。独立审查 0 critical / 1 major（封面无单测）→ 已补单测并收紧 `starts_with("cover")` 防 uncover 误伤。
+**Verification** — `cargo test -p layout_engine --lib` 90 PASS；`book_parser` 125 PASS（含 `test_is_cover_like_names`）；`reader_core` 173 PASS；`bridge` 17 PASS；`fix_sync.ps1` PASS；`flutter analyze` 0 error。A34.2：探针确认 IR 保留 `H1「省俭有方」`，分页路径不再调用 `remove_duplicate_title_blocks`。
 
 **Journey log** —
 1. `text-indent` 与 `text-align:right` 不能「先对齐再加 indent」——CSS 语义是 indent 只缩首行可用宽。
 2. 封面识别用 `starts_with("cover")` 而非 `contains`，避免 uncover 等误伤。
-3. 注释色与字号分通道：色不进缓存键（Dart `isComment` 覆盖），字号必须进键（改行高）。
-4. `CacheKey.config_hash` 亦应含 `show_comments`/`comment_scale`，不单靠 options_hash 兜底。
+3. 注释色与字号分通道：色不进缓存键，字号必须进键。
+4. `CacheKey.config_hash` 亦应含 `show_comments`/`comment_scale`。
+5. A34.2：`remove_duplicate_title` 对 EPUB 是「删掉页内唯一标题」——无页头时不能剥离。
 
 ## [S1] Problem
 

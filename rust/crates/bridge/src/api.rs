@@ -2441,6 +2441,9 @@ fn map_run(r: &book_parser::StyledRun) -> layout_engine::RunSpan {
 /// - 首个非空非标题块即停。
 /// 语义差异说明：TXT 预处理器做整章逐行扫描；EPUB 标题是结构化块（spine
 /// 导航的章名与正文首个 Heading 天然同文），仅开头扫描即可覆盖全部场景。
+/// A30c：EPUB 去重标题（当前 EPUB 路径 A34.2 起不再调用——页内无独立
+/// 章节头时剥离即丢失标题；保留实现供日后「页头显示章名」后再启用）。
+#[allow(dead_code)]
 fn remove_duplicate_title_blocks(blocks: &mut Vec<book_parser::ContentBlock>, title: &str) {
     let title_trimmed = title.trim();
     if title_trimmed.is_empty() {
@@ -2613,16 +2616,12 @@ fn process_structured_chapter(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
-    // A30c：去重标题（TXT 预处理 Stage1 同口径，先于替换规则——规则可能
-    // 改写标题文本）。IR 块文本是转换后文本，标题按同方向转换后比对。
-    if params.remove_duplicate_title {
-        let title_cmp = match params.convert_mode {
-            1 => book_parser::chinese_convert::convert_s2t(&raw_title),
-            2 => book_parser::chinese_convert::convert_t2s(&raw_title),
-            _ => raw_title,
-        };
-        remove_duplicate_title_blocks(&mut content.blocks, &title_cmp);
-    }
+    // A30c：去重标题——TXT 预处理 Stage1 仍剥离与章名重复的开头标题。
+    // A34.2：EPUB 结构化路径**不剥离**。阅读页没有独立章节头，标题只存在
+    // 于正文 IR；与目录同文的 h1（瓦尔登湖 chapter001「省俭有方」）被删后
+    // 页面上完全消失。设置开关对 EPUB 不再生效（保留字段以兼容持久化）。
+    let _ = &raw_title; // EPUB 路径不再用于剥离；保留变量供日后页头功能复用
+    let _ = &params.remove_duplicate_title;
 
     // A30b：用户替换规则块级应用（与 TXT 预处理同口径；规则可能改变文本
     // 长度，必须先于段落格式化与布局项字符累计——展示/搜索/锚点三方同源）。
@@ -3413,15 +3412,10 @@ fn search_epub_chapter(
     };
     let mut content = content;
 
-    // A30c：去重标题——与 process_structured_chapter 同时机同语义
-    if remove_duplicate_title {
-        let title_cmp = match chinese_convert {
-            1 => book_parser::chinese_convert::convert_s2t(&raw_title),
-            2 => book_parser::chinese_convert::convert_t2s(&raw_title),
-            _ => raw_title,
-        };
-        remove_duplicate_title_blocks(&mut content.blocks, &title_cmp);
-    }
+    // A30c：去重标题——与展示路径同语义。
+    // A34.2：EPUB 页内标题恒保留（无独立章节头），搜索锚点与展示同源。
+    let _ = remove_duplicate_title;
+    let _ = &raw_title;
 
     // A30b：用户替换规则块级应用——与 process_structured_chapter 同函数
     // 同时机（先规则后段落格式化），锚点字符流与展示天然同源
