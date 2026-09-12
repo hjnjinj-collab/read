@@ -2091,17 +2091,21 @@ fn apply_paragraph_format_settings(
             unreachable!("is_normal_para 已判定为 Paragraph");
         };
 
+        // A35.2：普通段落忽略书内 text-align:right——装饰诗词页
+        // （大奉打更人 p.foot1）右对齐在重排阅读器里观感破碎，
+        // 统一回落正文默认（左对齐/两端）+ 用户缩进。
+        // Center 保留（标题/短署名居中仍有意义）。
+        let align = match align {
+            Some(book_parser::Align::Right) => None,
+            other => other,
+        };
+
         // P3：用户缩进覆盖（设置优先于 CSS 物化值）
-        // A35.1：Right/Center 段不加用户缩进——右对齐再加 2em 会整体右偏
-        // （大奉打更人 p.foot1 诗词 text-align:right + CSS indent=0）
-        let user_indent_wanted = !matches!(
-            align,
-            Some(book_parser::Align::Right) | Some(book_parser::Align::Center)
-        );
-        let indent_first_line_em = if user_indent_wanted {
-            indent_override
-        } else {
+        // 居中段不加缩进（避免标题被推偏）
+        let indent_first_line_em = if matches!(align, Some(book_parser::Align::Center)) {
             css_indent
+        } else {
+            indent_override
         };
 
         // 统一智能分段：A35 块内切分（阈值+终结构+引号吸附；D10 同步重写 runs）
@@ -4755,6 +4759,66 @@ mod tests {
         let mut blocks = vec![para(&text)];
         apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, false), None);
         assert_eq!(blocks.len(), 1, "None 模式不切分");
+    }
+
+    /// A35.2：普通段落 text-align:right 回落正文默认（左对齐+用户缩进）
+    #[test]
+    fn epub_right_align_para_normalized_to_body() {
+        let b = ContentBlock::Paragraph {
+            text: "少年侠气，交结五都雄。".into(),
+            align: Some(book_parser::Align::Right),
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: Some(0.0),
+            spacing_after_em: None,
+            line_height: None,
+        };
+        let mut blocks = vec![b];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true), None);
+        match &blocks[0] {
+            ContentBlock::Paragraph {
+                align,
+                indent_first_line_em,
+                ..
+            } => {
+                assert_eq!(*align, None, "Right 应回落正文默认对齐");
+                assert_eq!(
+                    *indent_first_line_em,
+                    Some(2.0),
+                    "回落正文后应套用户缩进"
+                );
+            }
+            _ => unreachable!(),
+        }
+        // Center 保留，不套用户缩进
+        let b = ContentBlock::Paragraph {
+            text: "——贺铸".into(),
+            align: Some(book_parser::Align::Center),
+            color: None,
+            font_scale: None,
+            runs: Vec::new(),
+            anc: None,
+            is_comment: false,
+            indent_first_line_em: Some(0.0),
+            spacing_after_em: None,
+            line_height: None,
+        };
+        let mut blocks = vec![b];
+        apply_paragraph_format_settings(&mut blocks, &settings(ReParagraphMode::None, true), None);
+        match &blocks[0] {
+            ContentBlock::Paragraph {
+                align,
+                indent_first_line_em,
+                ..
+            } => {
+                assert_eq!(*align, Some(book_parser::Align::Center));
+                assert_eq!(*indent_first_line_em, Some(0.0));
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
