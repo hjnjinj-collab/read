@@ -185,47 +185,51 @@ class _BookCoverCardState extends State<BookCoverCard>
                       child: imageChild,
                     ),
 
-                  // 顶光
+                  // 顶光（轻，不抢底部弥漫）
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          colors.posterHighlight.withValues(alpha: 0.32),
-                          Colors.transparent,
-                        ],
-                        stops: const [0, 0.45],
-                      ),
-                    ),
-                  ),
-                  // 提取色自底部上涌（厚氛围）
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          colors.dominant.withValues(alpha: 0.88),
-                          colors.vibrant.withValues(alpha: 0.62),
-                          colors.dominant.withValues(alpha: 0.28),
-                          Colors.transparent,
-                        ],
-                        stops: const [0, 0.22, 0.48, 0.78],
-                      ),
-                    ),
-                  ),
-                  // 字幕可读性：底部再压一层轻暗
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.35),
+                          colors.posterHighlight.withValues(alpha: 0.22),
                           Colors.transparent,
                         ],
                         stops: const [0, 0.4],
+                      ),
+                    ),
+                  ),
+                  // 提取色弥漫：自底部涌起 → 中部厚 → 顶部消散
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          colors.dominant.withValues(alpha: 0.95),
+                          Color.lerp(colors.dominant, colors.vibrant, 0.45)!
+                              .withValues(alpha: 0.82),
+                          colors.vibrant.withValues(alpha: 0.58),
+                          colors.dominant.withValues(alpha: 0.32),
+                          colors.dominant.withValues(alpha: 0.1),
+                          Colors.transparent,
+                        ],
+                        stops: const [0, 0.16, 0.34, 0.55, 0.75, 0.92],
+                      ),
+                    ),
+                  ),
+                  // 仅轻压保证白字可读，不洗掉弥漫色
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.22),
+                          Colors.black.withValues(alpha: 0.06),
+                          Colors.transparent,
+                        ],
+                        stops: const [0, 0.28, 0.52],
                       ),
                     ),
                   ),

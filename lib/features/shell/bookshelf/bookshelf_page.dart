@@ -189,51 +189,91 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return Material(color: scheme.surface, child: row);
     }
 
-    // 顶栏：整层均匀模糊 + 极缓 tint 渐变，避免中部「糊/不糊」硬边
-    final h = AppGlass.topGlassHeight + topPad;
-    final tint = AppGlass.topTint(scheme);
-    return SizedBox(
-      height: h,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 底层：整块模糊（高度内无截断差异）
-            BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: AppGlass.topBlurSigma,
-                sigmaY: AppGlass.topBlurSigma,
-              ),
-              child: const SizedBox.expand(),
-            ),
-            // 上层：近白 tint 多段缓降，底缘完全透明
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    tint,
-                    tint,
-                    tint.withValues(alpha: 0.92),
-                    tint.withValues(alpha: 0.74),
-                    tint.withValues(alpha: 0.48),
-                    tint.withValues(alpha: 0.22),
-                    tint.withValues(alpha: 0.06),
-                    tint.withValues(alpha: 0),
-                  ],
-                  stops: const [0, 0.22, 0.38, 0.52, 0.66, 0.8, 0.92, 1],
+    // 悬浮轻雾毛玻璃条（参考系统设置）：圆角面板 + 重模糊 + 近白
+    final tint = scheme.brightness == Brightness.light
+        ? const Color(0xFFF7F8F6).withValues(alpha: 0.7)
+        : const Color(0xFF1A1D1A).withValues(alpha: 0.68);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, topPad + 6, 12, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: AppGlass.topBlurSigma,
+            sigmaY: AppGlass.topBlurSigma,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: tint,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: Colors.white.withValues(
+                  alpha: scheme.brightness == Brightness.light ? 0.55 : 0.12,
                 ),
+                width: 0.9,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.shadow.withValues(alpha: 0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '书架',
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4,
+                              ),
+                        ),
+                        if (!_loading && _entries.isNotEmpty)
+                          Text(
+                            '${_entries.length} 本',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: true,
+                        icon: Icon(AppIcons.grid, size: 18),
+                        tooltip: '网格',
+                      ),
+                      ButtonSegment(
+                        value: false,
+                        icon: Icon(AppIcons.list, size: 18),
+                        tooltip: '列表',
+                      ),
+                    ],
+                    selected: {shell.bookshelfGrid},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (s) =>
+                        notifier.setBookshelfGrid(s.first),
+                  ),
+                ],
               ),
             ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: EdgeInsets.only(top: topPad),
-                child: row,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -248,9 +288,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     final bottomPad = MediaQuery.paddingOf(context).bottom + 96;
     final scheme = Theme.of(context).colorScheme;
     final topPad = MediaQuery.paddingOf(context).top;
-    final topGlass = MediaQuery.disableAnimationsOf(context)
-        ? topPad + 64
-        : AppGlass.topGlassHeight + topPad;
+    // 悬浮毛玻璃条高度：边距 6 + 面板 ~64
+    final topGlass = topPad + 76;
 
     late final Widget content;
     if (_loading) {
