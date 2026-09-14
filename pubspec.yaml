@@ -48,6 +48,7 @@ dependencies:
   package_info_plus: ^10.2.1
   iconsax_flutter: ^1.0.1
   dynamic_color: ^2.1.0
+  palette_generator: ^0.3.3+7
 
 dev_dependencies:
   flutter_test:

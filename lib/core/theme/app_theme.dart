@@ -1,79 +1,94 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// 应用主题：松绿灰 seed，全量 ColorScheme 派生。
+/// 应用主题：中性纸面 + 松绿只作强调色。
 /// 阅读页纸色/夜间仍在阅读菜单，不在此覆盖。
 class AppTheme {
   AppTheme._();
 
-  /// 书脊布色
-  static const Color seed = Color(0xFF5B6C5A);
+  /// 强调色（书脊布）
+  static const Color seed = Color(0xFF4A5D4E);
+
+  /// 浅色纸面（刻意中性，避免 seed 染绿整页）
+  static const Color paper = Color(0xFFFAF9F5);
+  static const Color paperDim = Color(0xFFF1F0EA);
+  static const Color paperLine = Color(0xFFE4E2D9);
 
   static ThemeData light({Color? dynamicSeed}) {
-    final scheme = ColorScheme.fromSeed(
+    final base = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seed,
       brightness: Brightness.light,
+    );
+    final scheme = base.copyWith(
+      surface: dynamicSeed == null ? paper : base.surface,
+      surfaceContainerLowest: const Color(0xFFFFFEFB),
+      surfaceContainerLow: const Color(0xFFF7F6F1),
+      surfaceContainer: paperDim,
+      surfaceContainerHigh: const Color(0xFFEAE8E0),
+      surfaceContainerHighest: const Color(0xFFE0DED4),
+      outlineVariant: paperLine,
     );
     return _base(scheme);
   }
 
   static ThemeData dark({Color? dynamicSeed}) {
-    final scheme = ColorScheme.fromSeed(
+    final base = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seed,
       brightness: Brightness.dark,
     );
-    return _base(scheme);
+    return _base(base);
   }
 
   static ThemeData _base(ColorScheme scheme) {
-    final isLight = scheme.brightness == Brightness.light;
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
       splashFactory: InkSparkle.splashFactory,
+      visualDensity: VisualDensity.standard,
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: scheme.onSurface,
-          fontSize: 22,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.2,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 68,
-        backgroundColor: scheme.surfaceContainer.withValues(alpha: isLight ? 0.85 : 0.78),
-        indicatorColor: scheme.primaryContainer,
+        height: 64,
+        backgroundColor: Colors.transparent,
+        indicatorColor: scheme.primary.withValues(alpha: 0.14),
         elevation: 0,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
-            size: 24,
+            size: 22,
             color: states.contains(WidgetState.selected)
-                ? scheme.onPrimaryContainer
+                ? scheme.primary
                 : scheme.onSurfaceVariant,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
             color: states.contains(WidgetState.selected)
-                ? scheme.onSurface
+                ? scheme.primary
                 : scheme.onSurfaceVariant,
           ),
         ),
       ),
       cardTheme: CardThemeData(
-        elevation: 1,
+        elevation: 0,
         color: scheme.surfaceContainerLow,
-        shadowColor: scheme.shadow.withValues(alpha: 0.12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shadowColor: scheme.shadow.withValues(alpha: 0.18),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         clipBehavior: Clip.antiAlias,
         margin: EdgeInsets.zero,
       ),
@@ -85,12 +100,19 @@ class AppTheme {
         style: ButtonStyle(
           visualDensity: VisualDensity.compact,
           side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? scheme.primary.withValues(alpha: 0.12)
+                : scheme.surfaceContainerLow,
+          ),
+          foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: scheme.primaryContainer,
-        foregroundColor: scheme.onPrimaryContainer,
-        elevation: 2,
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       dividerTheme: DividerThemeData(
         color: scheme.outlineVariant,
@@ -105,9 +127,10 @@ class AppTheme {
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          // Zoom：Flutter 原生缩放过渡，比 FadeUpwards 更有「推近」感
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.windows: ZoomPageTransitionsBuilder(),
         },
       ),
     );

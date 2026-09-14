@@ -10,7 +10,7 @@ import '../../reader/presentation/providers/reader_provider.dart'
 import '../providers/shell_settings.dart';
 import 'book_cover_card.dart';
 
-/// 书架 Tab：岛屿网格 / 列表，导入本地 TXT/EPUB
+/// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
   const BookshelfPage({super.key});
 
@@ -62,7 +62,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
             onPressed: () => Navigator.pop(context, false),
             child: const Text('取消'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('移出'),
           ),
@@ -121,9 +121,67 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   }
 
   int _columnsForWidth(double width) {
-    if (width < 600) return 2;
-    if (width < 900) return 3;
-    return 4;
+    if (width < 360) return 2;
+    if (width < 700) return 3;
+    if (width < 1000) return 4;
+    return 5;
+  }
+
+  Widget _buildHeader(BuildContext context, ShellSettings shell,
+      ShellSettingsNotifier notifier, ColorScheme scheme) {
+    return Material(
+      color: scheme.surface,
+      elevation: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '书架',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.4,
+                          ),
+                    ),
+                    if (!_loading && _entries.isNotEmpty)
+                      Text(
+                        '${_entries.length} 本',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                      ),
+                  ],
+                ),
+              ),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(AppIcons.grid, size: 18),
+                    tooltip: '网格',
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(AppIcons.list, size: 18),
+                    tooltip: '列表',
+                  ),
+                ],
+                selected: {shell.bookshelfGrid},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) => notifier.setBookshelfGrid(s.first),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -131,99 +189,88 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     final shell = ref.watch(shellSettingsProvider);
     final shellNotifier = ref.read(shellSettingsProvider.notifier);
     final width = MediaQuery.sizeOf(context).width;
-    final bottomPad = MediaQuery.paddingOf(context).bottom + 88;
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 80;
+    final scheme = Theme.of(context).colorScheme;
+
+    late final Widget content;
+    if (_loading) {
+      content = const Center(child: CircularProgressIndicator());
+    } else if (_entries.isEmpty) {
+      content = _EmptyShelf(onImport: _pickAndOpenBook);
+    } else if (shell.bookshelfGrid) {
+      content = GridView.builder(
+        key: const ValueKey('grid'),
+        padding: EdgeInsets.fromLTRB(12, 4, 12, bottomPad),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: _columnsForWidth(width),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.68,
+        ),
+        itemCount: _entries.length,
+        itemBuilder: (context, index) {
+          final (book, progress) = _entries[index];
+          return BookCoverCard(
+            book: book,
+            progress: progress,
+            onTap: () => _openBook(book),
+            onLongPress: () => _removeBook(book),
+          );
+        },
+      );
+    } else {
+      content = ListView.separated(
+        key: const ValueKey('list'),
+        padding: EdgeInsets.only(bottom: bottomPad),
+        itemCount: _entries.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
+        itemBuilder: (context, index) {
+          final (book, progress) = _entries[index];
+          return BookListTile(
+            book: book,
+            subtitle: _subtitle(book, progress),
+            onTap: () => _openBook(book),
+            onRemove: () => _removeBook(book),
+          );
+        },
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      // 外层壳 extendBody：内层 FAB 不会自动避开毛玻璃底栏，手动抬高 68
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 68),
-        child: FloatingActionButton(
+        padding: const EdgeInsets.only(bottom: 72),
+        child: FloatingActionButton.large(
+          heroTag: 'bookshelf-import',
           onPressed: _pickAndOpenBook,
           tooltip: '导入书籍',
-          child: const Icon(AppIcons.add),
+          child: const Icon(AppIcons.add, size: 28),
         ),
       ),
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar.large(
-            title: const Text('书架'),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(
-                      value: true,
-                      icon: Icon(AppIcons.grid, size: 18),
-                      tooltip: '网格',
-                    ),
-                    ButtonSegment(
-                      value: false,
-                      icon: Icon(AppIcons.list, size: 18),
-                      tooltip: '列表',
-                    ),
-                  ],
-                  selected: {shell.bookshelfGrid},
-                  showSelectedIcon: false,
-                  onSelectionChanged: (s) =>
-                      shellNotifier.setBookshelfGrid(s.first),
-                ),
-              ),
-            ],
-          ),
-          if (_loading)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_entries.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyShelf(onImport: _pickAndOpenBook),
-            )
-          else if (shell.bookshelfGrid)
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(12, 4, 12, bottomPad),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: _columnsForWidth(width),
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 0.58,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final (book, progress) = _entries[index];
-                    return BookCoverCard(
-                      book: book,
-                      progress: progress,
-                      onTap: () => _openBook(book),
-                      onLongPress: () => _removeBook(book),
-                    );
-                  },
-                  childCount: _entries.length,
-                ),
-              ),
-            )
-          else
-            SliverPadding(
-              padding: EdgeInsets.only(bottom: bottomPad),
-              sliver: SliverList.separated(
-                itemCount: _entries.length,
-                separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-                itemBuilder: (context, index) {
-                  final (book, progress) = _entries[index];
-                  return BookListTile(
-                    book: book,
-                    subtitle: _subtitle(book, progress),
-                    onTap: () => _openBook(book),
-                    onRemove: () => _removeBook(book),
-                  );
-                },
-              ),
+      body: Column(
+        children: [
+          _buildHeader(context, shell, shellNotifier, scheme),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 240),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween(
+                      begin: const Offset(0, 0.04),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: content,
             ),
+          ),
         ],
       ),
     );
@@ -240,28 +287,28 @@ class _EmptyShelf extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 120),
+        padding: const EdgeInsets.fromLTRB(32, 0, 32, 100),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 96,
-              height: 96,
+              width: 88,
+              height: 88,
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(28),
+                color: scheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(24),
               ),
               child: Icon(
                 AppIcons.emptyBook,
-                size: 48,
-                color: scheme.onSurfaceVariant,
+                size: 42,
+                color: scheme.primary,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             Text(
               '书架是空的',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
             ),
             const SizedBox(height: 8),

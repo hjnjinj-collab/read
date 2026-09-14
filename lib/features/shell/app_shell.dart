@@ -58,7 +58,8 @@ class AppShell extends StatelessWidget {
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
                 child: ColoredBox(
-                  color: scheme.primaryContainer.withValues(alpha: 0.72),
+                  // 纸色雾面，避免 primaryContainer 把底栏染成整块绿
+                  color: scheme.surface.withValues(alpha: 0.78),
                   child: bar,
                 ),
               ),
