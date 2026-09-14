@@ -21,6 +21,24 @@ $ErrorActionPreference = 'Continue'
 $env:JAVA_HOME = "D:\android\vis tudio\3\Android\openjdk\jdk-21.0.8"
 # rquickjs-sys 需要 patch（Git usr/bin 提供）
 $env:Path = "C:\Program Files\Git\usr\bin;$env:JAVA_HOME\bin;$env:Path"
+
+# 宿主 build script（object/rquickjs 等）需要 MSVC link.exe。
+# 未进 PATH 时 cargo 会报 "link.exe returned an unexpected error"。
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vswhere) {
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+    if ($vsPath) {
+        $msvcDir = Get-ChildItem (Join-Path $vsPath "VC\Tools\MSVC") -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if ($msvcDir) {
+            $linkDir = Join-Path $msvcDir.FullName "bin\Hostx64\x64"
+            if (Test-Path $linkDir) {
+                $env:Path = "$linkDir;$env:Path"
+                Write-Host "  MSVC linker: $linkDir\link.exe" -ForegroundColor Gray
+            }
+        }
+    }
+}
 $env:ANDROID_NDK_HOME = "D:\android\ansdk\ndk\27.0.12077973"
 $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
 $env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
