@@ -189,34 +189,51 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return Material(color: scheme.surface, child: row);
     }
 
-    // 顶栏渐变模糊：加高 + 多段渐变，消除中部「截断带」
+    // 顶栏：整层均匀模糊 + 极缓 tint 渐变，避免中部「糊/不糊」硬边
     final h = AppGlass.topGlassHeight + topPad;
+    final tint = AppGlass.topTint(scheme);
     return SizedBox(
       height: h,
       child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(
-            sigmaX: AppGlass.topBlurSigma,
-            sigmaY: AppGlass.topBlurSigma,
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  AppGlass.topTint(scheme),
-                  AppGlass.topTint(scheme),
-                  AppGlass.topTint(scheme).withValues(alpha: 0.88),
-                  AppGlass.topTint(scheme).withValues(alpha: 0.62),
-                  AppGlass.topTint(scheme).withValues(alpha: 0.28),
-                  AppGlass.topTint(scheme).withValues(alpha: 0),
-                ],
-                stops: const [0, 0.28, 0.48, 0.68, 0.86, 1],
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 底层：整块模糊（高度内无截断差异）
+            BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: AppGlass.topBlurSigma,
+                sigmaY: AppGlass.topBlurSigma,
+              ),
+              child: const SizedBox.expand(),
+            ),
+            // 上层：近白 tint 多段缓降，底缘完全透明
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    tint,
+                    tint,
+                    tint.withValues(alpha: 0.92),
+                    tint.withValues(alpha: 0.74),
+                    tint.withValues(alpha: 0.48),
+                    tint.withValues(alpha: 0.22),
+                    tint.withValues(alpha: 0.06),
+                    tint.withValues(alpha: 0),
+                  ],
+                  stops: const [0, 0.22, 0.38, 0.52, 0.66, 0.8, 0.92, 1],
+                ),
               ),
             ),
-            child: row,
-          ),
+            Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: EdgeInsets.only(top: topPad),
+                child: row,
+              ),
+            ),
+          ],
         ),
       ),
     );

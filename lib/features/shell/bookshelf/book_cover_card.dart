@@ -185,35 +185,47 @@ class _BookCoverCardState extends State<BookCoverCard>
                       child: imageChild,
                     ),
 
-                  // 海报氛围：亮顶光、轻底 scrim，整卡偏明
+                  // 顶光
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          colors.posterHighlight.withValues(alpha: 0.35),
+                          colors.posterHighlight.withValues(alpha: 0.32),
                           Colors.transparent,
-                          colors.posterScrim.withValues(alpha: 0.12),
-                          colors.posterScrim.withValues(alpha: 0.42),
-                          colors.posterScrim.withValues(alpha: 0.78),
                         ],
-                        stops: const [0, 0.32, 0.55, 0.8, 1],
+                        stops: const [0, 0.45],
                       ),
                     ),
                   ),
-                  // 侧向亮染
+                  // 提取色自底部上涌（厚氛围）
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
                         colors: [
-                          colors.vibrant.withValues(alpha: 0.4),
-                          colors.vibrant.withValues(alpha: 0.1),
+                          colors.dominant.withValues(alpha: 0.88),
+                          colors.vibrant.withValues(alpha: 0.62),
+                          colors.dominant.withValues(alpha: 0.28),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.4, 1],
+                        stops: const [0, 0.22, 0.48, 0.78],
+                      ),
+                    ),
+                  ),
+                  // 字幕可读性：底部再压一层轻暗
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.35),
+                          Colors.transparent,
+                        ],
+                        stops: const [0, 0.4],
                       ),
                     ),
                   ),
@@ -342,7 +354,7 @@ class _RemainBadge extends StatelessWidget {
   }
 }
 
-/// 叠在封面上的圆环进度
+/// 叠在封面上的精致圆环进度：细弧 + 光晕 + 毛玻璃底盘
 class _RingProgress extends StatelessWidget {
   const _RingProgress({
     required this.progress,
@@ -358,61 +370,175 @@ class _RingProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const size = 44.0;
+    const size = 46.0;
     return AnimatedBuilder(
       animation: listenable,
       builder: (context, _) {
-        final t = listenable.value;
+        final t = Curves.easeOutCubic.transform(listenable.value);
+        final value = hasProgress ? (progress * t).clamp(0.0, 1.0) : 0.0;
         return SizedBox(
           width: size,
           height: size,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black.withValues(alpha: 0.38),
-                ),
-              ),
-              SizedBox(
-                width: size,
-                height: size,
-                child: CircularProgressIndicator(
-                  value: hasProgress ? (progress * t).clamp(0.0, 1.0) : null,
-                  strokeWidth: 3,
-                  strokeCap: StrokeCap.round,
-                  backgroundColor: Colors.white.withValues(alpha: 0.22),
-                  valueColor: AlwaysStoppedAnimation(
-                    hasProgress ? color : Colors.white54,
-                  ),
-                ),
-              ),
-              if (hasProgress)
-                Text(
-                  '${(progress * 100 * t).round()}%',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                )
-              else
-                Text(
-                  '新',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-            ],
+          child: CustomPaint(
+            painter: _RingPainter(
+              progress: value,
+              color: color,
+              indeterminate: !hasProgress,
+              t: t,
+            ),
+            child: Center(
+              child: hasProgress
+                  ? Text(
+                      '${(progress * 100 * t).round()}%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        height: 1,
+                        letterSpacing: -0.2,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                        shadows: [
+                          Shadow(color: Colors.black54, blurRadius: 3),
+                        ],
+                      ),
+                    )
+                  : Text(
+                      '新',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                      ),
+                    ),
+            ),
           ),
         );
       },
     );
   }
+}
+
+class _RingPainter extends CustomPainter {
+  _RingPainter({
+    required this.progress,
+    required this.color,
+    required this.indeterminate,
+    required this.t,
+  });
+
+  final double progress;
+  final Color color;
+  final bool indeterminate;
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.width / 2 - 3.5;
+
+    // 毛玻璃底盘
+    final disc = Paint()
+      ..color = Colors.black.withValues(alpha: 0.42)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.5);
+    canvas.drawCircle(center, size.width / 2, disc);
+
+    // 内描边
+    canvas.drawCircle(
+      center,
+      radius + 1.2,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.7
+        ..color = Colors.white.withValues(alpha: 0.18),
+    );
+
+    // 轨道
+    final track = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.2);
+    canvas.drawCircle(center, radius, track);
+
+    if (indeterminate) {
+      // 未读：一段旋转的短弧（用 t 做进场）
+      final sweep = 1.2 * t;
+      final start = -1.57 + t * 2.2;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        start,
+        sweep,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4
+          ..strokeCap = StrokeCap.round
+          ..color = Colors.white.withValues(alpha: 0.55),
+      );
+      return;
+    }
+
+    if (progress <= 0) return;
+
+    // 进度光晕
+    final glow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..strokeCap = StrokeCap.round
+      ..color = color.withValues(alpha: 0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.57,
+      6.283 * progress,
+      false,
+      glow,
+    );
+
+    // 进度弧
+    final arc = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        startAngle: -1.57,
+        endAngle: -1.57 + 6.283,
+        colors: [
+          Color.lerp(color, Colors.white, 0.25)!,
+          color,
+          Color.lerp(color, Colors.white, 0.15)!,
+        ],
+        stops: const [0, 0.55, 1],
+        transform: const GradientRotation(-1.57),
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.57,
+      6.283 * progress,
+      false,
+      arc,
+    );
+
+    // 端点小球
+    final angle = -1.57 + 6.283 * progress;
+    final tip = Offset(
+      center.dx + radius * math.cos(angle),
+      center.dy + radius * math.sin(angle),
+    );
+    canvas.drawCircle(
+      tip,
+      2.2,
+      Paint()..color = Color.lerp(color, Colors.white, 0.4)!,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RingPainter old) =>
+      old.progress != progress ||
+      old.color != color ||
+      old.t != t ||
+      old.indeterminate != indeterminate;
 }
 
 class _PosterFallback extends StatelessWidget {
