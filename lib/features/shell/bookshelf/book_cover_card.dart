@@ -199,7 +199,7 @@ class _BookCoverCardState extends State<BookCoverCard>
                       ),
                     ),
                   ),
-                  // 提取色弥漫：强调底部，中部迅速变薄，向上消散
+                  // 提取色弥漫：底部厚，25% 处仍 0.88，其后递减上涌消散
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -207,14 +207,14 @@ class _BookCoverCardState extends State<BookCoverCard>
                         end: Alignment.topCenter,
                         colors: [
                           colors.dominant.withValues(alpha: 1.0),
+                          colors.dominant.withValues(alpha: 0.88),
                           Color.lerp(colors.dominant, colors.vibrant, 0.4)!
-                              .withValues(alpha: 0.88),
-                          colors.vibrant.withValues(alpha: 0.52),
-                          colors.dominant.withValues(alpha: 0.2),
-                          colors.dominant.withValues(alpha: 0.05),
+                              .withValues(alpha: 0.62),
+                          colors.vibrant.withValues(alpha: 0.34),
+                          colors.dominant.withValues(alpha: 0.12),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.1, 0.24, 0.4, 0.58, 0.72],
+                        stops: const [0, 0.25, 0.42, 0.58, 0.72, 0.88],
                       ),
                     ),
                   ),
