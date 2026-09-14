@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/database/app_database.dart';
+import '../../../core/ffi/book_service.dart' show CoverStore;
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../reader/presentation/providers/reader_provider.dart'
@@ -28,7 +30,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   bool _loading = true;
   bool _shellEnteredOnce = false;
   String? _highlightPath;
-  DateTime? _highlightUntil;
+  Timer? _highlightTimer;
+  List<String> _prevOrder = const [];
+  String? _justMovedPath;
 
   @override
   bool get wantKeepAlive => true;
@@ -40,6 +44,12 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     _refresh(initial: true);
   }
 
+  @override
+  void dispose() {
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _refresh({bool initial = false}) async {
     final books = await _db.allBooksByLastRead();
     final progress = await Future.wait(
@@ -49,10 +59,27 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final entries = <(Book, ReadingProgressData?)>[
       for (var i = 0; i < books.length; i++) (books[i], progress[i]),
     ];
+    final order = [for (final b in books) b.filePath];
+    String? moved;
+    if (!initial &&
+        _prevOrder.isNotEmpty &&
+        order.isNotEmpty &&
+        order.first != _prevOrder.first) {
+      moved = order.first;
+    }
     setState(() {
       _entries = entries;
+      _prevOrder = order;
+      _justMovedPath = moved;
       if (initial) _loading = false;
     });
+    if (initial) {
+      // 首帧后串行预热封面/取色，不阻塞交互
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        CoverStore.preload(order);
+      });
+    }
   }
 
   Future<void> _openBook(Book book) async {
@@ -63,9 +90,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       'bookName': book.title,
     });
     if (!mounted) return;
-    setState(() {
-      _highlightPath = book.filePath;
-      _highlightUntil = DateTime.now().add(const Duration(milliseconds: 900));
+    _highlightTimer?.cancel();
+    setState(() => _highlightPath = book.filePath);
+    _highlightTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightPath = null;
+        _justMovedPath = null;
+      });
     });
     await _refresh();
   }
@@ -281,10 +313,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         itemCount: _entries.length,
         itemBuilder: (context, index) {
           final (book, progress) = _entries[index];
-          final highlighted = _highlightPath == book.filePath &&
-              _highlightUntil != null &&
-              DateTime.now().isBefore(_highlightUntil!);
-          return BookCoverCard(
+          final highlighted = _highlightPath == book.filePath;
+          final moved = _justMovedPath == book.filePath;
+          Widget card = BookCoverCard(
             key: ValueKey(book.filePath),
             book: book,
             progress: progress,
@@ -294,33 +325,31 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             onTap: () => _openBook(book),
             onLongPress: () => _removeBook(book),
           );
+          if (moved) {
+            // 最近阅读插到首位：从下方推入
+            card = TweenAnimationBuilder<double>(
+              key: ValueKey('move-${book.filePath}'),
+              tween: Tween(begin: 1, end: 0),
+              duration: const Duration(milliseconds: 360),
+              curve: Curves.easeOutCubic,
+              builder: (context, t, child) {
+                return Transform.translate(
+                  offset: Offset(0, 28 * t),
+                  child: Opacity(
+                    opacity: 1 - t * 0.35,
+                    child: child,
+                  ),
+                );
+              },
+              child: card,
+            );
+          }
+          return card;
         },
       );
-      // 首帧后关闭 stagger，避免切 Tab/刷新重播
       if (!_shellEnteredOnce) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) setState(() => _shellEnteredOnce = true);
-        });
-      }
-      if (_highlightUntil != null) {
-        final until = _highlightUntil!;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final left = until.difference(DateTime.now());
-          if (left <= Duration.zero) {
-            setState(() {
-              _highlightPath = null;
-              _highlightUntil = null;
-            });
-          } else {
-            Future.delayed(left, () {
-              if (!mounted) return;
-              setState(() {
-                _highlightPath = null;
-                _highlightUntil = null;
-              });
-            });
-          }
         });
       }
     } else {

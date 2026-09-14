@@ -149,9 +149,9 @@ class AppGlass {
   /// 底栏上方氛围晕染高度（扩大「底部氛围」范围）
   static const double bottomAmbientHeight = 160;
 
-  /// 模糊半径
-  static const double blurSigma = 48;
-  static const double topBlurSigma = 56;
+  /// 模糊半径：Android 上过高 sigma 会卡死合成，控制在 20–24
+  static const double blurSigma = 22;
+  static const double topBlurSigma = 24;
 
   /// 顶栏渐变模糊高度（加高，避免中部截断带）
   static const double topGlassHeight = 148;

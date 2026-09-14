@@ -6,6 +6,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 
 import '../models/simple_models.dart';
+import '../services/cover_palette.dart' show CoverPalette;
 import 'rust_bridge.dart/api.dart' as rust_api;
 import 'rust_bridge.dart/frb_generated.dart';
 import 'rust_bridge.dart/lib.dart' as rust_types;
@@ -833,11 +834,50 @@ Future<void> initCoverCacheDir() async {
   }
 }
 
-/// 源路径 → 封面缓存文件（FNV-1a 命名，跨启动稳定；无缓存返回 null）
-File? cachedCoverFor(String sourcePath) {
-  final file = coverCacheFile(sourcePath);
-  return file.existsSync() ? file : null;
+/// 封面文件永久内存索引：启动时扫一次，之后同步读取
+class CoverStore {
+  CoverStore._();
+
+  static final Map<String, File> _files = {};
+  static bool _loaded = false;
+
+  static Future<void> preload(Iterable<String> sourcePaths) async {
+    if (_loaded) {
+      for (final p in sourcePaths) {
+        final f = coverCacheFile(p);
+        if (!_files.containsKey(p) && f.existsSync()) {
+          _files[p] = f;
+        }
+      }
+      return;
+    }
+    _loaded = true;
+    for (final p in sourcePaths) {
+      final f = coverCacheFile(p);
+      if (f.existsSync()) _files[p] = f;
+    }
+    await CoverPalette.warmAll(_files);
+  }
+
+  /// 同步取封面文件（无则 null）
+  static File? fileOf(String sourcePath) {
+    final hit = _files[sourcePath];
+    if (hit != null && hit.existsSync()) return hit;
+    final f = coverCacheFile(sourcePath);
+    if (f.existsSync()) {
+      _files[sourcePath] = f;
+      return f;
+    }
+    return null;
+  }
+
+  static void remember(String sourcePath, File file) {
+    _files[sourcePath] = file;
+  }
 }
+
+/// 源路径 → 封面缓存文件（FNV-1a 命名，跨启动稳定；无缓存返回 null）
+File? cachedCoverFor(String sourcePath) => CoverStore.fileOf(sourcePath);
 
 /// 封面缓存文件路径
 File coverCacheFile(String sourcePath) {
@@ -865,6 +905,7 @@ Future<void> persistBookCover(
     if (file.existsSync()) return;
     await file.parent.create(recursive: true);
     await file.writeAsBytes(bytes);
+    CoverStore.remember(sourcePath, file);
   } catch (_) {
     // 封面持久化失败不影响阅读
   }

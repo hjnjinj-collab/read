@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../../core/database/app_database.dart';
-import '../../../../core/ffi/book_service.dart';
+import '../../../../core/ffi/book_service.dart' show CoverStore;
 import '../../../../core/services/cover_palette.dart';
 import '../../../../core/theme/app_icons.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -50,7 +50,7 @@ class _BookCoverCardState extends State<BookCoverCard>
   @override
   void initState() {
     super.initState();
-    _cover = cachedCoverFor(widget.book.filePath);
+    _cover = CoverStore.fileOf(widget.book.filePath);
     _enterCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 380),
@@ -84,6 +84,12 @@ class _BookCoverCardState extends State<BookCoverCard>
   }
 
   Future<void> _loadPalette() async {
+    final path = widget.book.filePath;
+    final hit = CoverPalette.cached(path);
+    if (hit != null) {
+      if (mounted) setState(() => _colors = hit);
+      return;
+    }
     final cover = _cover;
     if (cover == null || !cover.existsSync()) {
       if (mounted) {
@@ -91,12 +97,13 @@ class _BookCoverCardState extends State<BookCoverCard>
       }
       return;
     }
-    final colors = CoverPalette.cached(cover.path) ??
-        await CoverPalette.extractFromFile(cover);
-    if (!mounted) return;
-    setState(() {
-      _colors = colors ?? CoverPalette.synthetic(widget.book.title);
-    });
+    // 合成色先占位，取色完成后替换（不阻塞首帧）
+    if (mounted) {
+      setState(() => _colors = CoverPalette.synthetic(widget.book.title));
+    }
+    final colors = await CoverPalette.extractForBook(path, cover);
+    if (!mounted || colors == null) return;
+    setState(() => _colors = colors);
   }
 
   double get _progressValue {
@@ -628,7 +635,7 @@ class BookListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final coverPath = cachedCoverFor(book.filePath);
+    final coverPath = CoverStore.fileOf(book.filePath);
     final colors = CoverPalette.synthetic(book.title);
 
     return ListTile(

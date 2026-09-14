@@ -69,9 +69,9 @@ class CoverPalette {
   static bool _dirty = false;
   static Timer? _saveTimer;
 
-  /// 并发闸：同时最多 2 个提取，防止启动风暴
+  /// 并发闸：同时最多 1 个提取（2 会在 UI isolate 上叠加重度解码导致卡死）
   static int _active = 0;
-  static const int _maxActive = 2;
+  static const int _maxActive = 1;
   static final List<Completer<void>> _waiters = [];
 
   static Color clampMood(
@@ -184,29 +184,35 @@ class CoverPalette {
     }
   }
 
-  static Future<CoverColors?> extractFromFile(File file) async {
-    final key = file.path;
-    final hit = _mem[key];
+  static Future<CoverColors?> extractFromFile(File file) =>
+      extractForBook(file.path, file);
+
+  /// [sourcePath] 为书籍路径（缓存键）；[coverFile] 为封面图片文件
+  static Future<CoverColors?> extractForBook(
+    String sourcePath,
+    File coverFile,
+  ) async {
+    final hit = _mem[sourcePath];
     if (hit != null) return hit;
 
     await _ensureDiskLoaded();
-    final diskHit = _mem[key];
+    final diskHit = _mem[sourcePath];
     if (diskHit != null) return diskHit;
 
     await _acquire();
     try {
-      final again = _mem[key];
+      final again = _mem[sourcePath];
       if (again != null) return again;
 
       final generator = await PaletteGenerator.fromImageProvider(
-        FileImage(file),
+        FileImage(coverFile),
         maximumColorCount: 24,
         size: const Size(120, 180),
       );
 
       final colors = _pickFromGenerator(generator);
       if (colors == null) return null;
-      _mem[key] = colors;
+      _mem[sourcePath] = colors;
       _scheduleSave();
       return colors;
     } catch (e) {
@@ -269,5 +275,17 @@ class CoverPalette {
     return background.computeLuminance() > 0.55
         ? const Color(0xFF1C1B18)
         : const Color(0xFFF7F6F1);
+  }
+
+  /// 书架预热：串行取色，每本之间 yield。key = 书籍 sourcePath
+  static Future<void> warmAll(
+    Map<String, File> sourcePathToCover,
+  ) async {
+    await _ensureDiskLoaded();
+    for (final e in sourcePathToCover.entries) {
+      if (_mem.containsKey(e.key)) continue;
+      await extractForBook(e.key, e.value);
+      await Future<void>.delayed(Duration.zero);
+    }
   }
 }
