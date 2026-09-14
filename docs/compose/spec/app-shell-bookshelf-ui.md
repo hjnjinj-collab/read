@@ -155,19 +155,19 @@ GoRouter
 
 ```
 lib/core/theme/app_theme.dart
-lib/core/theme/app_icons.dart          # Lucide 封装/常用映射
+lib/core/theme/app_icons.dart          # Iconsax 映射
 lib/core/router/app_router.dart
 lib/features/shell/app_shell.dart
 lib/features/shell/book_sources_page.dart
 lib/features/shell/settings_page.dart
+lib/features/shell/providers/shell_settings.dart
 lib/features/shell/bookshelf/bookshelf_page.dart
-lib/features/shell/bookshelf/book_cover_card.dart
-lib/features/shell/bookshelf/book_list_tile.dart
+lib/features/shell/bookshelf/book_cover_card.dart  # 含 BookListTile
 ```
 
-依赖新增：`iconsax_flutter`（pub 名以实际可用为准；若仅有 `iconsax` 则用后者）。
+依赖新增：`iconsax_flutter`、`dynamic_color`。
 
-设置 key `shell`：`{ "bookshelfLayout": "grid"|"list", "dynamicColor": false }`。
+设置 key `shell`：`{ "bookshelfGrid": bool, "dynamicColor": bool }`。
 
 ## [S3] Out of Scope
 
@@ -180,11 +180,11 @@ lib/features/shell/bookshelf/book_list_tile.dart
 
 ## Tasks
 
-- [ ] T1: 依赖 iconsax + `app_theme.dart` 全量 scheme 明暗 — acceptance: 无裸 `Colors.blue`；analyze 过 (covers: S2)
-- [ ] T2: `app_router.dart` ShellRoute 三 Tab + 全屏阅读/关于 — acceptance: 路由可切换；阅读页无底栏 (covers: S2; depends: T1)
-- [ ] T3: AppShell 毛玻璃 NavigationBar + extendBody — acceptance: 内容从 Bar 下穿过且可读；回退实底可用 (covers: S2; depends: T2)
-- [ ] T4: 布局偏好落库 + SegmentedButton — acceptance: grid/list 重启保持 (covers: S2)
-- [ ] T5: 书架岛屿网格（响应式 2/3/4 列）+ 列表模式 — acceptance: 封面岛点开阅读；空态可导入 (covers: S2; depends: T2–T4)
-- [ ] T6: Hero 封面过渡 — acceptance: 网格打开有过渡，异常不崩 (covers: S2; depends: T5)
-- [ ] T7: 书源占位 + 设置（版本/关于/动态色/布局）— acceptance: 空态正确；开关落库 (covers: S2; depends: T2–T4)
-- [ ] T8: analyze 0 error + Windows 可启动 — acceptance: `flutter analyze` 0 error (covers: S2; depends: T1–T7)
+- [x] T1: 依赖 iconsax + `app_theme.dart` 全量 scheme 明暗 — acceptance: 无裸 `Colors.blue`；analyze 过 (covers: S2)
+- [x] T2: `app_router.dart` ShellRoute 三 Tab + 全屏阅读/关于 — acceptance: 路由可切换；阅读页无底栏 (covers: S2; depends: T1)
+- [x] T3: AppShell 毛玻璃 NavigationBar + extendBody — acceptance: 内容从 Bar 下穿过且可读；回退实底可用 (covers: S2; depends: T2)
+- [x] T4: 布局偏好落库 + SegmentedButton — acceptance: grid/list 重启保持 (covers: S2)
+- [x] T5: 书架岛屿网格（响应式 2/3/4 列）+ 列表模式 — acceptance: 封面岛点开阅读；空态可导入 (covers: S2; depends: T2–T4)
+- [x] T6: Hero 封面过渡 — acceptance: 网格打开有过渡，异常不崩 (covers: S2; depends: T5)
+- [x] T7: 书源占位 + 设置（版本/关于/动态色/布局）— acceptance: 空态正确；开关落库 (covers: S2; depends: T2–T4)
+- [x] T8: analyze 0 error + Windows 可启动 — acceptance: `flutter analyze` 0 error (covers: S2; depends: T1–T7)
