@@ -195,31 +195,17 @@ class CoverPalette {
 
     await _acquire();
     try {
-      // 二次检查：排队期间可能已有人写入
       final again = _mem[key];
       if (again != null) return again;
 
       final generator = await PaletteGenerator.fromImageProvider(
         FileImage(file),
-        maximumColorCount: 16,
-        size: const Size(80, 120),
+        maximumColorCount: 24,
+        size: const Size(120, 180),
       );
-      final rawDominant = generator.dominantColor?.color ??
-          generator.vibrantColor?.color ??
-          generator.mutedColor?.color;
-      if (rawDominant == null) return null;
-      final rawVibrant = generator.vibrantColor?.color ??
-          generator.lightVibrantColor?.color ??
-          rawDominant;
-      final rawDark = generator.darkMutedColor?.color ??
-          generator.darkVibrantColor?.color ??
-          Color.lerp(rawDominant, Colors.black, 0.45)!;
 
-      final colors = CoverColors(
-        dominant: clampMood(rawDominant),
-        vibrant: clampMood(rawVibrant, minL: 0.3, maxL: 0.72),
-        dark: clampMood(rawDark, minL: 0.1, maxL: 0.36),
-      );
+      final colors = _pickFromGenerator(generator);
+      if (colors == null) return null;
       _mem[key] = colors;
       _scheduleSave();
       return colors;
@@ -229,6 +215,54 @@ class CoverPalette {
     } finally {
       _release();
     }
+  }
+
+  /// 按「面积占比」选主色，避免高饱和点缀色（灯笼红等）抢走翡翠绿
+  static CoverColors? _pickFromGenerator(PaletteGenerator generator) {
+    final swatches = generator.colors.toList()
+      ..sort((a, b) => b.population.compareTo(a.population));
+
+    // 过滤过灰/过黑/过白，再在剩余里取面积最大者作 dominant
+    Color? dominant;
+    for (final s in swatches) {
+      final hsl = HSLColor.fromColor(s.color);
+      if (hsl.saturation < 0.12) continue;
+      if (hsl.lightness < 0.08 || hsl.lightness > 0.92) continue;
+      dominant = s.color;
+      break;
+    }
+    dominant ??= generator.dominantColor?.color;
+    if (dominant == null) return null;
+
+    // vibrant：在较高饱和色中找与 dominant 色相接近者，避免串到异色点缀
+    final dHue = HSLColor.fromColor(dominant).hue;
+    Color? vibrant;
+    double best = 1e9;
+    for (final s in swatches) {
+      final hsl = HSLColor.fromColor(s.color);
+      if (hsl.saturation < 0.2 || hsl.lightness < 0.15 || hsl.lightness > 0.85) {
+        continue;
+      }
+      var dh = (hsl.hue - dHue).abs() % 360;
+      if (dh > 180) dh = 360 - dh;
+      // 色相接近 + 饱和较高 优先
+      final score = dh - hsl.saturation * 40;
+      if (score < best) {
+        best = score;
+        vibrant = s.color;
+      }
+    }
+    vibrant ??= generator.vibrantColor?.color ?? dominant;
+
+    final rawDark = generator.darkMutedColor?.color ??
+        generator.darkVibrantColor?.color ??
+        Color.lerp(dominant, Colors.black, 0.45)!;
+
+    return CoverColors(
+      dominant: clampMood(dominant),
+      vibrant: clampMood(vibrant, minL: 0.3, maxL: 0.72),
+      dark: clampMood(rawDark, minL: 0.1, maxL: 0.36),
+    );
   }
 
   static Color onColor(Color background) {

@@ -199,37 +199,37 @@ class _BookCoverCardState extends State<BookCoverCard>
                       ),
                     ),
                   ),
-                  // 提取色弥漫：自底部涌起 → 中部厚 → 顶部消散
+                  // 提取色弥漫：强调底部，中部迅速变薄，向上消散
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          colors.dominant.withValues(alpha: 0.95),
-                          Color.lerp(colors.dominant, colors.vibrant, 0.45)!
-                              .withValues(alpha: 0.82),
-                          colors.vibrant.withValues(alpha: 0.58),
-                          colors.dominant.withValues(alpha: 0.32),
-                          colors.dominant.withValues(alpha: 0.1),
+                          colors.dominant.withValues(alpha: 1.0),
+                          Color.lerp(colors.dominant, colors.vibrant, 0.4)!
+                              .withValues(alpha: 0.88),
+                          colors.vibrant.withValues(alpha: 0.52),
+                          colors.dominant.withValues(alpha: 0.2),
+                          colors.dominant.withValues(alpha: 0.05),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.16, 0.34, 0.55, 0.75, 0.92],
+                        stops: const [0, 0.1, 0.24, 0.4, 0.58, 0.72],
                       ),
                     ),
                   ),
-                  // 仅轻压保证白字可读，不洗掉弥漫色
+                  // 仅底部轻压保证白字
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          Colors.black.withValues(alpha: 0.22),
-                          Colors.black.withValues(alpha: 0.06),
+                          Colors.black.withValues(alpha: 0.2),
+                          Colors.black.withValues(alpha: 0.04),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.28, 0.52],
+                        stops: const [0, 0.22, 0.42],
                       ),
                     ),
                   ),
