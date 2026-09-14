@@ -691,25 +691,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             }
             return Stack(
               children: [
-                // 桌面/无系统返回时显示返回键（Windows 测试）
-                if (defaultTargetPlatform == TargetPlatform.windows ||
-                    defaultTargetPlatform == TargetPlatform.linux ||
-                    defaultTargetPlatform == TargetPlatform.macOS)
-                  Positioned(
-                    top: 4,
-                    left: 4,
-                    child: SafeArea(
-                      child: Material(
-                        color: Colors.black.withValues(alpha: 0.25),
-                        shape: const CircleBorder(),
-                        child: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.white),
-                          tooltip: '返回书架',
-                          onPressed: () => Navigator.of(context).maybePop(),
-                        ),
-                      ),
-                    ),
-                  ),
                 // Hero 落点：书架岛屿封面飞入后收束（阅读页本身不展示封面）
                 Positioned(
                   top: 0,
@@ -764,44 +745,62 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 ),
               ),
 
-            // Top status bar
+            // Top status bar（桌面常显返回键；移动端仅菜单态露出标题条）
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.3),
-                      Colors.transparent,
+              child: Builder(builder: (context) {
+                final desktop = defaultTargetPlatform == TargetPlatform.windows ||
+                    defaultTargetPlatform == TargetPlatform.linux ||
+                    defaultTargetPlatform == TargetPlatform.macOS;
+                final showBar = _showMenu || desktop;
+                if (!showBar) return const SizedBox.shrink();
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: desktop ? 0.22 : 0.3),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        tooltip: '返回书架',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                      ),
+                      Expanded(
+                        child: Text(
+                          state.bookTitle ?? '',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${state.currentChapterIndex + 1}/${state.chapters.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                     ],
                   ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      state.bookTitle ?? '',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    Text(
-                      '${state.currentChapterIndex + 1}/${state.chapters.length}',
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
+                );
+              }),
             ),
 
             // Bottom menu

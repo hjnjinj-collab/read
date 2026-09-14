@@ -6,7 +6,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 
 import '../models/simple_models.dart';
-import '../services/cover_palette.dart' show CoverPalette;
+import '../services/cover_palette.dart' show CoverColors, CoverPalette;
 import 'rust_bridge.dart/api.dart' as rust_api;
 import 'rust_bridge.dart/frb_generated.dart';
 import 'rust_bridge.dart/lib.dart' as rust_types;
@@ -829,8 +829,36 @@ Future<void> initCoverCacheDir() async {
         }
       }
     }
+    // 迁移旧全局主色缓存 → 每张封面旁的 .pal.json
+    await _migrateLegacyPalette();
   } catch (e) {
     debugPrint('封面目录初始化失败: $e');
+  }
+}
+
+/// cover_palette_cache_v2.json（key=书籍路径）→ sidecar（key=封面文件路径）
+Future<void> _migrateLegacyPalette() async {
+  try {
+    final support = await getApplicationSupportDirectory();
+    final legacy = File('${support.path}/cover_palette_cache_v2.json');
+    if (!legacy.existsSync()) return;
+    final map = jsonDecode(await legacy.readAsString());
+    if (map is! Map<String, dynamic>) return;
+    for (final e in map.entries) {
+      final v = e.value;
+      if (v is! Map<String, dynamic>) continue;
+      final colors = CoverColors.fromJson(v);
+      if (colors == null) continue;
+      final cover = coverCacheFile(e.key);
+      if (!cover.existsSync()) continue;
+      final side = CoverPalette.sidecarOf(cover);
+      if (!side.existsSync()) {
+        side.writeAsStringSync(jsonEncode(colors.toJson()));
+      }
+    }
+    // 保留旧文件作备份，避免回滚丢失
+  } catch (e) {
+    debugPrint('主色旧缓存迁移失败: $e');
   }
 }
 
