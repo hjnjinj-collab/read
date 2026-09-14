@@ -67,9 +67,9 @@ class AppShell extends StatelessWidget {
             sigmaX: AppGlass.blurSigma,
             sigmaY: AppGlass.blurSigma,
           ),
-          // 准则：模糊必须叠主色滤镜（半透明，封面色可渗入）
+          // 准则：模糊必须叠主色滤镜（高透，封面色明显渗入）
           child: ColoredBox(
-            color: AppGlass.tint(scheme, strength: 0.5),
+            color: AppGlass.tint(scheme, strength: 0.38),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(28),

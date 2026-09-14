@@ -12,7 +12,7 @@ import '../../../../core/theme/app_theme.dart';
 /// 书封统一圆角（阴影 / 裁切 / Hero 必须同源）
 const double kCoverRadius = 12;
 
-/// 电影海报书封：夹紧取色阴影 + 海报渐变 + 进度缎带
+/// 电影海报书封：夹紧取色 + 圆环进度 + 格式/剩余章徽标
 class BookCoverCard extends StatefulWidget {
   const BookCoverCard({
     super.key,
@@ -41,6 +41,7 @@ class _BookCoverCardState extends State<BookCoverCard>
 
   late final AnimationController _enterCtrl;
   late final Animation<double> _enter;
+  late final AnimationController _ringCtrl;
 
   @override
   void initState() {
@@ -53,8 +54,14 @@ class _BookCoverCardState extends State<BookCoverCard>
       duration: const Duration(milliseconds: 380),
     );
     _enter = CurvedAnimation(parent: _enterCtrl, curve: AppMotion.enter);
+    _ringCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
     Future.delayed(Duration(milliseconds: delayMs), () {
-      if (mounted) _enterCtrl.forward();
+      if (!mounted) return;
+      _enterCtrl.forward();
+      _ringCtrl.forward();
     });
     _loadPalette();
   }
@@ -62,6 +69,7 @@ class _BookCoverCardState extends State<BookCoverCard>
   @override
   void dispose() {
     _enterCtrl.dispose();
+    _ringCtrl.dispose();
     super.dispose();
   }
 
@@ -87,11 +95,26 @@ class _BookCoverCardState extends State<BookCoverCard>
     return ((p.chapterIndex + 1) / p.totalChapters).clamp(0.0, 1.0);
   }
 
+  int? get _remainingChapters {
+    final p = widget.progress;
+    if (p == null || p.totalChapters <= 0) return null;
+    final left = p.totalChapters - (p.chapterIndex + 1);
+    return left < 0 ? 0 : left;
+  }
+
+  String get _fileType {
+    final path = widget.book.filePath;
+    final i = path.lastIndexOf('.');
+    if (i < 0 || i == path.length - 1) return 'BOOK';
+    return path.substring(i + 1).toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = _colors ?? CoverPalette.synthetic(widget.book.title);
     final cover = _cover;
     final progress = _progressValue;
+    final remaining = _remainingChapters;
     final hasProgress =
         widget.progress != null && (widget.progress?.totalChapters ?? 0) > 0;
     final radius = BorderRadius.circular(kCoverRadius);
@@ -118,7 +141,6 @@ class _BookCoverCardState extends State<BookCoverCard>
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: Material(
-            // shape 统一驱动裁切与阴影圆角，避免 Ink 方角投影
             shape: RoundedRectangleBorder(borderRadius: radius),
             clipBehavior: Clip.antiAlias,
             elevation: _pressed ? 2 : 6,
@@ -147,8 +169,7 @@ class _BookCoverCardState extends State<BookCoverCard>
                             );
                             return Material(
                               color: Colors.transparent,
-                              shape:
-                                  RoundedRectangleBorder(borderRadius: r),
+                              shape: RoundedRectangleBorder(borderRadius: r),
                               clipBehavior: Clip.antiAlias,
                               child: child,
                             );
@@ -164,72 +185,88 @@ class _BookCoverCardState extends State<BookCoverCard>
                       child: imageChild,
                     ),
 
-                  // 海报层：顶光 + 底部主色 scrim
+                  // 海报氛围：顶光 + 中部轻暗角 + 底部主色 scrim
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          colors.posterHighlight.withValues(alpha: 0.14),
+                          colors.posterHighlight.withValues(alpha: 0.18),
                           Colors.transparent,
-                          colors.posterScrim.withValues(alpha: 0.5),
-                          colors.posterScrim.withValues(alpha: 0.94),
+                          colors.posterScrim.withValues(alpha: 0.28),
+                          colors.posterScrim.withValues(alpha: 0.72),
+                          colors.posterScrim.withValues(alpha: 0.96),
                         ],
-                        stops: const [0, 0.32, 0.7, 1],
+                        stops: const [0, 0.28, 0.55, 0.78, 1],
+                      ),
+                    ),
+                  ),
+                  // 侧向氛围：左侧轻染主色
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          colors.vibrant.withValues(alpha: 0.18),
+                          Colors.transparent,
+                        ],
                       ),
                     ),
                   ),
 
-                  if (hasProgress)
+                  // 文件类型徽标
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: _TypeBadge(label: _fileType, color: colors.accent),
+                  ),
+
+                  // 剩余章节徽标
+                  if (remaining != null && hasProgress)
                     Positioned(
-                      top: 0,
-                      right: 14,
-                      child: _ProgressRibbon(
-                        progress: progress,
+                      top: 8,
+                      right: 8,
+                      child: _RemainBadge(
+                        remaining: remaining,
                         color: colors.accent,
                       ),
                     ),
+
+                  // 圆环进度（右下角叠在封面上）
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: _RingProgress(
+                      progress: hasProgress ? progress : 0,
+                      hasProgress: hasProgress,
+                      color: colors.accent,
+                      listenable: _ringCtrl,
+                    ),
+                  ),
 
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 20, 10, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.book.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              height: 1.25,
-                              letterSpacing: 0.1,
-                              shadows: [
-                                Shadow(color: Colors.black87, blurRadius: 6),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            hasProgress
-                                ? '${(progress * 100).round()}%'
-                                : '未读',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.86),
-                              fontSize: 11,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
-                          ),
-                        ],
+                      // 给右下角圆环留出空间
+                      padding: const EdgeInsets.fromLTRB(10, 20, 56, 10),
+                      child: Text(
+                        widget.book.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                          letterSpacing: 0.1,
+                          shadows: [
+                            Shadow(color: Colors.black87, blurRadius: 6),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -243,56 +280,137 @@ class _BookCoverCardState extends State<BookCoverCard>
   }
 }
 
-class _ProgressRibbon extends StatelessWidget {
-  const _ProgressRibbon({required this.progress, required this.color});
+/// 文件类型徽标（TXT / EPUB）
+class _TypeBadge extends StatelessWidget {
+  const _TypeBadge({required this.label, required this.color});
 
-  final double progress;
+  final String label;
   final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final h = 18.0 + progress * 42.0;
-    return CustomPaint(
-      size: Size(18, h),
-      painter: _RibbonPainter(color: color),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: color.withValues(alpha: 0.65),
+          width: 0.8,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.95),
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+        ),
+      ),
     );
   }
 }
 
-class _RibbonPainter extends CustomPainter {
-  _RibbonPainter({required this.color});
+/// 剩余章节徽标
+class _RemainBadge extends StatelessWidget {
+  const _RemainBadge({required this.remaining, required this.color});
 
+  final int remaining;
   final Color color;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(w, 0)
-      ..lineTo(w, h - 8)
-      ..lineTo(w / 2, h)
-      ..lineTo(0, h - 8)
-      ..close();
-    canvas.drawShadow(path, Colors.black, 3, false);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color.lerp(color, Colors.white, 0.12)!,
-            color,
-            Color.lerp(color, Colors.black, 0.22)!,
-          ],
-        ).createShader(Offset.zero & size),
+  Widget build(BuildContext context) {
+    final label = remaining == 0 ? '已读完' : '剩 $remaining 章';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
+}
+
+/// 叠在封面上的圆环进度
+class _RingProgress extends StatelessWidget {
+  const _RingProgress({
+    required this.progress,
+    required this.hasProgress,
+    required this.color,
+    required this.listenable,
+  });
+
+  final double progress;
+  final bool hasProgress;
+  final Color color;
+  final Animation<double> listenable;
 
   @override
-  bool shouldRepaint(covariant _RibbonPainter old) => old.color != color;
+  Widget build(BuildContext context) {
+    const size = 44.0;
+    return AnimatedBuilder(
+      animation: listenable,
+      builder: (context, _) {
+        final t = listenable.value;
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.38),
+                ),
+              ),
+              SizedBox(
+                width: size,
+                height: size,
+                child: CircularProgressIndicator(
+                  value: hasProgress ? (progress * t).clamp(0.0, 1.0) : null,
+                  strokeWidth: 3,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: Colors.white.withValues(alpha: 0.22),
+                  valueColor: AlwaysStoppedAnimation(
+                    hasProgress ? color : Colors.white54,
+                  ),
+                ),
+              ),
+              if (hasProgress)
+                Text(
+                  '${(progress * 100 * t).round()}%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                )
+              else
+                Text(
+                  '新',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _PosterFallback extends StatelessWidget {
@@ -342,6 +460,13 @@ class BookListTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onRemove;
 
+  String get _fileType {
+    final path = book.filePath;
+    final i = path.lastIndexOf('.');
+    if (i < 0 || i == path.length - 1) return 'BOOK';
+    return path.substring(i + 1).toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -387,10 +512,21 @@ class BookListTile extends StatelessWidget {
               color: scheme.onSurfaceVariant,
             ),
       ),
-      trailing: IconButton(
-        icon: const Icon(AppIcons.remove, size: 18),
-        tooltip: '移出书架',
-        onPressed: onRemove,
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _TypeBadge(label: _fileType, color: colors.accent),
+          const SizedBox(height: 4),
+          IconButton(
+            icon: const Icon(AppIcons.remove, size: 18),
+            tooltip: '移出书架',
+            onPressed: onRemove,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+        ],
       ),
       onTap: onTap,
     );
