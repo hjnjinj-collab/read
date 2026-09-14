@@ -19,7 +19,8 @@ $ErrorActionPreference = 'Continue'
 
 # 1. 设置环境变量
 $env:JAVA_HOME = "D:\android\vis tudio\3\Android\openjdk\jdk-21.0.8"
-$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+# rquickjs-sys 需要 patch（Git usr/bin 提供）
+$env:Path = "C:\Program Files\Git\usr\bin;$env:JAVA_HOME\bin;$env:Path"
 $env:ANDROID_NDK_HOME = "D:\android\ansdk\ndk\27.0.12077973"
 $env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
 $env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
