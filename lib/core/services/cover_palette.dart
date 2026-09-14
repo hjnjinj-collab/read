@@ -128,7 +128,7 @@ class CoverPalette {
     _diskLoaded = true;
     try {
       final dir = await getApplicationSupportDirectory();
-      _diskFile = File('${dir.path}/cover_palette_cache.json');
+      _diskFile = File('${dir.path}/cover_palette_cache_v2.json');
       if (await _diskFile!.exists()) {
         final raw = await _diskFile!.readAsString();
         final map = jsonDecode(raw);
