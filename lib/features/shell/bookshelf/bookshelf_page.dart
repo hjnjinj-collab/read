@@ -21,37 +21,53 @@ class BookshelfPage extends ConsumerStatefulWidget {
   ConsumerState<BookshelfPage> createState() => _BookshelfPageState();
 }
 
-class _BookshelfPageState extends ConsumerState<BookshelfPage> {
+class _BookshelfPageState extends ConsumerState<BookshelfPage>
+    with AutomaticKeepAliveClientMixin {
   late final AppDatabase _db;
   List<(Book, ReadingProgressData?)> _entries = [];
   bool _loading = true;
+  bool _shellEnteredOnce = false;
+  String? _highlightPath;
+  DateTime? _highlightUntil;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     _db = ref.read(appDatabaseProvider);
-    _refresh();
+    _refresh(initial: true);
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool initial = false}) async {
     final books = await _db.allBooksByLastRead();
-    final entries = <(Book, ReadingProgressData?)>[];
-    for (final b in books) {
-      entries.add((b, await _db.progressOf(b.filePath)));
-    }
+    final progress = await Future.wait(
+      books.map((b) => _db.progressOf(b.filePath)),
+    );
     if (!mounted) return;
+    final entries = <(Book, ReadingProgressData?)>[
+      for (var i = 0; i < books.length; i++) (books[i], progress[i]),
+    ];
     setState(() {
       _entries = entries;
-      _loading = false;
+      if (initial) _loading = false;
     });
   }
 
   Future<void> _openBook(Book book) async {
+    await _db.touchLastRead(book.filePath);
+    if (!mounted) return;
     await context.push('/reader', extra: {
       'filePath': book.filePath,
       'bookName': book.title,
     });
-    if (mounted) _refresh();
+    if (!mounted) return;
+    setState(() {
+      _highlightPath = book.filePath;
+      _highlightUntil = DateTime.now().add(const Duration(milliseconds: 900));
+    });
+    await _refresh();
   }
 
   Future<void> _removeBook(Book book) async {
@@ -236,6 +252,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final shell = ref.watch(shellSettingsProvider);
     final shellNotifier = ref.read(shellSettingsProvider.notifier);
     final width = MediaQuery.sizeOf(context).width;
@@ -264,15 +281,48 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         itemCount: _entries.length,
         itemBuilder: (context, index) {
           final (book, progress) = _entries[index];
+          final highlighted = _highlightPath == book.filePath &&
+              _highlightUntil != null &&
+              DateTime.now().isBefore(_highlightUntil!);
           return BookCoverCard(
+            key: ValueKey(book.filePath),
             book: book,
             progress: progress,
             staggerIndex: index,
+            animateEnter: !_shellEnteredOnce,
+            highlighted: highlighted,
             onTap: () => _openBook(book),
             onLongPress: () => _removeBook(book),
           );
         },
       );
+      // 首帧后关闭 stagger，避免切 Tab/刷新重播
+      if (!_shellEnteredOnce) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _shellEnteredOnce = true);
+        });
+      }
+      if (_highlightUntil != null) {
+        final until = _highlightUntil!;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final left = until.difference(DateTime.now());
+          if (left <= Duration.zero) {
+            setState(() {
+              _highlightPath = null;
+              _highlightUntil = null;
+            });
+          } else {
+            Future.delayed(left, () {
+              if (!mounted) return;
+              setState(() {
+                _highlightPath = null;
+                _highlightUntil = null;
+              });
+            });
+          }
+        });
+      }
     } else {
       content = ListView.separated(
         key: const ValueKey('list'),
@@ -282,6 +332,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         itemBuilder: (context, index) {
           final (book, progress) = _entries[index];
           return BookListTile(
+            key: ValueKey(book.filePath),
             book: book,
             subtitle: _subtitle(book, progress),
             onTap: () => _openBook(book),

@@ -1,8 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data' show Uint8List;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     as frb;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/simple_models.dart';
 import 'rust_bridge.dart/api.dart' as rust_api;
@@ -802,13 +803,43 @@ class BookService {
   }
 }
 
+/// 封面缓存目录（app support，跨启动/跨清理稳定）
+String? _coverDir;
+
+/// 启动时初始化封面目录，并迁移 systemTemp 旧缓存
+Future<void> initCoverCacheDir() async {
+  try {
+    final support = await getApplicationSupportDirectory();
+    _coverDir = '${support.path}/legado_covers';
+    final target = Directory(_coverDir!);
+    if (!target.existsSync()) {
+      await target.create(recursive: true);
+    }
+    // 迁移旧 systemTemp 缓存（一次性；失败忽略）
+    final legacy = Directory('${Directory.systemTemp.path}/legado_covers');
+    if (legacy.existsSync()) {
+      await for (final f in legacy.list()) {
+        if (f is! File) continue;
+        final dest = File('${_coverDir!}/${f.uri.pathSegments.last}');
+        if (!dest.existsSync()) {
+          try {
+            await f.copy(dest.path);
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('封面目录初始化失败: $e');
+  }
+}
+
 /// 源路径 → 封面缓存文件（FNV-1a 命名，跨启动稳定；无缓存返回 null）
 File? cachedCoverFor(String sourcePath) {
   final file = coverCacheFile(sourcePath);
   return file.existsSync() ? file : null;
 }
 
-/// 封面缓存文件路径（{temp}/legado_covers/{fnv1a}.img）
+/// 封面缓存文件路径
 File coverCacheFile(String sourcePath) {
   var hash = 0x811c9dc5;
   for (final unit in sourcePath.codeUnits) {
@@ -817,9 +848,8 @@ File coverCacheFile(String sourcePath) {
     hash ^= (unit >> 8) & 0xff;
     hash = (hash * 0x01000193) & 0xffffffff;
   }
-  return File(
-    '${Directory.systemTemp.path}/legado_covers/${hash.toRadixString(16)}.img',
-  );
+  final base = _coverDir ?? '${Directory.systemTemp.path}/legado_covers';
+  return File('$base/${hash.toRadixString(16)}.img');
 }
 
 /// 打开 EPUB 书时提取封面并落盘（书架跨启动显示；失败静默）

@@ -32,6 +32,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await BookService.init();
   await ReaderFont.initialize();
+  await initCoverCacheDir();
 
   final db = AppDatabase();
   await AppSettingsService.instance.load(db);

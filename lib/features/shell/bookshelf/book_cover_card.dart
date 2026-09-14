@@ -21,6 +21,8 @@ class BookCoverCard extends StatefulWidget {
     required this.onTap,
     required this.onLongPress,
     this.staggerIndex = 0,
+    this.animateEnter = true,
+    this.highlighted = false,
   });
 
   final Book book;
@@ -28,6 +30,8 @@ class BookCoverCard extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final int staggerIndex;
+  final bool animateEnter;
+  final bool highlighted;
 
   @override
   State<BookCoverCard> createState() => _BookCoverCardState();
@@ -47,8 +51,6 @@ class _BookCoverCardState extends State<BookCoverCard>
   void initState() {
     super.initState();
     _cover = cachedCoverFor(widget.book.filePath);
-    final delayMs = math.min(widget.staggerIndex, AppMotion.staggerMaxItems) *
-        AppMotion.staggerStep.inMilliseconds;
     _enterCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 380),
@@ -58,11 +60,19 @@ class _BookCoverCardState extends State<BookCoverCard>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    Future.delayed(Duration(milliseconds: delayMs), () {
-      if (!mounted) return;
-      _enterCtrl.forward();
-      _ringCtrl.forward();
-    });
+    if (widget.animateEnter) {
+      final delayMs =
+          math.min(widget.staggerIndex, AppMotion.staggerMaxItems) *
+              AppMotion.staggerStep.inMilliseconds;
+      Future.delayed(Duration(milliseconds: delayMs), () {
+        if (!mounted) return;
+        _enterCtrl.forward();
+        _ringCtrl.forward();
+      });
+    } else {
+      _enterCtrl.value = 1;
+      _ringCtrl.value = 1;
+    }
     _loadPalette();
   }
 
@@ -119,6 +129,8 @@ class _BookCoverCardState extends State<BookCoverCard>
         widget.progress != null && (widget.progress?.totalChapters ?? 0) > 0;
     final radius = BorderRadius.circular(kCoverRadius);
     final scale = _pressed ? 0.96 : 1.0;
+    // 限制解码尺寸，书架缩略图无需全分辨率
+    const decodeW = 360;
 
     final imageChild = cover != null
         ? Image.file(
@@ -126,6 +138,8 @@ class _BookCoverCardState extends State<BookCoverCard>
             fit: BoxFit.cover,
             width: double.infinity,
             height: double.infinity,
+            cacheWidth: decodeW,
+            gaplessPlayback: true,
             errorBuilder: (_, _, _) =>
                 _PosterFallback(title: widget.book.title, colors: colors),
           )
@@ -140,8 +154,19 @@ class _BookCoverCardState extends State<BookCoverCard>
           scale: scale,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
-          child: Material(
-            shape: RoundedRectangleBorder(borderRadius: radius),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 280),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(kCoverRadius),
+              border: widget.highlighted
+                  ? Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    )
+                  : null,
+            ),
+            child: Material(
+              shape: RoundedRectangleBorder(borderRadius: radius),
             clipBehavior: Clip.antiAlias,
             elevation: _pressed ? 2 : 6,
             shadowColor: colors.shadowColor.withValues(alpha: 0.55),
@@ -292,6 +317,7 @@ class _BookCoverCardState extends State<BookCoverCard>
               ),
             ),
           ),
+        ),
         ),
       ),
     );

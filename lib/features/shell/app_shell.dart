@@ -6,26 +6,16 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
 
-/// 三 Tab 应用壳。
+/// 三 Tab 应用壳（StatefulShell 状态保活）。
 /// 底栏：主色滤镜玻璃（alpha 0.5）+ 上方氛围晕染；extendBody 让封面穿过。
 class AppShell extends StatelessWidget {
-  const AppShell({super.key, required this.child});
+  const AppShell({super.key, required this.navigationShell});
 
-  final Widget child;
-
-  static const _tabs = ['/bookshelf', '/sources', '/settings'];
-
-  int _indexForLocation(String location) {
-    for (var i = 0; i < _tabs.length; i++) {
-      if (location.startsWith(_tabs[i])) return i;
-    }
-    return 0;
-  }
+  final StatefulNavigationShell navigationShell;
 
   @override
   Widget build(BuildContext context) {
-    final location = GoRouterState.of(context).uri.toString();
-    final index = _indexForLocation(location);
+    final index = navigationShell.currentIndex;
     final scheme = Theme.of(context).colorScheme;
     final disableBlur = MediaQuery.disableAnimationsOf(context);
     final bottomSafe = MediaQuery.paddingOf(context).bottom;
@@ -47,7 +37,10 @@ class AppShell extends StatelessWidget {
 
     final bar = NavigationBar(
       selectedIndex: index,
-      onDestinationSelected: (i) => context.go(_tabs[i]),
+      onDestinationSelected: (i) => navigationShell.goBranch(
+        i,
+        initialLocation: i == navigationShell.currentIndex,
+      ),
       backgroundColor: Colors.transparent,
       destinations: destinations,
     );
@@ -97,7 +90,7 @@ class AppShell extends StatelessWidget {
       extendBody: true,
       body: Stack(
         children: [
-          child,
+          navigationShell,
           // 底部氛围：主色自下而上淡出，范围更大
           Positioned(
             left: 0,
