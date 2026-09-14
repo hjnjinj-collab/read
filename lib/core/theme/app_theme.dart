@@ -49,7 +49,7 @@ class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 64,
+        height: 68,
         backgroundColor: Colors.transparent,
         indicatorColor: scheme.primaryContainer,
         elevation: 0,

@@ -103,10 +103,7 @@ class AppShell extends StatelessWidget {
       bottomNavigationBar: Padding(
         // 悬浮：左右留白，封面从侧边与底部露出
         padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + bottomSafe * 0.3),
-        child: SizedBox(
-          height: 64,
-          child: bar,
-        ),
+        child: bar,
       ),
     );
   }

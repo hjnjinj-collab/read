@@ -34,7 +34,7 @@ class BookCoverCard extends StatefulWidget {
 }
 
 class _BookCoverCardState extends State<BookCoverCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   CoverColors? _colors;
   File? _cover;
   bool _pressed = false;
@@ -505,28 +505,17 @@ class BookListTile extends StatelessWidget {
         style: Theme.of(context).textTheme.titleSmall,
       ),
       subtitle: Text(
-        subtitle,
+        '$_fileType · $subtitle',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _TypeBadge(label: _fileType, color: colors.accent),
-          const SizedBox(height: 4),
-          IconButton(
-            icon: const Icon(AppIcons.remove, size: 18),
-            tooltip: '移出书架',
-            onPressed: onRemove,
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          ),
-        ],
+      trailing: IconButton(
+        icon: const Icon(AppIcons.remove, size: 18),
+        tooltip: '移出书架',
+        onPressed: onRemove,
       ),
       onTap: onTap,
     );
