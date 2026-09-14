@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -130,55 +132,87 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
   Widget _buildHeader(BuildContext context, ShellSettings shell,
       ShellSettingsNotifier notifier, ColorScheme scheme) {
-    return Material(
-      color: scheme.surface,
-      elevation: 0,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+    final disableBlur = MediaQuery.disableAnimationsOf(context);
+    final topPad = MediaQuery.paddingOf(context).top;
+
+    final row = SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '书架',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.4,
+                        ),
+                  ),
+                  if (!_loading && _entries.isNotEmpty)
                     Text(
-                      '书架',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
+                      '${_entries.length} 本',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
                     ),
-                    if (!_loading && _entries.isNotEmpty)
-                      Text(
-                        '${_entries.length} 本',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                      ),
-                  ],
-                ),
-              ),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(
-                    value: true,
-                    icon: Icon(AppIcons.grid, size: 18),
-                    tooltip: '网格',
-                  ),
-                  ButtonSegment(
-                    value: false,
-                    icon: Icon(AppIcons.list, size: 18),
-                    tooltip: '列表',
-                  ),
                 ],
-                selected: {shell.bookshelfGrid},
-                showSelectedIcon: false,
-                onSelectionChanged: (s) => notifier.setBookshelfGrid(s.first),
               ),
-            ],
+            ),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(AppIcons.grid, size: 18),
+                  tooltip: '网格',
+                ),
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(AppIcons.list, size: 18),
+                  tooltip: '列表',
+                ),
+              ],
+              selected: {shell.bookshelfGrid},
+              showSelectedIcon: false,
+              onSelectionChanged: (s) => notifier.setBookshelfGrid(s.first),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (disableBlur) {
+      return Material(color: scheme.surface, child: row);
+    }
+
+    // 顶栏渐变模糊：上实下虚，滚入封面时有「雾化」过渡
+    final h = AppGlass.topGlassHeight + topPad;
+    return SizedBox(
+      height: h,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: AppGlass.blurSigma * 0.7,
+            sigmaY: AppGlass.blurSigma * 0.7,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  AppGlass.topTint(scheme),
+                  AppGlass.topTint(scheme).withValues(alpha: 0.55),
+                  AppGlass.topTint(scheme).withValues(alpha: 0),
+                ],
+                stops: const [0, 0.62, 1],
+              ),
+            ),
+            child: row,
           ),
         ),
       ),
@@ -193,6 +227,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     // 悬浮底栏高度约 64 + 边距；内容可滚入其下，末尾略留空避免贴死
     final bottomPad = MediaQuery.paddingOf(context).bottom + 96;
     final scheme = Theme.of(context).colorScheme;
+    final topPad = MediaQuery.paddingOf(context).top;
+    final topGlass = MediaQuery.disableAnimationsOf(context)
+        ? topPad + 64
+        : AppGlass.topGlassHeight + topPad;
 
     late final Widget content;
     if (_loading) {
@@ -202,7 +240,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     } else if (shell.bookshelfGrid) {
       content = GridView.builder(
         key: const ValueKey('grid'),
-        padding: EdgeInsets.fromLTRB(12, 4, 12, bottomPad),
+        padding: EdgeInsets.fromLTRB(12, topGlass + 4, 12, bottomPad),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: _columnsForWidth(width),
           mainAxisSpacing: 12,
@@ -224,7 +262,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     } else {
       content = ListView.separated(
         key: const ValueKey('list'),
-        padding: EdgeInsets.only(bottom: bottomPad),
+        padding: EdgeInsets.fromLTRB(0, topGlass + 4, 0, bottomPad),
         itemCount: _entries.length,
         separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
         itemBuilder: (context, index) {
@@ -246,10 +284,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         padding: const EdgeInsets.only(bottom: 88),
         child: _SpringImportFab(onPressed: _pickAndOpenBook),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _buildHeader(context, shell, shellNotifier, scheme),
-          Expanded(
+          Positioned.fill(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 240),
               switchInCurve: Curves.easeOutCubic,
@@ -269,6 +306,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               child: content,
             ),
           ),
+          // 顶栏渐变毛玻璃叠在内容上，滚动时封面从下穿入
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildHeader(context, shell, shellNotifier, scheme),
+          ),
         ],
       ),
     );
@@ -285,7 +329,7 @@ class _EmptyShelf extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 100),
+        padding: const EdgeInsets.fromLTRB(32, 120, 32, 100),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

@@ -185,33 +185,35 @@ class _BookCoverCardState extends State<BookCoverCard>
                       child: imageChild,
                     ),
 
-                  // 海报氛围：顶光 + 中部轻暗角 + 底部主色 scrim
+                  // 海报氛围：提亮顶光、减淡暗角，主色侧染更明显
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          colors.posterHighlight.withValues(alpha: 0.18),
+                          colors.posterHighlight.withValues(alpha: 0.28),
                           Colors.transparent,
-                          colors.posterScrim.withValues(alpha: 0.28),
-                          colors.posterScrim.withValues(alpha: 0.72),
-                          colors.posterScrim.withValues(alpha: 0.96),
+                          colors.posterScrim.withValues(alpha: 0.18),
+                          colors.posterScrim.withValues(alpha: 0.55),
+                          colors.posterScrim.withValues(alpha: 0.88),
                         ],
-                        stops: const [0, 0.28, 0.55, 0.78, 1],
+                        stops: const [0, 0.3, 0.52, 0.78, 1],
                       ),
                     ),
                   ),
-                  // 侧向氛围：左侧轻染主色
+                  // 侧向氛围：左缘主色更亮
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.centerLeft,
                         end: Alignment.centerRight,
                         colors: [
-                          colors.vibrant.withValues(alpha: 0.18),
+                          colors.vibrant.withValues(alpha: 0.32),
+                          colors.vibrant.withValues(alpha: 0.08),
                           Colors.transparent,
                         ],
+                        stops: const [0, 0.35, 1],
                       ),
                     ),
                   ),

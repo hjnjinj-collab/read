@@ -124,22 +124,33 @@ class AppTheme {
   }
 }
 
-/// 毛玻璃准则：模糊层必须叠主色滤镜。
+/// 毛玻璃准则：模糊层必须叠主色滤镜，但滤镜要「净」不要「脏」。
 class AppGlass {
   AppGlass._();
 
-  /// 底栏/浮层主色滤镜（高透，封面色明显渗入模糊层）
+  /// 底栏滤镜：近白/近 surface 打底，只轻染一点 primary，避免橄榄脏色
   static Color tint(ColorScheme scheme, {double strength = 0.55}) {
-    return Color.lerp(
-      scheme.surface,
-      scheme.primaryContainer,
-      strength,
-    )!
-        .withValues(alpha: scheme.brightness == Brightness.light ? 0.42 : 0.38);
+    final base = scheme.brightness == Brightness.light
+        ? const Color(0xFFF7F8F5)
+        : const Color(0xFF1C1F1C);
+    return Color.lerp(base, scheme.primary, strength * 0.18)!
+        .withValues(alpha: scheme.brightness == Brightness.light ? 0.55 : 0.5);
+  }
+
+  /// 顶栏滤镜：更白、更透，配合渐变模糊
+  static Color topTint(ColorScheme scheme) {
+    final base = scheme.brightness == Brightness.light
+        ? const Color(0xFFFAFBF8)
+        : const Color(0xFF141714);
+    return Color.lerp(base, scheme.primary, 0.08)!
+        .withValues(alpha: scheme.brightness == Brightness.light ? 0.58 : 0.52);
   }
 
   /// 模糊半径（统一，避免各处随意）
   static const double blurSigma = 40;
+
+  /// 顶栏渐变模糊高度
+  static const double topGlassHeight = 108;
 }
 
 /// 弹簧物理：统一曲线源（Flutter 系统弹簧族）
