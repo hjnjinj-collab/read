@@ -1,7 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// 封面取色结果（电影海报用色，全部做过亮/暗夹紧）
 @immutable
@@ -16,24 +19,38 @@ class CoverColors {
   final Color vibrant;
   final Color dark;
 
-  /// 阴影：中等明度、中等饱和，避免刺眼或脏黑
+  Map<String, dynamic> toJson() => {
+        'd': dominant.toARGB32(),
+        'v': vibrant.toARGB32(),
+        'k': dark.toARGB32(),
+      };
+
+  static CoverColors? fromJson(Map<String, dynamic> json) {
+    try {
+      return CoverColors(
+        dominant: Color(json['d'] as int),
+        vibrant: Color(json['v'] as int),
+        dark: Color(json['k'] as int),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Color get shadowColor => CoverPalette.clampMood(dominant);
 
-  /// 海报底部 scrim：再抬亮，避免整卡发闷
   Color get posterScrim => CoverPalette.clampMood(
         Color.lerp(dark, dominant, 0.55)!,
         minL: 0.22,
         maxL: 0.55,
       );
 
-  /// 顶部微光：更亮
   Color get posterHighlight => CoverPalette.clampMood(
         Color.lerp(vibrant, Colors.white, 0.42)!,
         minL: 0.68,
         maxL: 0.88,
       );
 
-  /// 缎带/强调（需足够对比，不可过暗）
   Color get accent => CoverPalette.clampMood(
         vibrant,
         minL: 0.42,
@@ -42,13 +59,21 @@ class CoverColors {
       );
 }
 
-/// 封面取色 + 色彩夹紧
+/// 封面取色：内存 + 磁盘 JSON 缓存，避免每次启动全量重提
 class CoverPalette {
   CoverPalette._();
 
-  static final Map<String, CoverColors> _cache = {};
+  static final Map<String, CoverColors> _mem = {};
+  static File? _diskFile;
+  static bool _diskLoaded = false;
+  static bool _dirty = false;
+  static Timer? _saveTimer;
 
-  /// 夹紧 HSL：避免过亮/过暗/过艳，保证阴影与 scrim 有氛围又不脏
+  /// 并发闸：同时最多 2 个提取，防止启动风暴
+  static int _active = 0;
+  static const int _maxActive = 2;
+  static final List<Completer<void>> _waiters = [];
+
   static Color clampMood(
     Color source, {
     double minL = 0.22,
@@ -96,17 +121,88 @@ class CoverPalette {
     );
   }
 
-  static CoverColors? cached(String path) => _cache[path];
+  static CoverColors? cached(String path) => _mem[path];
+
+  static Future<void> _ensureDiskLoaded() async {
+    if (_diskLoaded) return;
+    _diskLoaded = true;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      _diskFile = File('${dir.path}/cover_palette_cache.json');
+      if (await _diskFile!.exists()) {
+        final raw = await _diskFile!.readAsString();
+        final map = jsonDecode(raw);
+        if (map is Map<String, dynamic>) {
+          for (final e in map.entries) {
+            final v = e.value;
+            if (v is Map<String, dynamic>) {
+              final c = CoverColors.fromJson(v);
+              if (c != null) _mem[e.key] = c;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('取色磁盘缓存读取失败: $e');
+    }
+  }
+
+  static void _scheduleSave() {
+    _dirty = true;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 800), _flushDisk);
+  }
+
+  static Future<void> _flushDisk() async {
+    if (!_dirty || _diskFile == null) return;
+    _dirty = false;
+    try {
+      final map = <String, dynamic>{
+        for (final e in _mem.entries) e.key: e.value.toJson(),
+      };
+      await _diskFile!.writeAsString(jsonEncode(map), flush: true);
+    } catch (e) {
+      debugPrint('取色磁盘缓存写入失败: $e');
+    }
+  }
+
+  static Future<void> _acquire() async {
+    if (_active < _maxActive) {
+      _active++;
+      return;
+    }
+    final c = Completer<void>();
+    _waiters.add(c);
+    await c.future;
+  }
+
+  static void _release() {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeAt(0).complete();
+    } else {
+      _active = (_active - 1).clamp(0, _maxActive);
+    }
+  }
 
   static Future<CoverColors?> extractFromFile(File file) async {
     final key = file.path;
-    final hit = _cache[key];
+    final hit = _mem[key];
     if (hit != null) return hit;
+
+    await _ensureDiskLoaded();
+    final diskHit = _mem[key];
+    if (diskHit != null) return diskHit;
+
+    await _acquire();
     try {
+      // 二次检查：排队期间可能已有人写入
+      final again = _mem[key];
+      if (again != null) return again;
+
       final generator = await PaletteGenerator.fromImageProvider(
         FileImage(file),
         maximumColorCount: 16,
-        size: const Size(100, 150),
+        size: const Size(80, 120),
       );
       final rawDominant = generator.dominantColor?.color ??
           generator.vibrantColor?.color ??
@@ -124,11 +220,14 @@ class CoverPalette {
         vibrant: clampMood(rawVibrant, minL: 0.3, maxL: 0.72),
         dark: clampMood(rawDark, minL: 0.1, maxL: 0.36),
       );
-      _cache[key] = colors;
+      _mem[key] = colors;
+      _scheduleSave();
       return colors;
     } catch (e) {
       debugPrint('封面取色失败: $e');
       return null;
+    } finally {
+      _release();
     }
   }
 

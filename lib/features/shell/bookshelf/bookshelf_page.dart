@@ -189,91 +189,46 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return Material(color: scheme.surface, child: row);
     }
 
-    // 悬浮轻雾毛玻璃条（参考系统设置）：圆角面板 + 重模糊 + 近白
-    final tint = scheme.brightness == Brightness.light
-        ? const Color(0xFFF7F8F6).withValues(alpha: 0.7)
-        : const Color(0xFF1A1D1A).withValues(alpha: 0.68);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(12, topPad + 6, 12, 0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(
-            sigmaX: AppGlass.topBlurSigma,
-            sigmaY: AppGlass.topBlurSigma,
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: tint,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: Colors.white.withValues(
-                  alpha: scheme.brightness == Brightness.light ? 0.55 : 0.12,
-                ),
-                width: 0.9,
+    // 全宽渐变模糊（对齐系统设置参考图）：上雾重、下缘完全消散
+    final h = topPad + 96;
+    final fog = scheme.brightness == Brightness.light
+        ? const Color(0xFFF4F5F3)
+        : const Color(0xFF181B18);
+    return SizedBox(
+      height: h,
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: AppGlass.topBlurSigma,
+                sigmaY: AppGlass.topBlurSigma,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: scheme.shadow.withValues(alpha: 0.08),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              child: const SizedBox.expand(),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '书架',
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.4,
-                              ),
-                        ),
-                        if (!_loading && _entries.isNotEmpty)
-                          Text(
-                            '${_entries.length} 本',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
-                                ?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(
-                        value: true,
-                        icon: Icon(AppIcons.grid, size: 18),
-                        tooltip: '网格',
-                      ),
-                      ButtonSegment(
-                        value: false,
-                        icon: Icon(AppIcons.list, size: 18),
-                        tooltip: '列表',
-                      ),
-                    ],
-                    selected: {shell.bookshelfGrid},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (s) =>
-                        notifier.setBookshelfGrid(s.first),
-                  ),
-                ],
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    fog.withValues(alpha: 0.88),
+                    fog.withValues(alpha: 0.82),
+                    fog.withValues(alpha: 0.68),
+                    fog.withValues(alpha: 0.45),
+                    fog.withValues(alpha: 0.2),
+                    fog.withValues(alpha: 0),
+                  ],
+                  stops: const [0, 0.25, 0.45, 0.65, 0.85, 1],
+                ),
               ),
             ),
-          ),
+            Align(
+              alignment: Alignment.topCenter,
+              child: row,
+            ),
+          ],
         ),
       ),
     );
@@ -288,8 +243,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     final bottomPad = MediaQuery.paddingOf(context).bottom + 96;
     final scheme = Theme.of(context).colorScheme;
     final topPad = MediaQuery.paddingOf(context).top;
-    // 悬浮毛玻璃条高度：边距 6 + 面板 ~64
-    final topGlass = topPad + 76;
+    // 与全宽渐变模糊条同高：topPad + 96
+    final topGlass = topPad + 96;
 
     late final Widget content;
     if (_loading) {
