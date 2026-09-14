@@ -6,8 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
 
-/// 三 Tab 应用壳：书架 / 书源 / 设置
-/// 底栏为「主色滤镜毛玻璃」NavigationBar（见 AppGlass 准则）。
+/// 三 Tab 应用壳。
+/// 准则：模糊必须叠主色滤镜；底栏悬浮 + extendBody，封面从玻璃四周穿过。
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
 
@@ -28,55 +28,86 @@ class AppShell extends StatelessWidget {
     final index = _indexForLocation(location);
     final scheme = Theme.of(context).colorScheme;
     final disableBlur = MediaQuery.disableAnimationsOf(context);
+    final bottomSafe = MediaQuery.paddingOf(context).bottom;
 
-    final bar = NavigationBar(
-      selectedIndex: index,
-      onDestinationSelected: (i) => context.go(_tabs[i]),
-      backgroundColor: Colors.transparent,
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(AppIcons.bookshelf),
-          label: '书架',
-        ),
-        NavigationDestination(
-          icon: Icon(AppIcons.sources),
-          label: '书源',
-        ),
-        NavigationDestination(
-          icon: Icon(AppIcons.settings),
-          label: '设置',
-        ),
-      ],
-    );
+    final destinations = const [
+      NavigationDestination(
+        icon: Icon(AppIcons.bookshelf),
+        label: '书架',
+      ),
+      NavigationDestination(
+        icon: Icon(AppIcons.sources),
+        label: '书源',
+      ),
+      NavigationDestination(
+        icon: Icon(AppIcons.settings),
+        label: '设置',
+      ),
+    ];
 
-    return Scaffold(
-      extendBody: !disableBlur,
-      body: child,
-      bottomNavigationBar: disableBlur
-          ? ColoredBox(color: scheme.surfaceContainer, child: bar)
-          : ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AppGlass.blurSigma,
-                  sigmaY: AppGlass.blurSigma,
+    Widget bar;
+    if (disableBlur) {
+      bar = ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: ColoredBox(
+          color: scheme.surfaceContainer,
+          child: NavigationBar(
+            selectedIndex: index,
+            onDestinationSelected: (i) => context.go(_tabs[i]),
+            backgroundColor: Colors.transparent,
+            destinations: destinations,
+          ),
+        ),
+      );
+    } else {
+      bar = ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: AppGlass.blurSigma,
+            sigmaY: AppGlass.blurSigma,
+          ),
+          // 准则：模糊必须叠主色滤镜（半透明，封面色可渗入）
+          child: ColoredBox(
+            color: AppGlass.tint(scheme, strength: 0.5),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: scheme.primary.withValues(alpha: 0.18),
+                  width: 0.9,
                 ),
-                // 准则：模糊必须叠主色滤镜
-                child: ColoredBox(
-                  color: AppGlass.tint(scheme, strength: 0.62),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border(
-                        top: BorderSide(
-                          color: scheme.primary.withValues(alpha: 0.12),
-                          width: 0.8,
-                        ),
-                      ),
-                    ),
-                    child: bar,
+                boxShadow: [
+                  BoxShadow(
+                    color: scheme.shadow.withValues(alpha: 0.12),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
                   ),
-                ),
+                ],
+              ),
+              child: NavigationBar(
+                selectedIndex: index,
+                onDestinationSelected: (i) => context.go(_tabs[i]),
+                backgroundColor: Colors.transparent,
+                destinations: destinations,
               ),
             ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      extendBody: true,
+      body: child,
+      bottomNavigationBar: Padding(
+        // 悬浮：左右留白，封面从侧边与底部露出
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + bottomSafe * 0.3),
+        child: SizedBox(
+          height: 64,
+          child: bar,
+        ),
+      ),
     );
   }
 }

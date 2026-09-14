@@ -9,7 +9,10 @@ import '../../../../core/services/cover_palette.dart';
 import '../../../../core/theme/app_icons.dart';
 import '../../../../core/theme/app_theme.dart';
 
-/// 电影海报书封：取色阴影 + 海报渐变 + 进度缎带 + 弹簧按压
+/// 书封统一圆角（阴影 / 裁切 / Hero 必须同源）
+const double kCoverRadius = 12;
+
+/// 电影海报书封：夹紧取色阴影 + 海报渐变 + 进度缎带
 class BookCoverCard extends StatefulWidget {
   const BookCoverCard({
     super.key,
@@ -66,14 +69,11 @@ class _BookCoverCardState extends State<BookCoverCard>
     final cover = _cover;
     if (cover == null || !cover.existsSync()) {
       if (mounted) {
-        setState(() {
-          _colors = CoverPalette.synthetic(widget.book.title);
-        });
+        setState(() => _colors = CoverPalette.synthetic(widget.book.title));
       }
       return;
     }
-    final colors =
-        CoverPalette.cached(cover.path) ??
+    final colors = CoverPalette.cached(cover.path) ??
         await CoverPalette.extractFromFile(cover);
     if (!mounted) return;
     setState(() {
@@ -92,9 +92,21 @@ class _BookCoverCardState extends State<BookCoverCard>
     final colors = _colors ?? CoverPalette.synthetic(widget.book.title);
     final cover = _cover;
     final progress = _progressValue;
-    final hasProgress = widget.progress != null &&
-        (widget.progress?.totalChapters ?? 0) > 0;
+    final hasProgress =
+        widget.progress != null && (widget.progress?.totalChapters ?? 0) > 0;
+    final radius = BorderRadius.circular(kCoverRadius);
     final scale = _pressed ? 0.96 : 1.0;
+
+    final imageChild = cover != null
+        ? Image.file(
+            cover,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            errorBuilder: (_, _, _) =>
+                _PosterFallback(title: widget.book.title, colors: colors),
+          )
+        : _PosterFallback(title: widget.book.title, colors: colors);
 
     return FadeTransition(
       opacity: _enter,
@@ -106,170 +118,122 @@ class _BookCoverCardState extends State<BookCoverCard>
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: Material(
-            color: Colors.transparent,
+            // shape 统一驱动裁切与阴影圆角，避免 Ink 方角投影
+            shape: RoundedRectangleBorder(borderRadius: radius),
+            clipBehavior: Clip.antiAlias,
+            elevation: _pressed ? 2 : 6,
+            shadowColor: colors.shadowColor.withValues(alpha: 0.55),
+            surfaceTintColor: Colors.transparent,
+            color: colors.dark,
             child: InkWell(
               onTap: widget.onTap,
               onLongPress: widget.onLongPress,
               onHighlightChanged: (v) => setState(() => _pressed = v),
-              borderRadius: BorderRadius.circular(12),
-              child: Ink(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  // 取色阴影：电影海报同色投影
-                  boxShadow: [
-                    BoxShadow(
-                      color: colors.shadowColor.withValues(alpha: 0.38),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
-                      spreadRadius: -2,
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              colors.vibrant,
-                              colors.dark,
-                            ],
-                          ),
-                        ),
-                      ),
-                      if (cover != null)
-                        Hero(
-                          tag: 'cover:${widget.book.filePath}',
-                          flightShuttleBuilder: (
-                            context,
-                            animation,
-                            direction,
-                            from,
-                            to,
-                          ) {
-                            return AnimatedBuilder(
-                              animation: animation,
-                              builder: (context, child) {
-                                return Material(
-                                  color: Colors.transparent,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(
-                                      Tween(begin: 12.0, end: 4.0)
-                                          .animate(animation)
-                                          .value,
-                                    ),
-                                    child: child,
-                                  ),
-                                );
-                              },
-                              child: Image.file(cover, fit: BoxFit.cover),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (cover != null)
+                    Hero(
+                      tag: 'cover:${widget.book.filePath}',
+                      flightShuttleBuilder:
+                          (context, animation, direction, from, to) {
+                        return AnimatedBuilder(
+                          animation: animation,
+                          builder: (context, child) {
+                            final r = BorderRadius.circular(
+                              Tween(begin: kCoverRadius, end: 4.0)
+                                  .animate(animation)
+                                  .value,
+                            );
+                            return Material(
+                              color: Colors.transparent,
+                              shape:
+                                  RoundedRectangleBorder(borderRadius: r),
+                              clipBehavior: Clip.antiAlias,
+                              child: child,
                             );
                           },
-                          child: Image.file(
-                            cover,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _PosterFallback(
-                              title: widget.book.title,
-                              colors: colors,
+                          child: Image.file(cover, fit: BoxFit.cover),
+                        );
+                      },
+                      child: imageChild,
+                    )
+                  else
+                    Hero(
+                      tag: 'cover:${widget.book.filePath}',
+                      child: imageChild,
+                    ),
+
+                  // 海报层：顶光 + 底部主色 scrim
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          colors.posterHighlight.withValues(alpha: 0.14),
+                          Colors.transparent,
+                          colors.posterScrim.withValues(alpha: 0.5),
+                          colors.posterScrim.withValues(alpha: 0.94),
+                        ],
+                        stops: const [0, 0.32, 0.7, 1],
+                      ),
+                    ),
+                  ),
+
+                  if (hasProgress)
+                    Positioned(
+                      top: 0,
+                      right: 14,
+                      child: _ProgressRibbon(
+                        progress: progress,
+                        color: colors.accent,
+                      ),
+                    ),
+
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 20, 10, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.book.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              height: 1.25,
+                              letterSpacing: 0.1,
+                              shadows: [
+                                Shadow(color: Colors.black87, blurRadius: 6),
+                              ],
                             ),
                           ),
-                        )
-                      else
-                        Hero(
-                          tag: 'cover:${widget.book.filePath}',
-                          child: _PosterFallback(
-                            title: widget.book.title,
-                            colors: colors,
+                          const SizedBox(height: 4),
+                          Text(
+                            hasProgress
+                                ? '${(progress * 100).round()}%'
+                                : '未读',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.86),
+                              fontSize: 11,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
                           ),
-                        ),
-
-                      // 海报层：顶光 + 底部主色 scrim
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              colors.posterHighlight.withValues(alpha: 0.12),
-                              Colors.transparent,
-                              colors.posterScrim.withValues(alpha: 0.55),
-                              colors.posterScrim.withValues(alpha: 0.92),
-                            ],
-                            stops: const [0, 0.35, 0.72, 1],
-                          ),
-                        ),
+                        ],
                       ),
-
-                      // 进度缎带（书签）
-                      if (hasProgress)
-                        Positioned(
-                          top: 0,
-                          right: 14,
-                          child: _ProgressRibbon(
-                            progress: progress,
-                            color: colors.accent,
-                          ),
-                        ),
-
-                      // 书名 + 进度文案
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                widget.book.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.25,
-                                  letterSpacing: 0.1,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black87,
-                                      blurRadius: 6,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                hasProgress
-                                    ? '${(progress * 100).round()}%'
-                                    : '未读',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.82),
-                                  fontSize: 11,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -279,12 +243,8 @@ class _BookCoverCardState extends State<BookCoverCard>
   }
 }
 
-/// 书签缎带：长度随进度伸长
 class _ProgressRibbon extends StatelessWidget {
-  const _ProgressRibbon({
-    required this.progress,
-    required this.color,
-  });
+  const _ProgressRibbon({required this.progress, required this.color});
 
   final double progress;
   final Color color;
@@ -323,9 +283,9 @@ class _RibbonPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color.lerp(color, Colors.white, 0.15)!,
+            Color.lerp(color, Colors.white, 0.12)!,
             color,
-            Color.lerp(color, Colors.black, 0.25)!,
+            Color.lerp(color, Colors.black, 0.22)!,
           ],
         ).createShader(Offset.zero & size),
     );
@@ -358,7 +318,7 @@ class _PosterFallback extends StatelessWidget {
           style: TextStyle(
             fontSize: 48,
             fontWeight: FontWeight.w800,
-            color: Colors.white.withValues(alpha: 0.9),
+            color: Colors.white.withValues(alpha: 0.92),
             height: 1,
           ),
         ),
@@ -393,28 +353,24 @@ class BookListTile extends StatelessWidget {
       leading: SizedBox(
         width: 44,
         height: 66,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
+        child: Material(
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(4),
-            boxShadow: [
-              BoxShadow(
-                color: colors.shadowColor.withValues(alpha: 0.35),
-                blurRadius: 6,
-                offset: const Offset(0, 3),
-              ),
-            ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: coverPath != null
-                ? Image.file(
-                    coverPath,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) =>
-                        _ListSpine(colors: colors, title: book.title),
-                  )
-                : _ListSpine(colors: colors, title: book.title),
-          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 3,
+          shadowColor: colors.shadowColor.withValues(alpha: 0.5),
+          color: colors.dark,
+          child: coverPath != null
+              ? Image.file(
+                  coverPath,
+                  fit: BoxFit.cover,
+                  width: 44,
+                  height: 66,
+                  errorBuilder: (_, _, _) =>
+                      _ListSpine(colors: colors, title: book.title),
+                )
+              : _ListSpine(colors: colors, title: book.title),
         ),
       ),
       title: Text(

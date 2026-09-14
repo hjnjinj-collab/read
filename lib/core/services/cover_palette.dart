@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
 
-/// 封面取色结果（电影海报用色）
+/// 封面取色结果（电影海报用色，全部做过亮/暗夹紧）
 @immutable
 class CoverColors {
   const CoverColors({
@@ -16,30 +16,53 @@ class CoverColors {
   final Color vibrant;
   final Color dark;
 
-  /// 阴影色：略提饱和的 dominant
-  Color get shadowColor => HSLColor.fromColor(dominant)
-      .withSaturation(
-        (HSLColor.fromColor(dominant).saturation * 1.15).clamp(0.0, 1.0),
-      )
-      .toColor();
+  /// 阴影：中等明度、中等饱和，避免刺眼或脏黑
+  Color get shadowColor => CoverPalette.clampMood(dominant);
 
-  /// 海报底部 scrim 用色（暗部偏向 dominant）
-  Color get posterScrim => Color.lerp(dark, dominant, 0.35)!;
+  /// 海报底部 scrim
+  Color get posterScrim => CoverPalette.clampMood(
+        Color.lerp(dark, dominant, 0.4)!,
+        minL: 0.12,
+        maxL: 0.38,
+      );
 
-  /// 顶部微光（海报高光）
-  Color get posterHighlight => Color.lerp(vibrant, Colors.white, 0.25)!;
+  /// 顶部微光
+  Color get posterHighlight => CoverPalette.clampMood(
+        Color.lerp(vibrant, Colors.white, 0.2)!,
+        minL: 0.55,
+        maxL: 0.78,
+      );
 
-  /// 缎带/强调
-  Color get accent => vibrant;
+  /// 缎带/强调（需足够对比，不可过暗）
+  Color get accent => CoverPalette.clampMood(
+        vibrant,
+        minL: 0.42,
+        maxL: 0.68,
+        minS: 0.35,
+      );
 }
 
-/// 封面取色 + 无封面书脊色
+/// 封面取色 + 色彩夹紧
 class CoverPalette {
   CoverPalette._();
 
   static final Map<String, CoverColors> _cache = {};
 
-  /// 无封面时按书名哈希取「书脊色」
+  /// 夹紧 HSL：避免过亮/过暗/过艳，保证阴影与 scrim 有氛围又不脏
+  static Color clampMood(
+    Color source, {
+    double minL = 0.22,
+    double maxL = 0.62,
+    double minS = 0.18,
+    double maxS = 0.72,
+  }) {
+    final hsl = HSLColor.fromColor(source);
+    return hsl
+        .withLightness(hsl.lightness.clamp(minL, maxL))
+        .withSaturation(hsl.saturation.clamp(minS, maxS))
+        .toColor();
+  }
+
   static Color spineColorFor(String title) {
     const palette = <Color>[
       Color(0xFF6B5B4F),
@@ -55,20 +78,26 @@ class CoverPalette {
     return palette[title.hashCode.abs() % palette.length];
   }
 
-  /// 无封面时的伪 CoverColors
   static CoverColors synthetic(String title) {
-    final base = spineColorFor(title);
+    final base = clampMood(spineColorFor(title));
     final hsl = HSLColor.fromColor(base);
     return CoverColors(
       dominant: base,
-      vibrant: hsl.withLightness((hsl.lightness + 0.08).clamp(0, 1)).toColor(),
-      dark: hsl.withLightness((hsl.lightness * 0.35).clamp(0, 1)).toColor(),
+      vibrant: clampMood(
+        hsl.withLightness((hsl.lightness + 0.1).clamp(0, 1)).toColor(),
+        minL: 0.35,
+        maxL: 0.7,
+      ),
+      dark: clampMood(
+        hsl.withLightness((hsl.lightness * 0.4).clamp(0, 1)).toColor(),
+        minL: 0.12,
+        maxL: 0.35,
+      ),
     );
   }
 
   static CoverColors? cached(String path) => _cache[path];
 
-  /// 从封面提取 dominant / vibrant / darkMuted
   static Future<CoverColors?> extractFromFile(File file) async {
     final key = file.path;
     final hit = _cache[key];
@@ -79,20 +108,21 @@ class CoverPalette {
         maximumColorCount: 16,
         size: const Size(100, 150),
       );
-      final dominant = generator.dominantColor?.color ??
+      final rawDominant = generator.dominantColor?.color ??
           generator.vibrantColor?.color ??
           generator.mutedColor?.color;
-      if (dominant == null) return null;
-      final vibrant = generator.vibrantColor?.color ??
+      if (rawDominant == null) return null;
+      final rawVibrant = generator.vibrantColor?.color ??
           generator.lightVibrantColor?.color ??
-          dominant;
-      final dark = generator.darkMutedColor?.color ??
+          rawDominant;
+      final rawDark = generator.darkMutedColor?.color ??
           generator.darkVibrantColor?.color ??
-          Color.lerp(dominant, Colors.black, 0.45)!;
+          Color.lerp(rawDominant, Colors.black, 0.45)!;
+
       final colors = CoverColors(
-        dominant: dominant,
-        vibrant: vibrant,
-        dark: dark,
+        dominant: clampMood(rawDominant),
+        vibrant: clampMood(rawVibrant, minL: 0.3, maxL: 0.72),
+        dark: clampMood(rawDark, minL: 0.1, maxL: 0.36),
       );
       _cache[key] = colors;
       return colors;

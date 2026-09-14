@@ -128,18 +128,18 @@ class AppTheme {
 class AppGlass {
   AppGlass._();
 
-  /// 底栏/浮层主色滤镜（surface 与 primaryContainer 混合，随明暗自适应）
+  /// 底栏/浮层主色滤镜（半透明，让下层封面色能渗进模糊）
   static Color tint(ColorScheme scheme, {double strength = 0.55}) {
     return Color.lerp(
       scheme.surface,
       scheme.primaryContainer,
       strength,
     )!
-        .withValues(alpha: scheme.brightness == Brightness.light ? 0.82 : 0.74);
+        .withValues(alpha: scheme.brightness == Brightness.light ? 0.68 : 0.62);
   }
 
   /// 模糊半径（统一，避免各处随意）
-  static const double blurSigma = 28;
+  static const double blurSigma = 32;
 }
 
 /// 弹簧物理：统一曲线源（Flutter 系统弹簧族）

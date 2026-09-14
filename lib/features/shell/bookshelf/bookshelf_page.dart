@@ -190,7 +190,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     final shell = ref.watch(shellSettingsProvider);
     final shellNotifier = ref.read(shellSettingsProvider.notifier);
     final width = MediaQuery.sizeOf(context).width;
-    final bottomPad = MediaQuery.paddingOf(context).bottom + 80;
+    // 悬浮底栏高度约 64 + 边距；内容可滚入其下，末尾略留空避免贴死
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 96;
     final scheme = Theme.of(context).colorScheme;
 
     late final Widget content;
@@ -242,7 +243,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       backgroundColor: Colors.transparent,
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 72),
+        padding: const EdgeInsets.only(bottom: 88),
         child: _SpringImportFab(onPressed: _pickAndOpenBook),
       ),
       body: Column(
