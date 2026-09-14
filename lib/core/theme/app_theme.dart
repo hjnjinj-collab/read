@@ -1,42 +1,31 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// 应用主题：中性纸面 + 松绿只作强调色。
+/// 应用主题：松绿 seed 主导全应用色系（明暗均由 fromSeed 派生）。
 /// 阅读页纸色/夜间仍在阅读菜单，不在此覆盖。
+///
+/// 玻璃准则：任何 BackdropFilter 必须叠加 [AppGlass.tint] 主色滤镜，
+/// 禁止纯灰/无色模糊。
 class AppTheme {
   AppTheme._();
 
-  /// 强调色（书脊布）
-  static const Color seed = Color(0xFF4A5D4E);
-
-  /// 浅色纸面（刻意中性，避免 seed 染绿整页）
-  static const Color paper = Color(0xFFFAF9F5);
-  static const Color paperDim = Color(0xFFF1F0EA);
-  static const Color paperLine = Color(0xFFE4E2D9);
+  /// 书脊布色 —— 全应用主色系种子
+  static const Color seed = Color(0xFF5B6C5A);
 
   static ThemeData light({Color? dynamicSeed}) {
-    final base = ColorScheme.fromSeed(
+    final scheme = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seed,
       brightness: Brightness.light,
-    );
-    final scheme = base.copyWith(
-      surface: dynamicSeed == null ? paper : base.surface,
-      surfaceContainerLowest: const Color(0xFFFFFEFB),
-      surfaceContainerLow: const Color(0xFFF7F6F1),
-      surfaceContainer: paperDim,
-      surfaceContainerHigh: const Color(0xFFEAE8E0),
-      surfaceContainerHighest: const Color(0xFFE0DED4),
-      outlineVariant: paperLine,
     );
     return _base(scheme);
   }
 
   static ThemeData dark({Color? dynamicSeed}) {
-    final base = ColorScheme.fromSeed(
+    final scheme = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seed,
       brightness: Brightness.dark,
     );
-    return _base(base);
+    return _base(scheme);
   }
 
   static ThemeData _base(ColorScheme scheme) {
@@ -45,7 +34,6 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
       splashFactory: InkSparkle.splashFactory,
-      visualDensity: VisualDensity.standard,
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,
@@ -63,14 +51,14 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 64,
         backgroundColor: Colors.transparent,
-        indicatorColor: scheme.primary.withValues(alpha: 0.14),
+        indicatorColor: scheme.primaryContainer,
         elevation: 0,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             size: 22,
             color: states.contains(WidgetState.selected)
-                ? scheme.primary
+                ? scheme.onPrimaryContainer
                 : scheme.onSurfaceVariant,
           ),
         ),
@@ -79,7 +67,7 @@ class AppTheme {
             fontSize: 11,
             fontWeight: FontWeight.w600,
             color: states.contains(WidgetState.selected)
-                ? scheme.primary
+                ? scheme.onSurface
                 : scheme.onSurfaceVariant,
           ),
         ),
@@ -87,8 +75,8 @@ class AppTheme {
       cardTheme: CardThemeData(
         elevation: 0,
         color: scheme.surfaceContainerLow,
-        shadowColor: scheme.shadow.withValues(alpha: 0.18),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shadowColor: scheme.shadow.withValues(alpha: 0.2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         clipBehavior: Clip.antiAlias,
         margin: EdgeInsets.zero,
       ),
@@ -102,17 +90,17 @@ class AppTheme {
           side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
           backgroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.selected)
-                ? scheme.primary.withValues(alpha: 0.12)
-                : scheme.surfaceContainerLow,
+                ? scheme.primaryContainer
+                : scheme.surfaceContainer,
           ),
           foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: scheme.primary,
-        foregroundColor: scheme.onPrimary,
-        elevation: 3,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
       dividerTheme: DividerThemeData(
         color: scheme.outlineVariant,
@@ -127,7 +115,6 @@ class AppTheme {
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          // Zoom：Flutter 原生缩放过渡，比 FadeUpwards 更有「推近」感
           TargetPlatform.android: ZoomPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.windows: ZoomPageTransitionsBuilder(),
@@ -135,4 +122,45 @@ class AppTheme {
       ),
     );
   }
+}
+
+/// 毛玻璃准则：模糊层必须叠主色滤镜。
+class AppGlass {
+  AppGlass._();
+
+  /// 底栏/浮层主色滤镜（surface 与 primaryContainer 混合，随明暗自适应）
+  static Color tint(ColorScheme scheme, {double strength = 0.55}) {
+    return Color.lerp(
+      scheme.surface,
+      scheme.primaryContainer,
+      strength,
+    )!
+        .withValues(alpha: scheme.brightness == Brightness.light ? 0.82 : 0.74);
+  }
+
+  /// 模糊半径（统一，避免各处随意）
+  static const double blurSigma = 28;
+}
+
+/// 弹簧物理：统一曲线源（Flutter 系统弹簧族）
+class AppMotion {
+  AppMotion._();
+
+  /// 轻快回弹（FAB / 按钮）
+  static const Curve springOut = Curves.easeOutBack;
+
+  /// 进入（网格 stagger）
+  static const Curve enter = Curves.easeOutCubic;
+
+  /// 离开
+  static const Curve exit = Curves.easeInCubic;
+
+  /// 布局切换
+  static const Duration switchDuration = Duration(milliseconds: 260);
+
+  /// 网格条目 stagger 步长
+  static const Duration staggerStep = Duration(milliseconds: 28);
+
+  /// 网格条目 stagger 总窗口上限
+  static const int staggerMaxItems = 12;
 }

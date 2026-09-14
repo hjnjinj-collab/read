@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -6,8 +7,9 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/services/cover_palette.dart';
 import '../../../../core/theme/app_icons.dart';
+import '../../../../core/theme/app_theme.dart';
 
-/// 满铺书封卡：封面铺满 + 底部 scrim 书名，像书架上的一本书。
+/// 电影海报书封：取色阴影 + 海报渐变 + 进度缎带 + 弹簧按压
 class BookCoverCard extends StatefulWidget {
   const BookCoverCard({
     super.key,
@@ -15,38 +17,49 @@ class BookCoverCard extends StatefulWidget {
     required this.progress,
     required this.onTap,
     required this.onLongPress,
+    this.staggerIndex = 0,
   });
 
   final Book book;
   final ReadingProgressData? progress;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final int staggerIndex;
 
   @override
   State<BookCoverCard> createState() => _BookCoverCardState();
 }
 
-class _BookCoverCardState extends State<BookCoverCard> {
-  Color? _dominant;
+class _BookCoverCardState extends State<BookCoverCard>
+    with SingleTickerProviderStateMixin {
+  CoverColors? _colors;
   File? _cover;
-  bool _paletteDone = false;
+  bool _pressed = false;
+
+  late final AnimationController _enterCtrl;
+  late final Animation<double> _enter;
 
   @override
   void initState() {
     super.initState();
     _cover = cachedCoverFor(widget.book.filePath);
+    final delayMs = math.min(widget.staggerIndex, AppMotion.staggerMaxItems) *
+        AppMotion.staggerStep.inMilliseconds;
+    _enterCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _enter = CurvedAnimation(parent: _enterCtrl, curve: AppMotion.enter);
+    Future.delayed(Duration(milliseconds: delayMs), () {
+      if (mounted) _enterCtrl.forward();
+    });
     _loadPalette();
   }
 
   @override
-  void didUpdateWidget(covariant BookCoverCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.book.filePath != widget.book.filePath) {
-      _cover = cachedCoverFor(widget.book.filePath);
-      _paletteDone = false;
-      _dominant = null;
-      _loadPalette();
-    }
+  void dispose() {
+    _enterCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPalette() async {
@@ -54,156 +67,210 @@ class _BookCoverCardState extends State<BookCoverCard> {
     if (cover == null || !cover.existsSync()) {
       if (mounted) {
         setState(() {
-          _dominant = CoverPalette.spineColorFor(widget.book.title);
-          _paletteDone = true;
+          _colors = CoverPalette.synthetic(widget.book.title);
         });
       }
       return;
     }
-    final cached = CoverPalette.cached(cover.path);
-    Color? color = cached;
-    color ??= await CoverPalette.extractFromFile(cover);
+    final colors =
+        CoverPalette.cached(cover.path) ??
+        await CoverPalette.extractFromFile(cover);
     if (!mounted) return;
     setState(() {
-      _dominant = color ?? CoverPalette.spineColorFor(widget.book.title);
-      _paletteDone = true;
+      _colors = colors ?? CoverPalette.synthetic(widget.book.title);
     });
   }
 
-  double? get _progressValue {
+  double get _progressValue {
     final p = widget.progress;
-    if (p == null || p.totalChapters <= 0) return null;
+    if (p == null || p.totalChapters <= 0) return 0;
     return ((p.chapterIndex + 1) / p.totalChapters).clamp(0.0, 1.0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = _colors ?? CoverPalette.synthetic(widget.book.title);
     final cover = _cover;
-    final accent = _dominant ?? scheme.surfaceContainerHigh;
-    final progressValue = _progressValue;
-    final title = widget.book.title;
+    final progress = _progressValue;
+    final hasProgress = widget.progress != null &&
+        (widget.progress?.totalChapters ?? 0) > 0;
+    final scale = _pressed ? 0.96 : 1.0;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: widget.onTap,
-        onLongPress: widget.onLongPress,
-        borderRadius: BorderRadius.circular(10),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // 底色：无封面时用书脊色渐变
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color.lerp(accent, Colors.white, 0.15)!,
-                        Color.lerp(accent, Colors.black, 0.25)!,
-                      ],
+    return FadeTransition(
+      opacity: _enter,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.06), end: Offset.zero)
+            .animate(_enter),
+        child: AnimatedScale(
+          scale: scale,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: widget.onTap,
+              onLongPress: widget.onLongPress,
+              onHighlightChanged: (v) => setState(() => _pressed = v),
+              borderRadius: BorderRadius.circular(12),
+              child: Ink(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  // 取色阴影：电影海报同色投影
+                  boxShadow: [
+                    BoxShadow(
+                      color: colors.shadowColor.withValues(alpha: 0.38),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                      spreadRadius: -2,
                     ),
-                  ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                if (cover != null)
-                  Hero(
-                    tag: 'cover:${widget.book.filePath}',
-                    child: Image.file(
-                      cover,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          _SpineFallback(title: title, accent: accent),
-                    ),
-                  )
-                else
-                  Hero(
-                    tag: 'cover:${widget.book.filePath}',
-                    child: _SpineFallback(title: title, accent: accent),
-                  ),
-                // 底部 scrim + 书名
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0),
-                          Colors.black.withValues(alpha: 0.72),
-                        ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              colors.vibrant,
+                              colors.dark,
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 20, 8, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              height: 1.25,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black54,
-                                  blurRadius: 4,
+                      if (cover != null)
+                        Hero(
+                          tag: 'cover:${widget.book.filePath}',
+                          flightShuttleBuilder: (
+                            context,
+                            animation,
+                            direction,
+                            from,
+                            to,
+                          ) {
+                            return AnimatedBuilder(
+                              animation: animation,
+                              builder: (context, child) {
+                                return Material(
+                                  color: Colors.transparent,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(
+                                      Tween(begin: 12.0, end: 4.0)
+                                          .animate(animation)
+                                          .value,
+                                    ),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: Image.file(cover, fit: BoxFit.cover),
+                            );
+                          },
+                          child: Image.file(
+                            cover,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _PosterFallback(
+                              title: widget.book.title,
+                              colors: colors,
+                            ),
+                          ),
+                        )
+                      else
+                        Hero(
+                          tag: 'cover:${widget.book.filePath}',
+                          child: _PosterFallback(
+                            title: widget.book.title,
+                            colors: colors,
+                          ),
+                        ),
+
+                      // 海报层：顶光 + 底部主色 scrim
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              colors.posterHighlight.withValues(alpha: 0.12),
+                              Colors.transparent,
+                              colors.posterScrim.withValues(alpha: 0.55),
+                              colors.posterScrim.withValues(alpha: 0.92),
+                            ],
+                            stops: const [0, 0.35, 0.72, 1],
+                          ),
+                        ),
+                      ),
+
+                      // 进度缎带（书签）
+                      if (hasProgress)
+                        Positioned(
+                          top: 0,
+                          right: 14,
+                          child: _ProgressRibbon(
+                            progress: progress,
+                            color: colors.accent,
+                          ),
+                        ),
+
+                      // 书名 + 进度文案
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                widget.book.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.25,
+                                  letterSpacing: 0.1,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black87,
+                                      blurRadius: 6,
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                hasProgress
+                                    ? '${(progress * 100).round()}%'
+                                    : '未读',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.82),
+                                  fontSize: 11,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 6),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(1.5),
-                            child: LinearProgressIndicator(
-                              value: progressValue ?? 0,
-                              minHeight: 2.5,
-                              backgroundColor: Colors.white24,
-                              color: progressValue == null
-                                  ? Colors.transparent
-                                  : Colors.white,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
-                if (!_paletteDone)
-                  const Positioned(
-                    top: 8,
-                    right: 8,
-                    child: SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
         ),
@@ -212,34 +279,86 @@ class _BookCoverCardState extends State<BookCoverCard> {
   }
 }
 
-class _SpineFallback extends StatelessWidget {
-  const _SpineFallback({required this.title, required this.accent});
+/// 书签缎带：长度随进度伸长
+class _ProgressRibbon extends StatelessWidget {
+  const _ProgressRibbon({
+    required this.progress,
+    required this.color,
+  });
+
+  final double progress;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = 18.0 + progress * 42.0;
+    return CustomPaint(
+      size: Size(18, h),
+      painter: _RibbonPainter(color: color),
+    );
+  }
+}
+
+class _RibbonPainter extends CustomPainter {
+  _RibbonPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(w, 0)
+      ..lineTo(w, h - 8)
+      ..lineTo(w / 2, h)
+      ..lineTo(0, h - 8)
+      ..close();
+    canvas.drawShadow(path, Colors.black, 3, false);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(color, Colors.white, 0.15)!,
+            color,
+            Color.lerp(color, Colors.black, 0.25)!,
+          ],
+        ).createShader(Offset.zero & size),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RibbonPainter old) => old.color != color;
+}
+
+class _PosterFallback extends StatelessWidget {
+  const _PosterFallback({required this.title, required this.colors});
 
   final String title;
-  final Color accent;
+  final CoverColors colors;
 
   @override
   Widget build(BuildContext context) {
     final glyph = title.isEmpty ? '书' : title.characters.first;
-    final on = CoverPalette.onColor(accent);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color.lerp(accent, Colors.white, 0.12)!,
-            Color.lerp(accent, Colors.black, 0.2)!,
-          ],
+          colors: [colors.vibrant, colors.dark],
         ),
       ),
       child: Center(
         child: Text(
           glyph,
           style: TextStyle(
-            fontSize: 42,
-            fontWeight: FontWeight.w700,
-            color: on.withValues(alpha: 0.88),
+            fontSize: 48,
+            fontWeight: FontWeight.w800,
+            color: Colors.white.withValues(alpha: 0.9),
             height: 1,
           ),
         ),
@@ -267,22 +386,35 @@ class BookListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final coverPath = cachedCoverFor(book.filePath);
-    final spine = CoverPalette.spineColorFor(book.title);
+    final colors = CoverPalette.synthetic(book.title);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: SizedBox(
         width: 44,
         height: 66,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: coverPath != null
-              ? Image.file(
-                  coverPath,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => _ListSpine(spine: spine, title: book.title),
-                )
-              : _ListSpine(spine: spine, title: book.title),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            boxShadow: [
+              BoxShadow(
+                color: colors.shadowColor.withValues(alpha: 0.35),
+                blurRadius: 6,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: coverPath != null
+                ? Image.file(
+                    coverPath,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) =>
+                        _ListSpine(colors: colors, title: book.title),
+                  )
+                : _ListSpine(colors: colors, title: book.title),
+          ),
         ),
       ),
       title: Text(
@@ -310,9 +442,9 @@ class BookListTile extends StatelessWidget {
 }
 
 class _ListSpine extends StatelessWidget {
-  const _ListSpine({required this.spine, required this.title});
+  const _ListSpine({required this.colors, required this.title});
 
-  final Color spine;
+  final CoverColors colors;
   final String title;
 
   @override
@@ -323,17 +455,14 @@ class _ListSpine extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color.lerp(spine, Colors.white, 0.1)!,
-            Color.lerp(spine, Colors.black, 0.2)!,
-          ],
+          colors: [colors.vibrant, colors.dark],
         ),
       ),
       child: Center(
         child: Text(
           glyph,
           style: TextStyle(
-            color: CoverPalette.onColor(spine),
+            color: CoverPalette.onColor(colors.dominant),
             fontWeight: FontWeight.w700,
           ),
         ),

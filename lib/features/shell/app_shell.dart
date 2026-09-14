@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_icons.dart';
+import '../../core/theme/app_theme.dart';
 
 /// 三 Tab 应用壳：书架 / 书源 / 设置
-/// 底栏为毛玻璃 NavigationBar，内容 extendBody 从其下穿过。
+/// 底栏为「主色滤镜毛玻璃」NavigationBar（见 AppGlass 准则）。
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
 
@@ -28,11 +29,10 @@ class AppShell extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final disableBlur = MediaQuery.disableAnimationsOf(context);
 
-    // 玻璃路径强制透明底，由外层 ColoredBox 单层着色，避免与主题背景叠不透明
     final bar = NavigationBar(
       selectedIndex: index,
       onDestinationSelected: (i) => context.go(_tabs[i]),
-      backgroundColor: disableBlur ? scheme.surface : Colors.transparent,
+      backgroundColor: Colors.transparent,
       destinations: const [
         NavigationDestination(
           icon: Icon(AppIcons.bookshelf),
@@ -53,14 +53,27 @@ class AppShell extends StatelessWidget {
       extendBody: !disableBlur,
       body: child,
       bottomNavigationBar: disableBlur
-          ? bar
+          ? ColoredBox(color: scheme.surfaceContainer, child: bar)
           : ClipRect(
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                filter: ImageFilter.blur(
+                  sigmaX: AppGlass.blurSigma,
+                  sigmaY: AppGlass.blurSigma,
+                ),
+                // 准则：模糊必须叠主色滤镜
                 child: ColoredBox(
-                  // 纸色雾面，避免 primaryContainer 把底栏染成整块绿
-                  color: scheme.surface.withValues(alpha: 0.78),
-                  child: bar,
+                  color: AppGlass.tint(scheme, strength: 0.62),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: scheme.primary.withValues(alpha: 0.12),
+                          width: 0.8,
+                        ),
+                      ),
+                    ),
+                    child: bar,
+                  ),
                 ),
               ),
             ),

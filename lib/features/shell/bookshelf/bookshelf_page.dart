@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../reader/presentation/providers/reader_provider.dart'
     show appDatabaseProvider;
 import '../providers/shell_settings.dart';
@@ -213,6 +214,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
           return BookCoverCard(
             book: book,
             progress: progress,
+            staggerIndex: index,
             onTap: () => _openBook(book),
             onLongPress: () => _removeBook(book),
           );
@@ -241,12 +243,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 72),
-        child: FloatingActionButton.large(
-          heroTag: 'bookshelf-import',
-          onPressed: _pickAndOpenBook,
-          tooltip: '导入书籍',
-          child: const Icon(AppIcons.add, size: 28),
-        ),
+        child: _SpringImportFab(onPressed: _pickAndOpenBook),
       ),
       body: Column(
         children: [
@@ -325,6 +322,62 @@ class _EmptyShelf extends StatelessWidget {
               label: const Text('导入书籍'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 弹簧 FAB：按下缩放回弹 + 阴影随压感变化
+class _SpringImportFab extends StatefulWidget {
+  const _SpringImportFab({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_SpringImportFab> createState() => _SpringImportFabState();
+}
+
+class _SpringImportFabState extends State<_SpringImportFab>
+    with SingleTickerProviderStateMixin {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onPressed();
+      },
+      child: AnimatedScale(
+        scale: _pressed ? 0.88 : 1.0,
+        duration: Duration(milliseconds: _pressed ? 90 : 220),
+        curve: _pressed ? Curves.easeOut : AppMotion.springOut,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: scheme.primary.withValues(
+                  alpha: _pressed ? 0.15 : 0.28,
+                ),
+                blurRadius: _pressed ? 6 : 14,
+                offset: Offset(0, _pressed ? 2 : 6),
+              ),
+            ],
+          ),
+          child: Icon(
+            AppIcons.add,
+            color: scheme.onPrimaryContainer,
+            size: 28,
+          ),
         ),
       ),
     );
