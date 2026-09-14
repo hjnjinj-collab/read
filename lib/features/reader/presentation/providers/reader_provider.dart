@@ -885,6 +885,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
           await MeasureTextService.instance.flushToRust();
           _measureWarmedChapters.add(warmKey);
           await _bookService.clearStructuredPaginationCache(requestedBookId);
+          // 首翻 warm-up 改变 Rust 侧实测宽与分页结果；页数缓存必须同步失效。
+          _invalidatePageCountCache();
           page = await _bookService.getPageStructured(
             requestedBookId,
             requestedChapterIndex,
@@ -2321,6 +2323,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         paddingTop: common.padV,
         paddingRight: common.padH,
         paddingBottom: common.padV,
+        fontName: ReaderFont.family,
         chineseConvert: chineseConvertCode,
         pageFillThreshold: _pageFillThreshold,
         showComments: _showComments,
@@ -2541,7 +2544,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         : chapterIndex == state.currentChapterIndex + 1 && page.pageIndex == 0;
     final validPrev = sameChapter
         ? page.pageIndex == state.currentPageIndex - 1
-        : chapterIndex == state.currentChapterIndex - 1;
+        : chapterIndex == state.currentChapterIndex - 1 &&
+            page.pageIndex == await _pageCountOf(chapterIndex) - 1;
     readerTrace('page.adopt.attempt', {
       'forward': forward,
       'target': '$chapterIndex/${page.pageIndex}',
