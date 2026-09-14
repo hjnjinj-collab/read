@@ -76,24 +76,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     return _composerKey;
   }
 
+  /// 缓存 notifier，dispose 不得再碰 ref（已 unmount）
+  ReaderNotifier? _notifier;
+
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(readerProvider.notifier);
     // viewport 测量由 build 的 LayoutBuilder 负责（SafeArea 内实际可用
     // 区域）——postFrame 时首帧 build 已跑过，openBook 排版即用正确尺寸。
-    // 旧实现取 MediaQuery.size（全屏值，含状态栏/手势条区域）喂排版，
-    // 与 SafeArea 内绘制 canvas 不一致 → 移动端翻页后背景纹理放大。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref
-          .read(readerProvider.notifier)
-          .openBook(widget.filePath, widget.bookName);
+      _notifier?.openBook(widget.filePath, widget.bookName);
     });
   }
 
   @override
   void dispose() {
     _longPressTimer?.cancel();
-    ref.read(readerProvider.notifier).closeBook();
+    _notifier?.closeBook();
+    _notifier = null;
     super.dispose();
   }
 
@@ -691,15 +692,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             }
             return Stack(
               children: [
-                // Hero 落点：书架岛屿封面飞入后收束（阅读页本身不展示封面）
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  child: Hero(
-                    tag: 'cover:${widget.filePath}',
-                    child: const SizedBox(width: 1, height: 1),
-                  ),
-                ),
                 // P4: 阅读区域用 Listener + PageTurnComposer
                 Listener(
               onPointerDown: _onPointerDown,

@@ -333,17 +333,17 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             onLongPress: () => _removeBook(book),
           );
           if (moved) {
-            // 最近阅读插到首位：从下方推入
+            // 最近阅读插到首位：轻位移淡入，避免与按压缩放/Hero 叠成回弹
             card = TweenAnimationBuilder<double>(
               key: ValueKey('move-${book.filePath}'),
               tween: Tween(begin: 1, end: 0),
-              duration: const Duration(milliseconds: 360),
+              duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
               builder: (context, t, child) {
-                return Transform.translate(
-                  offset: Offset(0, 28 * t),
-                  child: Opacity(
-                    opacity: 1 - t * 0.35,
+                return Opacity(
+                  opacity: 1 - t * 0.4,
+                  child: Transform.translate(
+                    offset: Offset(0, 16 * t),
                     child: child,
                   ),
                 );

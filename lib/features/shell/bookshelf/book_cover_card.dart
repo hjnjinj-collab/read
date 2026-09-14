@@ -148,8 +148,9 @@ class _BookCoverCardState extends State<BookCoverCard>
             .animate(_enter),
         child: AnimatedScale(
           scale: scale,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
+          // 按压反馈从紧，避免与排序位移叠成「回弹」
+          duration: Duration(milliseconds: _pressed ? 70 : 140),
+          curve: _pressed ? Curves.easeOut : Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 280),
             decoration: BoxDecoration(
