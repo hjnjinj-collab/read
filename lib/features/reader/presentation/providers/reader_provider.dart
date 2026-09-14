@@ -699,6 +699,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _invalidateFrames(reason: 'open-book');
     _rawCurrentPage = null;
     _rawPageCache.clear();
+    // 立刻清空旧书图片缓存，避免换书首帧画到上一本纹理
+    BookImageStore.instance.clear();
     _cachedNotesChapterIndex = null;
     _pageCountForChapter = -1;
     clearSelection();
