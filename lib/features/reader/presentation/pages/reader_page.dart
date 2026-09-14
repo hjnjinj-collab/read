@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart' show Note;
@@ -60,7 +61,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _isNoteMode = false;
 
   /// P4: 翻页合成器的 key，用于调用其方法
-  final _composerKey = GlobalKey<_PageTurnComposerBridgeState>();
+  GlobalKey<_PageTurnComposerBridgeState> _composerKey =
+      GlobalKey<_PageTurnComposerBridgeState>();
+  String? _composerBoundBook;
+
+  /// 换书时换新 GlobalKey，强制丢弃上一本快照/纹理状态
+  GlobalKey<_PageTurnComposerBridgeState> _composerKeyFor(String bookId) {
+    if (_composerBoundBook != bookId) {
+      _composerBoundBook = bookId;
+      _composerKey = GlobalKey<_PageTurnComposerBridgeState>(
+        debugLabel: 'composer-$bookId',
+      );
+    }
+    return _composerKey;
+  }
 
   @override
   void initState() {
@@ -677,6 +691,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             }
             return Stack(
               children: [
+                // 桌面/无系统返回时显示返回键（Windows 测试）
+                if (defaultTargetPlatform == TargetPlatform.windows ||
+                    defaultTargetPlatform == TargetPlatform.linux ||
+                    defaultTargetPlatform == TargetPlatform.macOS)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: SafeArea(
+                      child: Material(
+                        color: Colors.black.withValues(alpha: 0.25),
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          tooltip: '返回书架',
+                          onPressed: () => Navigator.of(context).maybePop(),
+                        ),
+                      ),
+                    ),
+                  ),
                 // Hero 落点：书架岛屿封面飞入后收束（阅读页本身不展示封面）
                 Positioned(
                   top: 0,
@@ -708,7 +741,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                       )
                     : state.currentPage != null
                     ? _PageTurnComposerBridge(
-                        key: _composerKey,
+                        key: _composerKeyFor(
+                          state.bookId ?? widget.filePath,
+                        ),
                         currentPage: state.currentPage!,
                         mode: _pageTurnMode,
                         speed: _pageTurnSpeed,

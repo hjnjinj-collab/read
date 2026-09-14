@@ -1,12 +1,10 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
-import 'package:path_provider/path_provider.dart';
 
-/// 封面取色结果（电影海报用色，全部做过亮/暗夹紧）
+/// 封面取色结果（与封面同级 sidecar 永久缓存：`{hash}.pal.json`）
 @immutable
 class CoverColors {
   const CoverColors({
@@ -59,20 +57,12 @@ class CoverColors {
       );
 }
 
-/// 封面取色：内存 + 磁盘 JSON 缓存，避免每次启动全量重提
+/// 主色缓存：**只读 sidecar，不在书架路径做取色**。
+/// 取色仅在「封面首次落盘」时执行一次并写 `{cover}.pal.json`。
 class CoverPalette {
   CoverPalette._();
 
   static final Map<String, CoverColors> _mem = {};
-  static File? _diskFile;
-  static bool _diskLoaded = false;
-  static bool _dirty = false;
-  static Timer? _saveTimer;
-
-  /// 并发闸：同时最多 1 个提取（2 会在 UI isolate 上叠加重度解码导致卡死）
-  static int _active = 0;
-  static const int _maxActive = 1;
-  static final List<Completer<void>> _waiters = [];
 
   static Color clampMood(
     Color source, {
@@ -121,114 +111,64 @@ class CoverPalette {
     );
   }
 
-  static CoverColors? cached(String path) => _mem[path];
+  /// [sourcePath] 为书籍路径；[coverFile] 为封面图片，sidecar = 同名 .pal.json
+  static File sidecarOf(File coverFile) =>
+      File('${coverFile.path}.pal.json');
 
-  static Future<void> _ensureDiskLoaded() async {
-    if (_diskLoaded) return;
-    _diskLoaded = true;
+  static CoverColors? cached(String sourcePath) => _mem[sourcePath];
+
+  static void put(String sourcePath, CoverColors colors) {
+    _mem[sourcePath] = colors;
+  }
+
+  /// 仅读 sidecar（书架启动路径）。无文件则不取色。
+  static CoverColors? loadSidecar(String sourcePath, File coverFile) {
+    final hit = _mem[sourcePath];
+    if (hit != null) return hit;
+    final side = sidecarOf(coverFile);
+    if (!side.existsSync()) return null;
     try {
-      final dir = await getApplicationSupportDirectory();
-      _diskFile = File('${dir.path}/cover_palette_cache_v2.json');
-      if (await _diskFile!.exists()) {
-        final raw = await _diskFile!.readAsString();
-        final map = jsonDecode(raw);
-        if (map is Map<String, dynamic>) {
-          for (final e in map.entries) {
-            final v = e.value;
-            if (v is Map<String, dynamic>) {
-              final c = CoverColors.fromJson(v);
-              if (c != null) _mem[e.key] = c;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('取色磁盘缓存读取失败: $e');
+      final map = jsonDecode(side.readAsStringSync());
+      if (map is! Map<String, dynamic>) return null;
+      final c = CoverColors.fromJson(map);
+      if (c != null) _mem[sourcePath] = c;
+      return c;
+    } catch (_) {
+      return null;
     }
   }
 
-  static void _scheduleSave() {
-    _dirty = true;
-    _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 800), _flushDisk);
-  }
-
-  static Future<void> _flushDisk() async {
-    if (!_dirty || _diskFile == null) return;
-    _dirty = false;
-    try {
-      final map = <String, dynamic>{
-        for (final e in _mem.entries) e.key: e.value.toJson(),
-      };
-      await _diskFile!.writeAsString(jsonEncode(map), flush: true);
-    } catch (e) {
-      debugPrint('取色磁盘缓存写入失败: $e');
-    }
-  }
-
-  static Future<void> _acquire() async {
-    if (_active < _maxActive) {
-      _active++;
-      return;
-    }
-    final c = Completer<void>();
-    _waiters.add(c);
-    await c.future;
-  }
-
-  static void _release() {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete();
-    } else {
-      _active = (_active - 1).clamp(0, _maxActive);
-    }
-  }
-
-  static Future<CoverColors?> extractFromFile(File file) =>
-      extractForBook(file.path, file);
-
-  /// [sourcePath] 为书籍路径（缓存键）；[coverFile] 为封面图片文件
-  static Future<CoverColors?> extractForBook(
+  /// 从封面图提取主色并写 sidecar（**仅封面首次落盘时调用**）
+  static Future<CoverColors?> extractAndPersist(
     String sourcePath,
     File coverFile,
   ) async {
     final hit = _mem[sourcePath];
     if (hit != null) return hit;
-
-    await _ensureDiskLoaded();
-    final diskHit = _mem[sourcePath];
-    if (diskHit != null) return diskHit;
-
-    await _acquire();
+    final existing = loadSidecar(sourcePath, coverFile);
+    if (existing != null) return existing;
     try {
-      final again = _mem[sourcePath];
-      if (again != null) return again;
-
       final generator = await PaletteGenerator.fromImageProvider(
         FileImage(coverFile),
         maximumColorCount: 24,
         size: const Size(120, 180),
       );
-
       final colors = _pickFromGenerator(generator);
       if (colors == null) return null;
       _mem[sourcePath] = colors;
-      _scheduleSave();
+      final side = sidecarOf(coverFile);
+      side.writeAsStringSync(jsonEncode(colors.toJson()));
       return colors;
     } catch (e) {
       debugPrint('封面取色失败: $e');
       return null;
-    } finally {
-      _release();
     }
   }
 
-  /// 按「面积占比」选主色，避免高饱和点缀色（灯笼红等）抢走翡翠绿
   static CoverColors? _pickFromGenerator(PaletteGenerator generator) {
     final swatches = generator.paletteColors.toList()
       ..sort((a, b) => b.population.compareTo(a.population));
 
-    // 过滤过灰/过黑/过白，再在剩余里取面积最大者作 dominant
     Color? dominant;
     for (final s in swatches) {
       final hsl = HSLColor.fromColor(s.color);
@@ -240,7 +180,6 @@ class CoverPalette {
     dominant ??= generator.dominantColor?.color;
     if (dominant == null) return null;
 
-    // vibrant：在较高饱和色中找与 dominant 色相接近者，避免串到异色点缀
     final dHue = HSLColor.fromColor(dominant).hue;
     Color? vibrant;
     double best = 1e9;
@@ -251,7 +190,6 @@ class CoverPalette {
       }
       var dh = (hsl.hue - dHue).abs() % 360;
       if (dh > 180) dh = 360 - dh;
-      // 色相接近 + 饱和较高 优先
       final score = dh - hsl.saturation * 40;
       if (score < best) {
         best = score;
@@ -275,17 +213,5 @@ class CoverPalette {
     return background.computeLuminance() > 0.55
         ? const Color(0xFF1C1B18)
         : const Color(0xFFF7F6F1);
-  }
-
-  /// 书架预热：串行取色，每本之间 yield。key = 书籍 sourcePath
-  static Future<void> warmAll(
-    Map<String, File> sourcePathToCover,
-  ) async {
-    await _ensureDiskLoaded();
-    for (final e in sourcePathToCover.entries) {
-      if (_mem.containsKey(e.key)) continue;
-      await extractForBook(e.key, e.value);
-      await Future<void>.delayed(Duration.zero);
-    }
   }
 }

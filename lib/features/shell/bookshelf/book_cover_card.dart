@@ -85,25 +85,14 @@ class _BookCoverCardState extends State<BookCoverCard>
 
   Future<void> _loadPalette() async {
     final path = widget.book.filePath;
-    final hit = CoverPalette.cached(path);
-    if (hit != null) {
-      if (mounted) setState(() => _colors = hit);
-      return;
-    }
-    final cover = _cover;
-    if (cover == null || !cover.existsSync()) {
-      if (mounted) {
-        setState(() => _colors = CoverPalette.synthetic(widget.book.title));
-      }
-      return;
-    }
-    // 合成色先占位，取色完成后替换（不阻塞首帧）
+    // 只读内存/sidecar，不在书架路径跑 PaletteGenerator
+    final hit = CoverPalette.cached(path) ??
+        (_cover != null
+            ? CoverPalette.loadSidecar(path, _cover!)
+            : null);
     if (mounted) {
-      setState(() => _colors = CoverPalette.synthetic(widget.book.title));
+      setState(() => _colors = hit ?? CoverPalette.synthetic(widget.book.title));
     }
-    final colors = await CoverPalette.extractForBook(path, cover);
-    if (!mounted || colors == null) return;
-    setState(() => _colors = colors);
   }
 
   double get _progressValue {

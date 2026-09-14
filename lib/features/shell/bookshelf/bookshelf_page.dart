@@ -31,6 +31,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   bool _shellEnteredOnce = false;
   String? _highlightPath;
   Timer? _highlightTimer;
+  Timer? _justMovedTimer;
   List<String> _prevOrder = const [];
   String? _justMovedPath;
 
@@ -47,6 +48,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   @override
   void dispose() {
     _highlightTimer?.cancel();
+    _justMovedTimer?.cancel();
     super.dispose();
   }
 
@@ -74,9 +76,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       if (initial) _loading = false;
     });
     if (initial) {
-      // 首帧后串行预热封面/取色，不阻塞交互
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        // 只读封面文件 + sidecar，不取色
         CoverStore.preload(order);
       });
     }
@@ -100,6 +102,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       });
     });
     await _refresh();
+    // 推入动画结束后清标记，避免残留导致下次无动画
+    _justMovedTimer?.cancel();
+    _justMovedTimer = Timer(const Duration(milliseconds: 420), () {
+      if (mounted) setState(() => _justMovedPath = null);
+    });
   }
 
   Future<void> _removeBook(Book book) async {

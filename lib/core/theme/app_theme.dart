@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 /// 阅读页纸色/夜间仍在阅读菜单，不在此覆盖。
 ///
 /// 玻璃准则：任何 BackdropFilter 必须叠加 [AppGlass.tint] 主色滤镜，
-/// 禁止纯灰/无色模糊。
+/// 禁止纯灰/无色模糊。模糊本身允许较高 sigma——卡顿根因是每帧
+/// 读封面/取色，不是双层模糊。
 class AppTheme {
   AppTheme._();
 
-  /// 书脊布色 —— 全应用主色系种子
   static const Color seed = Color(0xFF5B6C5A);
 
   static ThemeData light({Color? dynamicSeed}) {
@@ -124,11 +124,10 @@ class AppTheme {
   }
 }
 
-/// 毛玻璃准则：重模糊 + 主色滤镜（底栏 alpha≈0.5，主题色可感但不脏）。
+/// 毛玻璃准则：模糊层必须叠主色滤镜。
 class AppGlass {
   AppGlass._();
 
-  /// 底栏：surface 与 primary 混合，整体 alpha≈0.5
   static Color tint(ColorScheme scheme, {double strength = 0.55}) {
     final base = scheme.brightness == Brightness.light
         ? const Color(0xFFF2F5F1)
@@ -137,7 +136,6 @@ class AppGlass {
         .withValues(alpha: 0.5);
   }
 
-  /// 顶栏：近白轻染 primary，上实下虚由外层 gradient 控制
   static Color topTint(ColorScheme scheme) {
     final base = scheme.brightness == Brightness.light
         ? const Color(0xFFF7F8F5)
@@ -146,14 +144,12 @@ class AppGlass {
         .withValues(alpha: scheme.brightness == Brightness.light ? 0.84 : 0.8);
   }
 
-  /// 底栏上方氛围晕染高度（扩大「底部氛围」范围）
   static const double bottomAmbientHeight = 160;
 
-  /// 模糊半径：Android 上过高 sigma 会卡死合成，控制在 20–24
-  static const double blurSigma = 22;
-  static const double topBlurSigma = 24;
+  /// 双层模糊允许较高 sigma；性能靠「封面/主色只读缓存」保证
+  static const double blurSigma = 40;
+  static const double topBlurSigma = 48;
 
-  /// 顶栏渐变模糊高度（加高，避免中部截断带）
   static const double topGlassHeight = 148;
 }
 
@@ -161,21 +157,10 @@ class AppGlass {
 class AppMotion {
   AppMotion._();
 
-  /// 轻快回弹（FAB / 按钮）
   static const Curve springOut = Curves.easeOutBack;
-
-  /// 进入（网格 stagger）
   static const Curve enter = Curves.easeOutCubic;
-
-  /// 离开
   static const Curve exit = Curves.easeInCubic;
-
-  /// 布局切换
   static const Duration switchDuration = Duration(milliseconds: 260);
-
-  /// 网格条目 stagger 步长
   static const Duration staggerStep = Duration(milliseconds: 28);
-
-  /// 网格条目 stagger 总窗口上限
   static const int staggerMaxItems = 12;
 }

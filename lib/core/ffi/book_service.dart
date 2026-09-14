@@ -834,29 +834,21 @@ Future<void> initCoverCacheDir() async {
   }
 }
 
-/// 封面文件永久内存索引：启动时扫一次，之后同步读取
+/// 封面文件永久内存索引 + 主色 sidecar 只读加载
 class CoverStore {
   CoverStore._();
 
   static final Map<String, File> _files = {};
-  static bool _loaded = false;
 
+  /// 书架启动：只读封面文件与 `.pal.json`，**不跑取色**
   static Future<void> preload(Iterable<String> sourcePaths) async {
-    if (_loaded) {
-      for (final p in sourcePaths) {
-        final f = coverCacheFile(p);
-        if (!_files.containsKey(p) && f.existsSync()) {
-          _files[p] = f;
-        }
-      }
-      return;
-    }
-    _loaded = true;
     for (final p in sourcePaths) {
       final f = coverCacheFile(p);
-      if (f.existsSync()) _files[p] = f;
+      if (f.existsSync()) {
+        _files[p] = f;
+        CoverPalette.loadSidecar(p, f);
+      }
     }
-    await CoverPalette.warmAll(_files);
   }
 
   /// 同步取封面文件（无则 null）
@@ -866,6 +858,7 @@ class CoverStore {
     final f = coverCacheFile(sourcePath);
     if (f.existsSync()) {
       _files[sourcePath] = f;
+      CoverPalette.loadSidecar(sourcePath, f);
       return f;
     }
     return null;
@@ -892,7 +885,7 @@ File coverCacheFile(String sourcePath) {
   return File('$base/${hash.toRadixString(16)}.img');
 }
 
-/// 打开 EPUB 书时提取封面并落盘（书架跨启动显示；失败静默）
+/// 打开 EPUB：封面 + 主色各提取一次并永久落盘
 Future<void> persistBookCover(
   BookService service,
   String bookId,
@@ -902,10 +895,13 @@ Future<void> persistBookCover(
     final bytes = await service.getBookCover(bookId);
     if (bytes.isEmpty) return;
     final file = coverCacheFile(sourcePath);
-    if (file.existsSync()) return;
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(bytes);
+    if (!file.existsSync()) {
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(bytes);
+    }
     CoverStore.remember(sourcePath, file);
+    // 主色只在封面就绪后提取一次，写 sidecar；书架之后只读
+    await CoverPalette.extractAndPersist(sourcePath, file);
   } catch (_) {
     // 封面持久化失败不影响阅读
   }
