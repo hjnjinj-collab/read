@@ -1,14 +1,20 @@
 ---
 feature: app-shell-bookshelf-ui
-status: in-progress
+status: delivered
 updated: 2026-09-13
 branch: master
-commits: 
+commits: 88cb22a..0c388c6
 ---
 
 # 应用壳 + 书架 UI 重做
 
 ## Report
+
+**What was built** — 从零落地应用壳设计系统：松绿灰 seed 全量 `ColorScheme`、Iconsax 图标、`go_router` ShellRoute 三 Tab（书架/书源/设置）。底栏为毛玻璃 `NavigationBar`（`BackdropFilter` + `primaryContainer@0.72` 单层着色，`extendBody` 让内容穿过；系统「减弱动态」时退化为不透明实底）。书架支持岛屿封面网格（响应式 2/3/4 列）与列表双模式，偏好落库；网格封面带 Hero，阅读页有对应落点。书源页为空壳占位；设置页含布局/动态取色（默认关）/版本/关于。
+
+**Verification** — `flutter analyze` 新 UI 路径 0 error；全量 analyze 0 error（PRE-EXISTING 25 条 reader info/warning）；`flutter test test/book_source_service_test.dart` 14 PASS。独立评审发现并修复：玻璃双层不透明、FAB 被底栏遮挡、`/reader` extra 硬转型、Hero 无落点。
+
+**Journey log** — 1) `dynamic_color` 2.x 的 `ColorScheme` 与 framework 类型分叉，改走 `CorePalette` 取 primary 再 `fromSeed` 派生。2) 外层 `extendBody` 时内层 Scaffold FAB 不会自动避开 bottomNavigationBar，须手动抬高。3) `NavigationBarThemeData.backgroundColor` 会叠在自定义玻璃 ColoredBox 上，玻璃路径必须强制 `Colors.transparent`。4) Hero 只有源没有落点不会崩但也没有飞入。5) 书源网络层其实已完备，README 旧表述已更正。
 
 ## [S1] Problem
 
