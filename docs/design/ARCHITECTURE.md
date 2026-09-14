@@ -1155,7 +1155,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
   - 推荐优化方向：缓存优化 + 批量 API（已完成）
 
 **所有 A1–A30d + APK 全线落地**。下一阶段候选：
-- P1：书源引擎接线（在线书城 UI——Rust 规则引擎+网络层已完备，Dart BookSourceService 已封装，UI 零调用）
+- P1：书源引擎接线（Rust 规则引擎+网络层+FFI+Dart 封装已完备，持久化为 stub、UI 零调用。完整边界见 [BOOK_SOURCE_BOUNDARY.md](./BOOK_SOURCE_BOUNDARY.md)）
 - P2：TTS 朗读（渲染高亮基建已有，缺语音引擎+分句调度）
 - ~~P2：笔记/划线持久化~~ **已完成（A31）**：`Notes` 表 + 阅读页划线/备注/列表 + 布局层 segments 高亮 + `batch_locate_notes` + excerpt 模糊重定位
 - P3：书架管理完善（分组/排序/书架内搜索/重命名）

@@ -32,8 +32,9 @@
 | 阅读设置体系 | ✅ 完成（持久化 + 即时生效） |
 | 性能架构（缓存/锁纪律） | ✅ 完成（四个锁竞争热点全部闭环） |
 | Windows / Android | ✅ 完成 |
+| 应用壳（书架/书源/设置 + 毛玻璃底栏） | ✅ 完成（书源为空壳占位） |
 | PDF / MOBI | ⏳ 计划中 |
-| 在线书源 | ⏳ 计划中 |
+| 在线书源 | 🔶 引擎已就绪，UI/持久化未接（[边界清单](./docs/design/BOOK_SOURCE_BOUNDARY.md)） |
 | iOS / Web | ⏳ 计划中 |
 
 ## 📖 格式支持
@@ -253,7 +254,7 @@ flutter_rust_bridge_codegen generate
 | 阅读菜单扩展 | 跨章连续进度滑杆、全书页数跳页 | 小-中 |
 | 锁竞争热点收尾 | 净化缓存磁盘重建持锁窗口、搜索结果缓存 | 小 |
 | 新格式 | PDF 支持 | 大 |
-| 在线书源 | book_source_engine 已就绪，缺网络层与 UI | 中-大 |
+| 在线书源 | 引擎+网络+FFI+Dart 封装已就绪；持久化 stub、UI 零调用。边界见 [BOOK_SOURCE_BOUNDARY.md](./docs/design/BOOK_SOURCE_BOUNDARY.md) | 中-大 |
 | iOS / Web | 跨平台扩展 | 大 |
 
 ### 已知边界（架构盘点发现）
@@ -263,10 +264,26 @@ flutter_rust_bridge_codegen generate
 - bridge 集成测试存在 A35-L2 签名漂移（PRE-EXISTING，待修复）
 - 普通段落 `text-align:right` 统一回落正文排版（装饰诗词页；A35.2 钦定）
 
+### 在线书源（开工前请读边界清单）
+
+引擎链路已通，但**不能**当作已完成的书城：
+
+| 层 | 状态 |
+|----|------|
+| 规则引擎 CSS/JSONPath/Regex + HTTP | ✅ `rust/crates/book_source_engine/` |
+| FFI search/info/toc/content | ✅ `bridge/api.rs` |
+| Dart 封装 + 模型测试 | ✅ `lib/core/services/book_source_service.dart` |
+| 书源持久化（load/list/delete/enable） | ❌ 仅校验/占位 |
+| 书源管理 / 在线搜索 / 下载进书架 UI | ❌ 零调用 |
+
+书源内 `@js:` 规则与章节识别 QuickJS **不是同一条链**（前者未实现）。  
+完整清单与正式开工顺序：[docs/design/BOOK_SOURCE_BOUNDARY.md](./docs/design/BOOK_SOURCE_BOUNDARY.md)
+
 ## 📚 文档
 
 - [开发者指南](./AGENTS.md) — 构建、架构注意事项（必读）
 - [详细架构 + 路线图](./docs/design/ARCHITECTURE.md)
+- [在线书源实现边界](./docs/design/BOOK_SOURCE_BOUNDARY.md) — **正式开工书源前必读**
 - [EPUB 渲染规则](./docs/design/EPUB_RENDER_RULES.md)
 - [特性文档](./docs/compose/spec/) — compose-next 交付记录
 - [变更日志](./CHANGELOG.md)
