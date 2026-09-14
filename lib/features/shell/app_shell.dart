@@ -7,7 +7,7 @@ import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
 
 /// 三 Tab 应用壳。
-/// 准则：模糊必须叠主色滤镜；底栏悬浮 + extendBody，封面从玻璃四周穿过。
+/// 底栏：主色滤镜玻璃（alpha 0.5）+ 上方氛围晕染；extendBody 让封面穿过。
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
 
@@ -45,52 +45,48 @@ class AppShell extends StatelessWidget {
       ),
     ];
 
-    Widget bar;
+    final bar = NavigationBar(
+      selectedIndex: index,
+      onDestinationSelected: (i) => context.go(_tabs[i]),
+      backgroundColor: Colors.transparent,
+      destinations: destinations,
+    );
+
+    Widget glassBar;
     if (disableBlur) {
-      bar = ClipRRect(
+      glassBar = ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: ColoredBox(
-          color: scheme.surfaceContainer,
-          child: NavigationBar(
-            selectedIndex: index,
-            onDestinationSelected: (i) => context.go(_tabs[i]),
-            backgroundColor: Colors.transparent,
-            destinations: destinations,
-          ),
+          color: scheme.primaryContainer.withValues(alpha: 0.92),
+          child: bar,
         ),
       );
     } else {
-      bar = ClipRRect(
+      glassBar = ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: BackdropFilter(
           filter: ImageFilter.blur(
             sigmaX: AppGlass.blurSigma,
             sigmaY: AppGlass.blurSigma,
           ),
-          // 准则：模糊 + 净色主色滤镜（近白底，轻染 primary）
           child: ColoredBox(
             color: AppGlass.tint(scheme, strength: 0.5),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(
-                  color: scheme.primary.withValues(alpha: 0.12),
-                  width: 0.8,
+                  color: scheme.primary.withValues(alpha: 0.22),
+                  width: 0.9,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: scheme.shadow.withValues(alpha: 0.08),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
+                    color: scheme.primary.withValues(alpha: 0.14),
+                    blurRadius: 28,
+                    offset: const Offset(0, 10),
                   ),
                 ],
               ),
-              child: NavigationBar(
-                selectedIndex: index,
-                onDestinationSelected: (i) => context.go(_tabs[i]),
-                backgroundColor: Colors.transparent,
-                destinations: destinations,
-              ),
+              child: bar,
             ),
           ),
         ),
@@ -99,11 +95,37 @@ class AppShell extends StatelessWidget {
 
     return Scaffold(
       extendBody: true,
-      body: child,
+      body: Stack(
+        children: [
+          child,
+          // 底部氛围：主色自下而上淡出，范围更大
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: AppGlass.bottomAmbientHeight,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      scheme.primary.withValues(alpha: 0.18),
+                      scheme.primary.withValues(alpha: 0.08),
+                      scheme.primary.withValues(alpha: 0),
+                    ],
+                    stops: const [0, 0.4, 1],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       bottomNavigationBar: Padding(
-        // 悬浮：左右留白，封面从侧边与底部露出
         padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + bottomSafe * 0.3),
-        child: bar,
+        child: glassBar,
       ),
     );
   }

@@ -189,7 +189,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return Material(color: scheme.surface, child: row);
     }
 
-    // 顶栏渐变模糊：上重糊近白 → 下淡出，避免封面色糊成脏条
+    // 顶栏渐变模糊：加高 + 多段渐变，消除中部「截断带」
     final h = AppGlass.topGlassHeight + topPad;
     return SizedBox(
       height: h,
@@ -206,11 +206,13 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                 end: Alignment.bottomCenter,
                 colors: [
                   AppGlass.topTint(scheme),
-                  AppGlass.topTint(scheme).withValues(alpha: 0.92),
-                  AppGlass.topTint(scheme).withValues(alpha: 0.55),
+                  AppGlass.topTint(scheme),
+                  AppGlass.topTint(scheme).withValues(alpha: 0.88),
+                  AppGlass.topTint(scheme).withValues(alpha: 0.62),
+                  AppGlass.topTint(scheme).withValues(alpha: 0.28),
                   AppGlass.topTint(scheme).withValues(alpha: 0),
                 ],
-                stops: const [0, 0.45, 0.72, 1],
+                stops: const [0, 0.28, 0.48, 0.68, 0.86, 1],
               ),
             ),
             child: row,

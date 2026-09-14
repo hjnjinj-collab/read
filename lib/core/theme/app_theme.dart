@@ -124,38 +124,37 @@ class AppTheme {
   }
 }
 
-/// 毛玻璃准则：重模糊 + 干净近白遮罩；primary 只作发丝描边，避免脏色。
+/// 毛玻璃准则：重模糊 + 主色滤镜（底栏 alpha≈0.5，主题色可感但不脏）。
 class AppGlass {
   AppGlass._();
 
-  /// 底栏：高不透明近白/近黑，几乎不吃封面色相 →「净」
+  /// 底栏：surface 与 primary 混合，整体 alpha≈0.5
   static Color tint(ColorScheme scheme, {double strength = 0.55}) {
     final base = scheme.brightness == Brightness.light
-        ? const Color(0xFFF4F6F3)
+        ? const Color(0xFFF2F5F1)
         : const Color(0xFF1A1D1A);
-    // strength 仅极轻染 primary，防止整片橄榄
-    return Color.lerp(base, scheme.primary, strength * 0.06)!
-        .withValues(alpha: scheme.brightness == Brightness.light ? 0.78 : 0.72);
+    return Color.lerp(base, scheme.primaryContainer, strength)!
+        .withValues(alpha: 0.5);
   }
 
-  /// 顶栏：上更实、可下渐隐；同样近白，不混封面色
+  /// 顶栏：近白轻染 primary，上实下虚由外层 gradient 控制
   static Color topTint(ColorScheme scheme) {
     final base = scheme.brightness == Brightness.light
         ? const Color(0xFFF7F8F5)
         : const Color(0xFF151815);
-    return Color.lerp(base, scheme.primary, 0.04)!
-        .withValues(alpha: scheme.brightness == Brightness.light ? 0.82 : 0.78);
+    return Color.lerp(base, scheme.primary, 0.06)!
+        .withValues(alpha: scheme.brightness == Brightness.light ? 0.84 : 0.8);
   }
 
-  /// 顶栏底部渐隐到此 alpha
-  static double get topFadeAlpha => 0.0;
+  /// 底栏上方氛围晕染高度（扩大「底部氛围」范围）
+  static const double bottomAmbientHeight = 160;
 
-  /// 模糊半径：顶栏更重，把封面细节彻底糊掉
+  /// 模糊半径
   static const double blurSigma = 48;
-  static const double topBlurSigma = 64;
+  static const double topBlurSigma = 56;
 
-  /// 顶栏渐变模糊高度
-  static const double topGlassHeight = 112;
+  /// 顶栏渐变模糊高度（加高，避免中部截断带）
+  static const double topGlassHeight = 148;
 }
 
 /// 弹簧物理：统一曲线源（Flutter 系统弹簧族）
