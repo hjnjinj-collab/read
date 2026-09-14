@@ -74,14 +74,14 @@ class AppShell extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(
-                  color: scheme.primary.withValues(alpha: 0.18),
-                  width: 0.9,
+                  color: scheme.primary.withValues(alpha: 0.12),
+                  width: 0.8,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: scheme.shadow.withValues(alpha: 0.12),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
+                    color: scheme.shadow.withValues(alpha: 0.08),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),

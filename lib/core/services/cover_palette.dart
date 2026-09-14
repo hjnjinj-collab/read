@@ -19,18 +19,18 @@ class CoverColors {
   /// 阴影：中等明度、中等饱和，避免刺眼或脏黑
   Color get shadowColor => CoverPalette.clampMood(dominant);
 
-  /// 海报底部 scrim：偏中亮，避免整卡发闷
+  /// 海报底部 scrim：再抬亮，避免整卡发闷
   Color get posterScrim => CoverPalette.clampMood(
-        Color.lerp(dark, dominant, 0.5)!,
-        minL: 0.18,
-        maxL: 0.48,
+        Color.lerp(dark, dominant, 0.55)!,
+        minL: 0.22,
+        maxL: 0.55,
       );
 
-  /// 顶部微光：更亮，氛围能看出来
+  /// 顶部微光：更亮
   Color get posterHighlight => CoverPalette.clampMood(
-        Color.lerp(vibrant, Colors.white, 0.35)!,
-        minL: 0.62,
-        maxL: 0.82,
+        Color.lerp(vibrant, Colors.white, 0.42)!,
+        minL: 0.68,
+        maxL: 0.88,
       );
 
   /// 缎带/强调（需足够对比，不可过暗）

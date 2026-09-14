@@ -185,35 +185,35 @@ class _BookCoverCardState extends State<BookCoverCard>
                       child: imageChild,
                     ),
 
-                  // 海报氛围：提亮顶光、减淡暗角，主色侧染更明显
+                  // 海报氛围：亮顶光、轻底 scrim，整卡偏明
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          colors.posterHighlight.withValues(alpha: 0.28),
+                          colors.posterHighlight.withValues(alpha: 0.35),
                           Colors.transparent,
-                          colors.posterScrim.withValues(alpha: 0.18),
-                          colors.posterScrim.withValues(alpha: 0.55),
-                          colors.posterScrim.withValues(alpha: 0.88),
+                          colors.posterScrim.withValues(alpha: 0.12),
+                          colors.posterScrim.withValues(alpha: 0.42),
+                          colors.posterScrim.withValues(alpha: 0.78),
                         ],
-                        stops: const [0, 0.3, 0.52, 0.78, 1],
+                        stops: const [0, 0.32, 0.55, 0.8, 1],
                       ),
                     ),
                   ),
-                  // 侧向氛围：左缘主色更亮
+                  // 侧向亮染
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.centerLeft,
                         end: Alignment.centerRight,
                         colors: [
-                          colors.vibrant.withValues(alpha: 0.32),
-                          colors.vibrant.withValues(alpha: 0.08),
+                          colors.vibrant.withValues(alpha: 0.4),
+                          colors.vibrant.withValues(alpha: 0.1),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.35, 1],
+                        stops: const [0, 0.4, 1],
                       ),
                     ),
                   ),

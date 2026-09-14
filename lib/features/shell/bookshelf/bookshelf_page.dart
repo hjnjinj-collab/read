@@ -189,15 +189,15 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return Material(color: scheme.surface, child: row);
     }
 
-    // 顶栏渐变模糊：上实下虚，滚入封面时有「雾化」过渡
+    // 顶栏渐变模糊：上重糊近白 → 下淡出，避免封面色糊成脏条
     final h = AppGlass.topGlassHeight + topPad;
     return SizedBox(
       height: h,
       child: ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: AppGlass.blurSigma * 0.7,
-            sigmaY: AppGlass.blurSigma * 0.7,
+            sigmaX: AppGlass.topBlurSigma,
+            sigmaY: AppGlass.topBlurSigma,
           ),
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -206,10 +206,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                 end: Alignment.bottomCenter,
                 colors: [
                   AppGlass.topTint(scheme),
+                  AppGlass.topTint(scheme).withValues(alpha: 0.92),
                   AppGlass.topTint(scheme).withValues(alpha: 0.55),
                   AppGlass.topTint(scheme).withValues(alpha: 0),
                 ],
-                stops: const [0, 0.62, 1],
+                stops: const [0, 0.45, 0.72, 1],
               ),
             ),
             child: row,
