@@ -135,10 +135,15 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _pickAndOpenBook,
-        tooltip: '导入书籍',
-        child: const Icon(AppIcons.add),
+      // 外层壳 extendBody：内层 FAB 不会自动避开毛玻璃底栏，手动抬高 68
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 68),
+        child: FloatingActionButton(
+          onPressed: _pickAndOpenBook,
+          tooltip: '导入书籍',
+          child: const Icon(AppIcons.add),
+        ),
       ),
       body: CustomScrollView(
         slivers: [
@@ -212,7 +217,6 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                   final (book, progress) = _entries[index];
                   return BookListTile(
                     book: book,
-                    progress: progress,
                     subtitle: _subtitle(book, progress),
                     onTap: () => _openBook(book),
                     onRemove: () => _removeBook(book),

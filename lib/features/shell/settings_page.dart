@@ -49,7 +49,7 @@ class SettingsPage extends ConsumerWidget {
                   loading: () => const Text('读取中…'),
                   error: (_, _) => const Text('版本未知'),
                 ),
-                trailing: const Icon(Icons.chevron_right),
+                trailing: const Icon(AppIcons.chevronRight),
                 onTap: () => context.push('/about'),
               ),
               const SizedBox(height: 120),

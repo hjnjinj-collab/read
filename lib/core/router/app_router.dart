@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -36,10 +37,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/reader',
         builder: (context, state) {
-          final extra = state.extra as Map<String, String>;
+          final extra = state.extra;
+          if (extra is! Map) {
+            return const _InvalidReaderArgs();
+          }
+          final filePath = extra['filePath']?.toString() ?? '';
+          if (filePath.isEmpty) {
+            return const _InvalidReaderArgs();
+          }
           return ReaderPage(
-            filePath: extra['filePath']!,
-            bookName: extra['bookName'] ?? '',
+            filePath: filePath,
+            bookName: extra['bookName']?.toString() ?? '',
           );
         },
       ),
@@ -50,3 +58,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+class _InvalidReaderArgs extends StatelessWidget {
+  const _InvalidReaderArgs();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('无效的书籍参数')),
+    );
+  }
+}

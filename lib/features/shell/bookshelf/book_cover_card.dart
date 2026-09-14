@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/theme/app_icons.dart';
 
 /// 岛屿书封卡（网格模式签名元素）
 class BookCoverCard extends StatelessWidget {
@@ -52,7 +51,8 @@ class BookCoverCard extends StatelessWidget {
                       ? Image.file(
                           cover,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => _PlaceholderCover(scheme: scheme),
+                          errorBuilder: (_, _, _) =>
+                              _PlaceholderCover(scheme: scheme),
                         )
                       : _PlaceholderCover(scheme: scheme),
                 ),
@@ -131,7 +131,7 @@ class _PlaceholderCover extends StatelessWidget {
       ),
       child: Center(
         child: Icon(
-          Icons.menu_book_outlined,
+          AppIcons.emptyBook,
           size: 36,
           color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
         ),
@@ -145,14 +145,12 @@ class BookListTile extends StatelessWidget {
   const BookListTile({
     super.key,
     required this.book,
-    required this.progress,
     required this.subtitle,
     required this.onTap,
     required this.onRemove,
   });
 
   final Book book;
-  final ReadingProgressData? progress;
   final String subtitle;
   final VoidCallback onTap;
   final VoidCallback onRemove;
@@ -193,7 +191,7 @@ class BookListTile extends StatelessWidget {
             ),
       ),
       trailing: IconButton(
-        icon: const Icon(Icons.close, size: 18),
+        icon: const Icon(AppIcons.remove, size: 18),
         tooltip: '移出书架',
         onPressed: onRemove,
       ),
@@ -212,13 +210,10 @@ class _ListPlaceholder extends StatelessWidget {
     return ColoredBox(
       color: scheme.surfaceContainerHighest,
       child: Icon(
-        Icons.menu_book_outlined,
+        AppIcons.emptyBook,
         size: 22,
         color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
       ),
     );
   }
 }
-
-/// 封面文件（复用 book_service 缓存路径）
-File? coverFileOf(String filePath) => cachedCoverFor(filePath);

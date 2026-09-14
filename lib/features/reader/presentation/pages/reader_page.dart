@@ -677,6 +677,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             }
             return Stack(
               children: [
+                // Hero 落点：书架岛屿封面飞入后收束（阅读页本身不展示封面）
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  child: Hero(
+                    tag: 'cover:${widget.filePath}',
+                    child: const SizedBox(width: 1, height: 1),
+                  ),
+                ),
                 // P4: 阅读区域用 Listener + PageTurnComposer
                 Listener(
               onPointerDown: _onPointerDown,

@@ -5,7 +5,6 @@ class AppIcons {
   AppIcons._();
 
   static const bookshelf = Iconsax.book_1;
-  static const bookshelfActive = Iconsax.book_1;
   static const sources = Iconsax.cloud;
   static const settings = Iconsax.setting_2;
   static const add = Iconsax.add;
@@ -16,4 +15,5 @@ class AppIcons {
   static const remove = Iconsax.trash;
   static const emptyBook = Iconsax.book;
   static const emptyCloud = Iconsax.cloud;
+  static const chevronRight = Iconsax.arrow_right_2;
 }
