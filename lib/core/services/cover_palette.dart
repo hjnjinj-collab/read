@@ -219,7 +219,7 @@ class CoverPalette {
 
   /// 按「面积占比」选主色，避免高饱和点缀色（灯笼红等）抢走翡翠绿
   static CoverColors? _pickFromGenerator(PaletteGenerator generator) {
-    final swatches = generator.colors.toList()
+    final swatches = generator.paletteColors.toList()
       ..sort((a, b) => b.population.compareTo(a.population));
 
     // 过滤过灰/过黑/过白，再在剩余里取面积最大者作 dominant
