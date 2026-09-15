@@ -160,6 +160,15 @@ class AppMotion {
   static const Curve springOut = Curves.easeOutBack;
   static const Curve enter = Curves.easeOutCubic;
   static const Curve exit = Curves.easeInCubic;
+  // 网格重排：直接位移，禁止回弹/缩放
+  static const Curve reorder = Curves.easeOutCubic;
+  static const Duration reorderDuration = Duration(milliseconds: 300);
+  // 阅读页 ↔ 书架：整页缩向第一本槽位（偏慢，便于看清「从哪来到哪去」）
+  static const Curve readerShrink = Curves.easeInOutCubic;
+  static const Duration readerShrinkDuration = Duration(milliseconds: 620);
+  static const double readerShrinkEndScale = 0.22;
+  /// pop 时 reverse 动画的前 (1 - hold) 段保持不透明，仅末段淡出
+  static const double readerShrinkFadeHold = 0.28;
   static const Duration switchDuration = Duration(milliseconds: 260);
   static const Duration staggerStep = Duration(milliseconds: 28);
   static const int staggerMaxItems = 12;

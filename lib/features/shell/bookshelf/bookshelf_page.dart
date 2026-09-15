@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show listEquals;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +16,7 @@ import '../../reader/presentation/providers/reader_provider.dart'
     show appDatabaseProvider;
 import '../providers/shell_settings.dart';
 import 'book_cover_card.dart';
+import 'bookshelf_layout.dart';
 
 /// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -31,9 +34,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   bool _shellEnteredOnce = false;
   String? _highlightPath;
   Timer? _highlightTimer;
-  Timer? _justMovedTimer;
+  Timer? _flipClearTimer;
   List<String> _prevOrder = const [];
-  String? _justMovedPath;
+  Map<String, int> _prevIndex = const {};
+  bool _flipArmed = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -48,7 +52,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   @override
   void dispose() {
     _highlightTimer?.cancel();
-    _justMovedTimer?.cancel();
+    _flipClearTimer?.cancel();
     super.dispose();
   }
 
@@ -62,19 +66,29 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       for (var i = 0; i < books.length; i++) (books[i], progress[i]),
     ];
     final order = [for (final b in books) b.filePath];
-    String? moved;
-    if (!initial &&
+    final oldIndex = <String, int>{
+      for (var i = 0; i < _prevOrder.length; i++) _prevOrder[i]: i,
+    };
+    final orderChanged = !initial &&
         _prevOrder.isNotEmpty &&
-        order.isNotEmpty &&
-        order.first != _prevOrder.first) {
-      moved = order.first;
-    }
+        !listEquals(order, _prevOrder);
     setState(() {
       _entries = entries;
+      _prevIndex = oldIndex;
       _prevOrder = order;
-      _justMovedPath = moved;
+      _flipArmed = orderChanged &&
+          !MediaQuery.disableAnimationsOf(context);
       if (initial) _loading = false;
     });
+    if (_flipArmed) {
+      _flipClearTimer?.cancel();
+      _flipClearTimer = Timer(
+        AppMotion.reorderDuration + const Duration(milliseconds: 40),
+        () {
+          if (mounted) setState(() => _flipArmed = false);
+        },
+      );
+    }
     if (initial) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -84,28 +98,47 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     }
   }
 
+  /// 网格槽位左上角（与 GridView padding/gap/aspect 一致）
+  Offset _gridOrigin(
+    int index, {
+    required int cols,
+    required double cellW,
+    required double cellH,
+  }) {
+    return BookshelfLayout.cellOrigin(
+      index,
+      cols: cols,
+      cellW: cellW,
+      cellH: cellH,
+    );
+  }
+
+  /// 列表行顶（leading 高 66 + 上下 padding 12，分隔线 1）
+  double _listRowTop(int index) => index * (66 + 12 + 1);
+
   Future<void> _openBook(Book book) async {
+    final shelfIndex =
+        _entries.indexWhere((e) => e.$1.filePath == book.filePath);
     await _db.touchLastRead(book.filePath);
     if (!mounted) return;
     await context.push('/reader', extra: {
       'filePath': book.filePath,
       'bookName': book.title,
+      // push 缩放起点：当前书槽位（从哪来）；pop 固定落首位（去哪）
+      'shelfIndex': shelfIndex < 0 ? 0 : shelfIndex,
     });
+    if (!mounted) return;
+    // 先 FLIP 让位，动画结束后再点亮描边，避免与位移叠在一起看不清
+    await _refresh();
+    await Future<void>.delayed(
+      AppMotion.reorderDuration + const Duration(milliseconds: 40),
+    );
     if (!mounted) return;
     _highlightTimer?.cancel();
     setState(() => _highlightPath = book.filePath);
-    _highlightTimer = Timer(const Duration(milliseconds: 900), () {
+    _highlightTimer = Timer(const Duration(milliseconds: 1600), () {
       if (!mounted) return;
-      setState(() {
-        _highlightPath = null;
-        _justMovedPath = null;
-      });
-    });
-    await _refresh();
-    // 推入动画结束后清标记，避免残留导致下次无动画
-    _justMovedTimer?.cancel();
-    _justMovedTimer = Timer(const Duration(milliseconds: 420), () {
-      if (mounted) setState(() => _justMovedPath = null);
+      setState(() => _highlightPath = null);
     });
   }
 
@@ -178,12 +211,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     }
   }
 
-  int _columnsForWidth(double width) {
-    if (width < 360) return 2;
-    if (width < 700) return 3;
-    if (width < 1000) return 4;
-    return 5;
-  }
+  int _columnsForWidth(double width) =>
+      BookshelfLayout.columnsForWidth(width);
 
   Widget _buildHeader(BuildContext context, ShellSettings shell,
       ShellSettingsNotifier notifier, ColorScheme scheme) {
@@ -308,20 +337,24 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     } else if (_entries.isEmpty) {
       content = _EmptyShelf(onImport: _pickAndOpenBook);
     } else if (shell.bookshelfGrid) {
+      final cols = _columnsForWidth(width);
+      final padH = BookshelfLayout.padH;
+      final gap = BookshelfLayout.gap;
+      final cellW = BookshelfLayout.cellWidth(width, cols);
+      final cellH = BookshelfLayout.cellHeight(cellW);
       content = GridView.builder(
         key: const ValueKey('grid'),
-        padding: EdgeInsets.fromLTRB(12, topGlass + 4, 12, bottomPad),
+        padding: EdgeInsets.fromLTRB(padH, topGlass + 4, padH, bottomPad),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: _columnsForWidth(width),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.68,
+          crossAxisCount: cols,
+          mainAxisSpacing: gap,
+          crossAxisSpacing: gap,
+          childAspectRatio: BookshelfLayout.childAspectRatio,
         ),
         itemCount: _entries.length,
         itemBuilder: (context, index) {
           final (book, progress) = _entries[index];
           final highlighted = _highlightPath == book.filePath;
-          final moved = _justMovedPath == book.filePath;
           Widget card = BookCoverCard(
             key: ValueKey(book.filePath),
             book: book,
@@ -332,26 +365,20 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             onTap: () => _openBook(book),
             onLongPress: () => _removeBook(book),
           );
-          if (moved) {
-            // 最近阅读插到首位：轻位移淡入，避免与按压缩放/Hero 叠成回弹
-            card = TweenAnimationBuilder<double>(
-              key: ValueKey('move-${book.filePath}'),
-              tween: Tween(begin: 1, end: 0),
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeOutCubic,
-              builder: (context, t, child) {
-                return Opacity(
-                  opacity: 1 - t * 0.4,
-                  child: Transform.translate(
-                    offset: Offset(0, 16 * t),
-                    child: child,
-                  ),
-                );
-              },
-              child: card,
-            );
+          final old = _flipArmed ? _prevIndex[book.filePath] : null;
+          final Offset begin;
+          if (old != null && old != index) {
+            begin = _gridOrigin(old, cols: cols, cellW: cellW, cellH: cellH) -
+                _gridOrigin(index, cols: cols, cellW: cellW, cellH: cellH);
+          } else {
+            begin = Offset.zero;
           }
-          return card;
+          // 稳定外层，避免 FLIP 包装/卸下导致卡片 State remount
+          return _FlipSlot(
+            key: ValueKey('flip-${book.filePath}'),
+            begin: begin,
+            child: card,
+          );
         },
       );
       if (!_shellEnteredOnce) {
@@ -367,12 +394,21 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
         itemBuilder: (context, index) {
           final (book, progress) = _entries[index];
-          return BookListTile(
+          Widget tile = BookListTile(
             key: ValueKey(book.filePath),
             book: book,
             subtitle: _subtitle(book, progress),
             onTap: () => _openBook(book),
             onRemove: () => _removeBook(book),
+          );
+          final old = _flipArmed ? _prevIndex[book.filePath] : null;
+          final Offset begin = (old != null && old != index)
+              ? Offset(0, _listRowTop(old) - _listRowTop(index))
+              : Offset.zero;
+          return _FlipSlot(
+            key: ValueKey('flip-${book.filePath}'),
+            begin: begin,
+            child: tile,
           );
         },
       );
@@ -416,6 +452,83 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// FLIP 位移：从旧槽位滑到新槽位，无回弹/缩放。
+/// 始终挂在卡片外（key 稳定），避免包装/卸下造成封面 State remount。
+class _FlipSlot extends StatefulWidget {
+  const _FlipSlot({
+    super.key,
+    required this.begin,
+    required this.child,
+  });
+
+  /// 相对终态的起点偏移；[Offset.zero] 表示不重排
+  final Offset begin;
+  final Widget child;
+
+  @override
+  State<_FlipSlot> createState() => _FlipSlotState();
+}
+
+class _FlipSlotState extends State<_FlipSlot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late Animation<Offset> _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: AppMotion.reorderDuration,
+    );
+    _bindOffset(widget.begin);
+    if (widget.begin == Offset.zero) {
+      _ctrl.value = 1;
+    } else {
+      _ctrl.forward();
+    }
+  }
+
+  void _bindOffset(Offset begin) {
+    _offset = Tween<Offset>(begin: begin, end: Offset.zero).animate(
+      CurvedAnimation(parent: _ctrl, curve: AppMotion.reorder),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _FlipSlot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.begin == oldWidget.begin) return;
+    if (widget.begin == Offset.zero) {
+      // 本轮重排结束：直接落到终态
+      _ctrl.value = 1;
+      _bindOffset(Offset.zero);
+      return;
+    }
+    _bindOffset(widget.begin);
+    _ctrl.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _offset,
+      builder: (context, child) {
+        final o = _offset.value;
+        if (o == Offset.zero) return child!;
+        return Transform.translate(offset: o, child: child);
+      },
+      child: widget.child,
     );
   }
 }

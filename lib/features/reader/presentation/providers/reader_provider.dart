@@ -766,7 +766,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         chapters: chapters,
         currentChapterIndex: 0,
         currentPageIndex: 0,
-        isLoading: false,
+        // 保持 loading 直到首页就绪——此处若 false 会在无 currentPage 时闪 "No content"
+        isLoading: true,
       );
 
       // 书架登记
@@ -796,6 +797,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-load'});
         return;
       }
+      // 首页已提交，结束 loading
+      state = state.copyWith(isLoading: false);
 
       // A31 布局层单轨：加载页后刷本章笔记（内部会从 _rawCurrentPage re-enrich）
       await _refreshCurrentChapterNotes(force: true);

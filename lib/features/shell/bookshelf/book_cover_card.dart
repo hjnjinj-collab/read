@@ -151,25 +151,42 @@ class _BookCoverCardState extends State<BookCoverCard>
           // 按压反馈从紧，避免与排序位移叠成「回弹」
           duration: Duration(milliseconds: _pressed ? 70 : 140),
           curve: _pressed ? Curves.easeOut : Curves.easeOutCubic,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 280),
+          // 外层：提取色氛围光（参考图卡片外圈色晕）+ 高亮描边
+          // 描边/光晕在 Material 外，clip 不会裁掉
+          child: DecoratedBox(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(kCoverRadius),
+              borderRadius: radius,
               border: widget.highlighted
                   ? Border.all(
-                      color: Theme.of(context).colorScheme.primary,
-                      width: 2,
+                      // 与封面提取色同调（accent 已夹紧 L/S，凝实可读）
+                      color: colors.accent,
+                      width: 5,
+                      strokeAlign: BorderSide.strokeAlignOutside,
                     )
                   : null,
+              boxShadow: [
+                // 主色厚晕 + vibrant 外扩，形成封面外的氛围感
+                BoxShadow(
+                  color: colors.dominant.withValues(alpha: 0.32),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 4),
+                ),
+                BoxShadow(
+                  color: colors.vibrant.withValues(alpha: 0.18),
+                  blurRadius: 36,
+                  spreadRadius: 8,
+                ),
+              ],
             ),
             child: Material(
               shape: RoundedRectangleBorder(borderRadius: radius),
-            clipBehavior: Clip.antiAlias,
-            elevation: _pressed ? 2 : 6,
-            shadowColor: colors.shadowColor.withValues(alpha: 0.55),
-            surfaceTintColor: Colors.transparent,
-            color: colors.dark,
-            child: InkWell(
+              clipBehavior: Clip.antiAlias,
+              elevation: _pressed ? 1 : 2,
+              shadowColor: colors.shadowColor.withValues(alpha: 0.4),
+              surfaceTintColor: Colors.transparent,
+              color: colors.dark,
+              child: InkWell(
               onTap: widget.onTap,
               onLongPress: widget.onLongPress,
               onHighlightChanged: (v) => setState(() => _pressed = v),
@@ -221,37 +238,38 @@ class _BookCoverCardState extends State<BookCoverCard>
                       ),
                     ),
                   ),
-                  // 提取色弥漫：底部厚，25% 处仍 0.88，其后递减上涌消散
+                  // 提取色弥漫：底部 0.9 起，约 30% 高度内缓降到 0.72，再上涌消散
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          colors.dominant.withValues(alpha: 1.0),
-                          colors.dominant.withValues(alpha: 0.88),
-                          Color.lerp(colors.dominant, colors.vibrant, 0.4)!
-                              .withValues(alpha: 0.62),
-                          colors.vibrant.withValues(alpha: 0.34),
-                          colors.dominant.withValues(alpha: 0.12),
+                          colors.dominant.withValues(alpha: 0.9),
+                          colors.dominant.withValues(alpha: 0.72),
+                          Color.lerp(colors.dominant, colors.vibrant, 0.45)!
+                              .withValues(alpha: 0.48),
+                          colors.vibrant.withValues(alpha: 0.3),
+                          Color.lerp(colors.vibrant, colors.posterHighlight, 0.35)!
+                              .withValues(alpha: 0.16),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.25, 0.42, 0.58, 0.72, 0.88],
+                        stops: const [0, 0.30, 0.48, 0.62, 0.76, 0.9],
                       ),
                     ),
                   ),
-                  // 仅底部轻压保证白字
+                  // 仅底部极轻压保证白字可读
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          Colors.black.withValues(alpha: 0.2),
-                          Colors.black.withValues(alpha: 0.04),
+                          Colors.black.withValues(alpha: 0.12),
+                          Colors.black.withValues(alpha: 0.02),
                           Colors.transparent,
                         ],
-                        stops: const [0, 0.22, 0.42],
+                        stops: const [0, 0.2, 0.38],
                       ),
                     ),
                   ),
@@ -310,11 +328,12 @@ class _BookCoverCardState extends State<BookCoverCard>
                       ),
                     ),
                   ),
+
                 ],
               ),
             ),
           ),
-        ),
+          ),
         ),
       ),
     );

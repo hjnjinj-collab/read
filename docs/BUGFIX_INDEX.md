@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-09-09
+> 最后更新: 2026-09-15
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -34,6 +34,7 @@
 | **页尾长段落整段下移造成半页空白（调低填充门槛更严重）** | layout_text 决策块在 fill≥page_fill_threshold 时无条件整段推页，空白上限=1−threshold；行级续排循环虽存在但被该分支拦截 | M9.2：删除整段推页决策，改为行级精度——算剩余空间可容行数、放得下的行留下、余量推下页；仅保留孤行(<2行)/寡行(下页单行)轻保护。TXT 路径不再消费 page_fill_threshold（EPUB 仍消费） |
 | **TXT 阅读整体卡顿、越读越卡（翻页/设置面板/全局 UI 均卡）** | ①预加载自激级联：warm→miss→trigger→warm 无限推进全书、无去重无取消，10 章 LRU 被冲成滑动窗口→当前章被挤出→每次翻页同步全章重排；②命中路径每次翻页深克隆整章所有页；③is_chapter_marker 每次调用现场编译 3 个正则（每章数千次） | M9.3：①get_chapter_content 拆 impl(trigger)+quiet 封装、process_and_layout_chapter_inner(allow_preload_trigger) 参数化打断闭环 + 策略收窄 [N±1] + executor try_submit_dedup 去重（并修复 PreloadHandle Drop 自动取消误杀任务：内联等待终态）；②CachedChapterPages.pages 包 Arc（对齐 EPUB 先例），命中零克隆；③OnceLock 静态化正则（含 protect_html_tags） |
 | **`flutter build apk` 卡在 "Building native assets failed"（sqlite3 hook）** | sqlite3 默认从 `github.com` 下载预编译 .so，墙内网络 `HttpException: 信号灯超时` | [bugfixes/2026-08-29_Android构建sqlite3_hook_GitHub下载不通](./bugfixes/2026-08-29_Android构建sqlite3_hook_GitHub下载不通.md) ⭐ pubspec 加 `hooks.user_defines.sqlite3: source: source + path: <相对路径>` 走 NDK 本地编译 |
+| **Windows `build.ps1` 报 `Member not found: 'arm64e'`（objective_c hook）** | `objective_c 9.6.1` hook 引用 `Architecture.arm64e`，但已发布 `code_assets 2.0.0` 无此成员；path_provider 传递拉入 | [bugfixes/2026-09-15_objective_c_9.6.1_arm64e_hook编译失败](./bugfixes/2026-09-15_objective_c_9.6.1_arm64e_hook编译失败.md) ⭐ `dependency_overrides: objective_c: 9.6.0` |
 | **`flutter build apk` 报 `Dependency ':flutter_plugin_android_lifecycle' requires compile against version 36 or later`** | Flutter 17.x 默认 `flutter.compileSdkVersion = 34`，但 AGP 9.0.1 在 `CheckAarMetadataWorkAction` 强制校验 AAR `min-compile-sdk=36`；多个 plugin 自己 build.gradle 写 `compileSdk flutter.compileSdkVersion` 也得改 | [bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补](./bugfixes/2026-08-29_AGP9_强制compileSdk36_pub_cache修补.md) ⭐ app/build.gradle.kts 硬编 `compileSdk = 36` + 修补 pub cache 所有 plugin + 禁 Kotlin 增量编译（跨盘符相对路径错误） |
 | **`flutter build apk` 报 `Member not found: 'platform'`** | file_picker 12.x 引入 plugin federation（Android 拆 `android_file_picker`），`FilePicker.platform` 移除；`pickFiles()` 返回类型从 `FilePickerResult?` 变 `List<PlatformFile>` | [bugfixes/2026-08-29_file_picker_12.x_API破坏性变更](./bugfixes/2026-08-29_file_picker_12.x_API破坏性变更.md) ⭐ `FilePicker.platform.pickFiles()` → `FilePicker.pickFiles()`，`result.files.single` → `files.first` |
 | **APK 安装成功但启动白/黑屏卡死（Flutter UI 永远不出现）** | `RustLib.init()` 调 `ExternalLibrary.open('libbridge.so')` 但 **APK 缺 `libbridge.so`**——Rust 库没为 Android ABI 编译；`build_apk.ps1` 没 cargo build 步骤，`main()` 在 `await BookService.init()` 抛 `ArgumentError` 后 `runApp` 不执行 | [bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so](./bugfixes/2026-08-29_APK启动黑屏_缺失libbridge.so.md) ⭐ `cargo install cargo-ndk` + `build_apk.ps1` 加 `cargo ndk -t <4 ABIs> -o jniLibs/ build --release` |

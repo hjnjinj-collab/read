@@ -83,8 +83,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   void initState() {
     super.initState();
     _notifier = ref.read(readerProvider.notifier);
-    // viewport 测量由 build 的 LayoutBuilder 负责（SafeArea 内实际可用
-    // 区域）——postFrame 时首帧 build 已跑过，openBook 排版即用正确尺寸。
+    // 转场一插入就开书：620ms 缩放期间完成解析/分页，落地不再闪 "No content"。
+    // viewport 由首帧 LayoutBuilder 登记；openBook 内部读 notifier 的
+    // screenHeight，若仍为 0 会用 MediaQuery 兜底（见 setScreenSize 调用链）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifier?.openBook(widget.filePath, widget.bookName);
     });

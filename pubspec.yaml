@@ -76,6 +76,13 @@ hooks:
       source: source
       path: .native_assets/sqlite3/sqlite3.c
 
+# objective_c 9.6.1 的 hook 引用 Architecture.arm64e，但已发布的
+# code_assets 2.0.0 尚无该成员 → Windows/Linux 构建 hook 编译失败。
+# 钉到 9.6.0（仅用字符串 'arm64e' 作 clang 参数，不依赖 Architecture 枚举）。
+# 上游：https://github.com/dart-lang/native
+dependency_overrides:
+  objective_c: 9.6.0
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

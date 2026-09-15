@@ -3,8 +3,10 @@
 ## 已定准则
 
 - 主色：松绿 seed `#5B6C5A`，`ColorScheme.fromSeed` 主导明暗
-- 玻璃：**重模糊 + 高不透明近白/近黑**；primary 只作发丝描边。透太多会把封面色糊成橄榄脏色（多轮反馈根因）
-- 顶栏：`topBlurSigma=64`，近白 alpha≈0.82，下渐隐到 0
+- 玻璃底栏：`surface↔primaryContainer` 混合 **alpha 0.5** + blur 48 + 主色描边/光晕
+- 顶栏：悬浮圆角轻雾面板（参考系统设置），blur 56 + 近白 alpha 0.7 + 白描边
+- 封面氛围：**提取色自底部弥漫上涌**（dominant 0.95 → 中部厚 → 顶消散），黑压仅 0.22 保字
+- 底部氛围：`bottomAmbientHeight=160`，primary 自下 0.18→0
 - 封面：palette 夹紧 L/S；海报顶光亮、底 scrim 轻；圆环进度右下；格式/剩余章徽标
 - 动效：stagger 进入、FAB 弹簧、Hero flightShuttle、Zoom 转场
 
