@@ -236,6 +236,188 @@ static STRUCTURED_PAGINATION_CACHE: Lazy<Mutex<lru::LruCache<StructuredPageKey, 
 /// EPUB 分页缓存 TTL（秒），与 TXT PAGINATION_CACHE 对齐
 const STRUCTURED_CACHE_TTL_SECS: u64 = 900;
 
+/// 跨重启热分页缓存目录（Dart 启动时设置；空则禁用落盘）
+static HOT_PAGE_CACHE_DIR: Lazy<Mutex<Option<std::path::PathBuf>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// FFI：设置热分页缓存目录（applicationSupportDirectory/legado_page_hot）
+pub fn set_hot_page_cache_dir(dir: String) -> anyhow::Result<()> {
+    let p = std::path::PathBuf::from(&dir);
+    std::fs::create_dir_all(&p)?;
+    *HOT_PAGE_CACHE_DIR.lock().unwrap() = Some(p);
+    Ok(())
+}
+
+/// 布局指纹（不含 book_id）：设置/视口变更即失效
+fn layout_fingerprint(key: &StructuredPageKey) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    key.cache_schema_revision.hash(&mut h);
+    key.layout_revision.hash(&mut h);
+    key.chapter_index.hash(&mut h);
+    key.width.hash(&mut h);
+    key.height.hash(&mut h);
+    key.font_size.hash(&mut h);
+    key.line_height.hash(&mut h);
+    key.padding.hash(&mut h);
+    key.font_name.hash(&mut h);
+    key.convert_mode.hash(&mut h);
+    key.page_fill_threshold_bits.hash(&mut h);
+    key.show_comments.hash(&mut h);
+    key.comment_scale_bits.hash(&mut h);
+    key.para_format_hash.hash(&mut h);
+    key.remove_duplicate_title.hash(&mut h);
+    key.rules_hash.hash(&mut h);
+    key.re_segment.hash(&mut h);
+    key.seg_hash.hash(&mut h);
+    h.finish()
+}
+
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn hot_page_file(
+    source_path: &str,
+    key: &StructuredPageKey,
+) -> Option<std::path::PathBuf> {
+    let dir = HOT_PAGE_CACHE_DIR.lock().unwrap().clone()?;
+    let name = format!(
+        "{:x}_{:x}_{}.json",
+        fnv1a64(source_path),
+        layout_fingerprint(key),
+        key.chapter_index
+    );
+    Some(dir.join(name))
+}
+
+fn load_hot_pages_from_disk(
+    source_path: &str,
+    key: &StructuredPageKey,
+) -> Option<Arc<Vec<crate::PageInfo>>> {
+    let path = hot_page_file(source_path, key)?;
+    let bytes = std::fs::read(&path).ok()?;
+    let pages: Vec<crate::PageInfo> = serde_json::from_slice(&bytes).ok()?;
+    if pages.is_empty() {
+        return None;
+    }
+    // 章索引必须一致，防串章
+    if pages.first().map(|p| p.chapter_index) != Some(key.chapter_index) {
+        return None;
+    }
+    Some(Arc::new(pages))
+}
+
+fn save_hot_pages_to_disk(
+    source_path: String,
+    key: StructuredPageKey,
+    pages: Arc<Vec<crate::PageInfo>>,
+) {
+    // 后台写盘，不阻塞前台分页
+    std::thread::spawn(move || {
+        let Some(path) = hot_page_file(&source_path, &key) else {
+            return;
+        };
+        let Ok(json) = serde_json::to_vec(&*pages) else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")));
+        // 先写临时文件再 rename，避免半截 JSON
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+        evict_hot_cache_if_needed();
+    });
+}
+
+/// TXT 磁盘热缓存：键用 source_path + config/options hash，不含 book_id
+fn txt_hot_page_file(
+    source_path: &str,
+    key: &reader_core::pagination_cache::CacheKey,
+) -> Option<std::path::PathBuf> {
+    let dir = HOT_PAGE_CACHE_DIR.lock().unwrap().clone()?;
+    let name = format!(
+        "txt_{:x}_{:x}_{:x}_{}.json",
+        fnv1a64(source_path),
+        key.config_hash,
+        key.options_hash,
+        key.chapter_index
+    );
+    Some(dir.join(name))
+}
+
+fn load_txt_hot_pages_from_disk(
+    source_path: &str,
+    key: &reader_core::pagination_cache::CacheKey,
+) -> Option<Arc<Vec<Page>>> {
+    let path = txt_hot_page_file(source_path, key)?;
+    let bytes = std::fs::read(&path).ok()?;
+    let pages: Vec<Page> = serde_json::from_slice(&bytes).ok()?;
+    if pages.is_empty() {
+        return None;
+    }
+    Some(Arc::new(pages))
+}
+
+fn save_txt_hot_pages_to_disk(
+    source_path: String,
+    key: reader_core::pagination_cache::CacheKey,
+    pages: Arc<Vec<Page>>,
+) {
+    std::thread::spawn(move || {
+        let Some(path) = txt_hot_page_file(&source_path, &key) else {
+            return;
+        };
+        let Ok(json) = serde_json::to_vec(&*pages) else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")));
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+        evict_hot_cache_if_needed();
+    });
+}
+
+/// 热缓存淘汰：按 mtime 保留最近 HOT_PAGE_CACHE_MAX_FILES 个
+const HOT_PAGE_CACHE_MAX_FILES: usize = 400;
+
+fn evict_hot_cache_if_needed() {
+    let Some(dir) = HOT_PAGE_CACHE_DIR.lock().unwrap().clone() else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let mtime = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        files.push((p, mtime));
+    }
+    if files.len() <= HOT_PAGE_CACHE_MAX_FILES {
+        return;
+    }
+    files.sort_by_key(|(_, t)| *t);
+    let extra = files.len() - HOT_PAGE_CACHE_MAX_FILES;
+    for (p, _) in files.into_iter().take(extra) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 /// 结构化分页缓存键
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct StructuredPageKey {
@@ -569,6 +751,45 @@ fn parse_txt_file_inner(
     cleaning_options: Option<ContentCleaningOptions>,
 ) -> anyhow::Result<String> {
     use book_parser::{BookFormat, EpubParser};
+    use std::hash::{Hash, Hasher};
+
+    let cleaning_fp = {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        match &cleaning_options {
+            Some(o) => {
+                true.hash(&mut h);
+                o.convert_mode.hash(&mut h);
+                o.paragraph_mode.hash(&mut h);
+                o.clean_html.hash(&mut h);
+                o.remove_ads.hash(&mut h);
+            }
+            None => false.hash(&mut h),
+        }
+        h.finish()
+    };
+
+    // 会话复用：同 source_path 已在内存则直接返回 book_id，避免每次开书全量 parse
+    {
+        let books = BOOKS.read().unwrap();
+        if let Some((id, handle)) = books
+            .iter()
+            .find(|(_, h)| h.source_path.as_deref() == Some(file_path.as_str()))
+        {
+            let book_id = id.clone();
+            let need_clean = handle.cleaning_fingerprint != cleaning_fp;
+            drop(books);
+            touch_book_recency(&book_id);
+            if need_clean {
+                if let Some(opts) = cleaning_options {
+                    update_book_cleaning(book_id.clone(), opts)?;
+                }
+                if let Some(h) = BOOKS.write().unwrap().get_mut(&book_id) {
+                    h.cleaning_fingerprint = cleaning_fp;
+                }
+            }
+            return Ok(book_id);
+        }
+    }
 
     // 工厂格式判定
     let path = std::path::Path::new(&file_path);
@@ -594,6 +815,7 @@ fn parse_txt_file_inner(
                 epub_cleaned: None,
                 structured: None,
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
+                cleaning_fingerprint: cleaning_fp,
             }
         }
         BookFormat::Epub => {
@@ -628,6 +850,7 @@ fn parse_txt_file_inner(
                 epub_cleaned: None,
                 structured: Some(crate::StructuredEpubHandle { parser }),
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
+                cleaning_fingerprint: cleaning_fp,
             }
         }
         other => anyhow::bail!(
@@ -639,11 +862,42 @@ fn parse_txt_file_inner(
     // Generate unique book ID
     let book_id = format!("book_{}", uuid::Uuid::new_v4());
 
-    // Store book and parser
-    let mut books = BOOKS.write().unwrap();
-    books.insert(book_id.clone(), handle);
+    // Store book and parser；LRU 保留最近 MAX_BOOK_SESSIONS 本，便于连开再回
+    {
+        let mut books = BOOKS.write().unwrap();
+        books.insert(book_id.clone(), handle);
+        touch_book_recency(&book_id);
+        evict_book_sessions_over_cap(&mut books);
+    }
 
     Ok(book_id)
+}
+
+/// 内存会话上限：连开多本后再回仍可复用 parse 结果
+const MAX_BOOK_SESSIONS: usize = 10;
+
+/// 最近使用的 book_id（front = 最新）
+lazy_static::lazy_static! {
+    static ref BOOK_RECENCY: Mutex<Vec<String>> = Mutex::new(Vec::new());
+}
+
+fn touch_book_recency(book_id: &str) {
+    let mut rec = BOOK_RECENCY.lock().unwrap();
+    rec.retain(|id| id != book_id);
+    rec.insert(0, book_id.to_string());
+}
+
+fn evict_book_sessions_over_cap(books: &mut std::collections::HashMap<String, BookHandle>) {
+    let mut rec = BOOK_RECENCY.lock().unwrap();
+    rec.retain(|id| books.contains_key(id));
+    while books.len() > MAX_BOOK_SESSIONS {
+        let Some(old) = rec.pop() else { break };
+        if old != String::new() {
+            books.remove(&old);
+        }
+    }
+    // 回收 rec 里已不存在的 id
+    rec.retain(|id| books.contains_key(id));
 }
 
 /// 内容净化选项
@@ -1074,6 +1328,28 @@ fn process_and_layout_chapter_inner(
         return Ok(cached.pages);
     }
 
+    // 跨重启 TXT 热缓存
+    {
+        let source_path = BOOKS
+            .read()
+            .unwrap()
+            .get(book_id)
+            .and_then(|h| h.source_path.clone());
+        if let Some(src) = source_path {
+            if let Some(pages) = load_txt_hot_pages_from_disk(&src, &cache_key) {
+                PAGINATION_CACHE.lock().unwrap().put(
+                    cache_key.clone(),
+                    CachedChapterPages {
+                        pages: Arc::clone(&pages),
+                        total_pages: pages.len(),
+                        created_at: Instant::now(),
+                    },
+                );
+                return Ok(pages);
+            }
+        }
+    }
+
     // M9.5-G：预处理结果缓存——命中则跳过取原文与整个预处理流水线。
     // para_format_hash 置 0：缩进/段距等格式化在缓存之后执行、不影响预处理输出。
     // A35 统一后：Stage2 消费 segment_threshold——re_segment 开启时阈值必须入键，
@@ -1173,13 +1449,52 @@ fn process_and_layout_chapter_inner(
     let pages = std::sync::Arc::new(engine.layout_text(&processed, chapter_index)?);
 
     PAGINATION_CACHE.lock().unwrap().put(
-        cache_key,
+        cache_key.clone(),
         CachedChapterPages {
             pages: std::sync::Arc::clone(&pages),
             total_pages: pages.len(),
             created_at: Instant::now(),
         },
     );
+
+    // TXT 热备份落盘
+    if let Some(src) = BOOKS
+        .read()
+        .unwrap()
+        .get(book_id)
+        .and_then(|h| h.source_path.clone())
+    {
+        save_txt_hot_pages_to_disk(src, cache_key.clone(), Arc::clone(&pages));
+    }
+
+    // 邻居章预写（与 EPUB 对齐）：后台分页前后各 1 章并落盘
+    if allow_preload_trigger {
+        let bid = book_id.to_string();
+        let cfg = config.clone();
+        let rules = replace_rules.to_vec();
+        let segs = segment_rules.to_vec();
+        let ch = chapter_index;
+        let rdd = remove_duplicate_title;
+        let rs = re_segment;
+        let cc = chinese_convert;
+        let pfh = para_format_hash;
+        std::thread::spawn(move || {
+            for n in [ch.saturating_sub(1), ch + 1] {
+                let _ = process_and_layout_chapter_inner(
+                    &bid,
+                    n,
+                    &cfg,
+                    rdd,
+                    rs,
+                    cc,
+                    &rules,
+                    &segs,
+                    pfh,
+                    false,
+                );
+            }
+        });
+    }
 
     Ok(pages)
 }
@@ -2597,6 +2912,25 @@ fn process_structured_chapter(
         STRUCTURED_PAGINATION_CACHE.lock().unwrap().pop(&cache_key);
     }
 
+    // 跨重启热缓存：内存 miss 先读盘（键用 source_path + 布局指纹，不含 book_id）
+    {
+        let source_path = BOOKS
+            .read()
+            .unwrap()
+            .get(book_id)
+            .and_then(|h| h.source_path.clone());
+        if let Some(src) = source_path {
+            if let Some(pages) = load_hot_pages_from_disk(&src, &cache_key) {
+                let entry = StructuredCacheEntry::new(Arc::clone(&pages));
+                STRUCTURED_PAGINATION_CACHE
+                    .lock()
+                    .unwrap()
+                    .put(cache_key.clone(), entry);
+                return Ok(Some(pages));
+            }
+        }
+    }
+
     // u8 → ConvertMode（与 TXT process_and_layout_chapter 同编码：1=简→繁 2=繁→简）
     let convert_mode = match params.convert_mode {
         1 => book_parser::content_cleaner::ConvertMode::SimplifiedToTraditional,
@@ -2719,7 +3053,29 @@ fn process_structured_chapter(
     STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
-        .put(cache_key, entry);
+        .put(cache_key.clone(), entry);
+
+    // 热备份：当前章分页异步落盘，供跨重启启动命中
+    if let Some(src) = BOOKS
+        .read()
+        .unwrap()
+        .get(book_id)
+        .and_then(|h| h.source_path.clone())
+    {
+        save_hot_pages_to_disk(src, cache_key.clone(), Arc::clone(&arc_infos));
+    }
+
+    // 邻居章预写：后台分页前后各 1 章并落盘（try_lock 让路，不挡前台）
+    {
+        let bid = book_id.to_string();
+        let params = params.clone();
+        let ch = chapter_index;
+        std::thread::spawn(move || {
+            for n in [ch.saturating_sub(1), ch + 1] {
+                let _ = process_structured_chapter(&bid, n, &params, true);
+            }
+        });
+    }
 
     Ok(Some(arc_infos))
 }
@@ -2793,6 +3149,7 @@ fn structured_layout_config(
 ///
 /// A30b：新增用户替换规则（块级应用）。rules_hash 入结构化分页缓存键——
 /// 规则变更即换键自然重算；规则本体供 process_structured_chapter 应用。
+#[derive(Clone)]
 struct StructuredParams {
     config: LayoutConfig,
     convert_mode: u8,

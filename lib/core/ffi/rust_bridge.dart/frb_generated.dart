@@ -61,7 +61,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1405246360;
+  int get rustContentHash => 325316591;
 
   static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
     stem: 'bridge',
@@ -460,6 +460,8 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSetContentCleaningOptions({required ContentCleaningOptions options});
 
   Future<void> crateApiSetDefaultFont({required String fontName});
+
+  Future<void> crateApiSetHotPageCacheDir({required String dir});
 
   Future<void> crateApiSetParagraphFormatSettings({
     required bool enableIndent,
@@ -2866,6 +2868,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_default_font", argNames: ["fontName"]);
 
   @override
+  Future<void> crateApiSetHotPageCacheDir({required String dir}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 75, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiSetHotPageCacheDirConstMeta,
+        argValues: [dir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSetHotPageCacheDirConstMeta =>
+      const TaskConstMeta(debugName: "set_hot_page_cache_dir", argNames: ["dir"]);
+
+  @override
   Future<void> crateApiSetParagraphFormatSettings({
     required bool enableIndent,
     required int indentSizeChars,
@@ -2890,7 +2912,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(justify, serializer);
           sse_encode_bool(punctuationCompress, serializer);
           sse_encode_f_32(commentScale, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 75, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 76, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiSetParagraphFormatSettingsConstMeta,
@@ -2933,7 +2955,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(bookId, serializer);
           sse_encode_box_autoadd_content_cleaning_options(options, serializer);
-          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 76, port: port_);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 77, port: port_);
         },
         codec: SseCodec(decodeSuccessData: sse_decode_unit, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiUpdateBookCleaningConstMeta,

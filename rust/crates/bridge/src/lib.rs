@@ -28,6 +28,8 @@ pub struct BookHandle {
     /// （调用方在读锁内 clone Arc 后在 BOOKS 锁外等待/持有，见 api.rs
     /// get_chapter_content_impl 两阶段重建）
     pub clean_rebuild_gate: Arc<Mutex<()>>,
+    /// 净化配置指纹：复用会话时判断是否需要 update_book_cleaning
+    pub cleaning_fingerprint: u64,
 }
 
 /// FFI-safe chapter info
@@ -55,7 +57,7 @@ impl From<Chapter> for ChapterInfo {
 }
 
 /// FFI-safe page info
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PageInfo {
     pub page_index: usize,
     pub chapter_index: usize,
@@ -80,7 +82,7 @@ pub struct PageInfo {
 /// 判别方式：`resource_href` 为 None 即文本项，Some 即图片项。
 /// 有意不用枚举——FRB 对枚举变体强制要求 freezed 依赖，
 /// 与项目「手写模型、克制依赖」约定冲突。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PageEntryInfo {
     /// 文本行内容（None=图片项）
     pub text: Option<String>,
@@ -110,7 +112,7 @@ pub struct PageEntryInfo {
 }
 
 /// 文本行内样式分段
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PageSegInfo {
     pub start: usize,
     pub end: usize,

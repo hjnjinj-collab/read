@@ -837,6 +837,20 @@ Future<void> initCoverCacheDir() async {
   }
 }
 
+/// 跨重启热分页缓存目录（EPUB 当前章；启动命中后注入内存 LRU）
+Future<void> initHotPageCacheDir() async {
+  try {
+    final support = await getApplicationSupportDirectory();
+    final dir = Directory('${support.path}/legado_page_hot');
+    if (!dir.existsSync()) {
+      await dir.create(recursive: true);
+    }
+    await rust_api.setHotPageCacheDir(dir: dir.path);
+  } catch (e) {
+    debugPrint('热分页缓存目录初始化失败: $e');
+  }
+}
+
 /// cover_palette_cache_v2.json（key=书籍路径）→ sidecar（key=封面文件路径）
 Future<void> _migrateLegacyPalette() async {
   try {
