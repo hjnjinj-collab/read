@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart' show Note;
+import '../../../../core/ffi/book_service.dart' show CoverStore;
 import '../../../../core/models/simple_models.dart';
+import '../../../../core/services/cover_palette.dart';
 import '../services/book_image_store.dart';
 import '../providers/reader_provider.dart';
 import '../widgets/image_zoom_viewer.dart';
@@ -30,6 +32,8 @@ class ReaderPage extends ConsumerStatefulWidget {
 
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _showMenu = false;
+  /// 封面提取色：顶栏雾 tint 用 dominant，与书架描边/氛围同调
+  CoverColors? _coverColors;
 
   /// P4: 翻页模式（2026-09-04 P1: 上移 ReaderNotifier 持久化——原 widget
   /// 本地 state 随 ReaderPage 销毁重置，换书即丢设置；getter 读 notifier，
@@ -83,6 +87,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   void initState() {
     super.initState();
     _notifier = ref.read(readerProvider.notifier);
+    _loadCoverTint();
     // 转场一插入就开书：620ms 缩放期间完成解析/分页，落地不再闪 "No content"。
     // viewport 由首帧 LayoutBuilder 登记；openBook 内部读 notifier 的
     // screenHeight，若仍为 0 会用 MediaQuery 兜底（见 setScreenSize 调用链）。
@@ -91,11 +96,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     });
   }
 
+  void _loadCoverTint() {
+    final path = widget.filePath;
+    final cover = CoverStore.fileOf(path);
+    final hit = CoverPalette.cached(path) ??
+        (cover != null ? CoverPalette.loadSidecar(path, cover) : null);
+    if (hit != null && mounted) {
+      setState(() => _coverColors = hit);
+    }
+  }
+
   @override
   void dispose() {
     _longPressTimer?.cancel();
-    _notifier?.closeBook();
+    final notifier = _notifier;
     _notifier = null;
+    // dispose 期间不得改 provider（会触发 building 中 modify 崩溃）
+    if (notifier != null) {
+      scheduleMicrotask(() => notifier.closeBook());
+    }
     super.dispose();
   }
 
@@ -749,6 +768,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                     defaultTargetPlatform == TargetPlatform.macOS;
                 final showBar = _showMenu || desktop;
                 if (!showBar) return const SizedBox.shrink();
+                final dom = _coverColors?.dominant;
                 return Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -758,10 +778,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
+                      // 顶栏继承封面 dominant：与书架提取色同调；无色则黑雾
                       colors: [
-                        Colors.black.withValues(alpha: desktop ? 0.22 : 0.3),
+                        if (dom != null)
+                          dom.withValues(alpha: desktop ? 0.38 : 0.48)
+                        else
+                          Colors.black.withValues(alpha: desktop ? 0.22 : 0.3),
+                        if (dom != null)
+                          dom.withValues(alpha: 0.12)
+                        else
+                          Colors.black.withValues(alpha: 0.06),
                         Colors.transparent,
                       ],
+                      stops: const [0, 0.55, 1],
                     ),
                   ),
                   child: Row(

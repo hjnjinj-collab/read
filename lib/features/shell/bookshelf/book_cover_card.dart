@@ -645,7 +645,12 @@ class BookListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final coverPath = CoverStore.fileOf(book.filePath);
-    final colors = CoverPalette.synthetic(book.title);
+    // 与网格同源：sidecar 提取色，失败再 synthetic
+    final colors = CoverPalette.cached(book.filePath) ??
+        (coverPath != null
+            ? CoverPalette.loadSidecar(book.filePath, coverPath)
+            : null) ??
+        CoverPalette.synthetic(book.title);
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -660,16 +665,38 @@ class BookListTile extends StatelessWidget {
           elevation: 3,
           shadowColor: colors.shadowColor.withValues(alpha: 0.5),
           color: colors.dark,
-          child: coverPath != null
-              ? Image.file(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (coverPath != null)
+                Image.file(
                   coverPath,
                   fit: BoxFit.cover,
                   width: 44,
                   height: 66,
+                  gaplessPlayback: true,
                   errorBuilder: (_, _, _) =>
                       _ListSpine(colors: colors, title: book.title),
                 )
-              : _ListSpine(colors: colors, title: book.title),
+              else
+                _ListSpine(colors: colors, title: book.title),
+              // 与网格同语义的轻量提取色弥漫（列表 leading 仅底部）
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      colors.dominant.withValues(alpha: 0.55),
+                      colors.vibrant.withValues(alpha: 0.2),
+                      Colors.transparent,
+                    ],
+                    stops: const [0, 0.4, 0.85],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       title: Text(

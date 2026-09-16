@@ -7,16 +7,22 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+// 分段控件尚未进公开 barrel，与官方 example 一致从 src 引用
+// ignore: implementation_imports
+import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/ffi/book_service.dart' show CoverStore;
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../reader/presentation/providers/reader_provider.dart'
-    show appDatabaseProvider;
+    show appDatabaseProvider, bookServiceProvider;
+import '../providers/shell_actions.dart';
 import '../providers/shell_settings.dart';
 import 'book_cover_card.dart';
 import 'bookshelf_layout.dart';
+import 'recent_hero_banner.dart';
 
 /// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -38,6 +44,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   List<String> _prevOrder = const [];
   Map<String, int> _prevIndex = const {};
   bool _flipArmed = false;
+  // 用 Notification 监听滚动：同一 controller 不能挂两个 ScrollView
+  // （grid/list 切换 + AnimatedSwitcher 会双挂触发 Scrollbar 断言）
+  double _scrollT = 0;
 
   @override
   bool get wantKeepAlive => true;
@@ -47,6 +56,23 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     super.initState();
     _db = ref.read(appDatabaseProvider);
     _refresh(initial: true);
+    // 底栏「添加书籍」→ 本页拉起文件选择（keep-alive，跨 Tab 也能收）
+    ref.listenManual(importRequestProvider, (prev, next) {
+      if (prev != null && next > prev) {
+        _pickAndOpenBook();
+      }
+    });
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    final metrics = n.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+    // 0→1：标题压缩 / 顶栏滤镜显现区间（约 56px）
+    final t = (metrics.pixels / 56.0).clamp(0.0, 1.0);
+    if ((t - _scrollT).abs() < 0.01) return false;
+    setState(() => _scrollT = t);
+    return false;
   }
 
   @override
@@ -94,7 +120,32 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         if (!mounted) return;
         // 只读封面文件 + sidecar，不取色
         CoverStore.preload(order);
+        // 后台预热最近 3 本 parse 会话：重启后常用书打开时可复用会话
+        // + 命中磁盘热分页，首屏接近热缓存
+        _warmRecentSessions(order.take(3).toList());
       });
+    }
+  }
+
+  /// 后台 parse 最近书籍（不打开阅读页）；失败静默
+  Future<void> _warmRecentSessions(List<String> paths) async {
+    if (paths.isEmpty) return;
+    final svc = ref.read(bookServiceProvider);
+    // 与 openBook 同口径的净化（smart 恒开；简繁默认 none——用户改设置后
+    // 首次打开会 miss 热缓存并重算，仍优于冷 parse）
+    final opts = svc.buildCleaningOptions(
+      removeHtmlTags: true,
+      removeAds: true,
+      smartParagraph: true,
+      traditionalized: false,
+      simplified: false,
+    );
+    for (final p in paths) {
+      try {
+        await svc.parseTxtFileAsync(p, null, cleaningOptions: opts);
+      } catch (_) {
+        // 预热失败不影响书架
+      }
     }
   }
 
@@ -126,6 +177,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       'bookName': book.title,
       // push 缩放起点：当前书槽位（从哪来）；pop 固定落首位（去哪）
       'shelfIndex': shelfIndex < 0 ? 0 : shelfIndex,
+      // 转场叠层用封面（小尺寸先像封面，放大后再露阅读页）
+      'coverPath': CoverStore.fileOf(book.filePath)?.path,
     });
     if (!mounted) return;
     // 先 FLIP 让位，动画结束后再点亮描边，避免与位移叠在一起看不清
@@ -222,7 +275,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final row = SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+        padding: EdgeInsets.fromLTRB(16, 2, 8, 4 - 2 * _scrollT),
         child: Row(
           children: [
             Expanded(
@@ -230,39 +283,97 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 滚动压缩：headline → titleLarge
                   Text(
                     '书架',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.4,
-                        ),
-                  ),
-                  if (!_loading && _entries.isNotEmpty)
-                    Text(
-                      '${_entries.length} 本',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                    style: TextStyle.lerp(
+                      Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.4,
                           ),
+                      Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                      _scrollT,
+                    ),
+                  ),
+                  // 副标题随滚动淡出；接近透明时移出布局，
+                  // 否则占位会把标题与右侧按钮错位
+                  if (!_loading && _entries.isNotEmpty && _scrollT < 0.85)
+                    Opacity(
+                      opacity: ((0.85 - _scrollT) / 0.85).clamp(0.0, 1.0),
+                      child: Text(
+                        '${_entries.length} 本',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                      ),
                     ),
                 ],
               ),
             ),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: true,
-                  icon: Icon(AppIcons.grid, size: 18),
-                  tooltip: '网格',
-                ),
-                ButtonSegment(
-                  value: false,
-                  icon: Icon(AppIcons.list, size: 18),
-                  tooltip: '列表',
-                ),
-              ],
-              selected: {shell.bookshelfGrid},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) => notifier.setBookshelfGrid(s.first),
+            // 液态分段：选中玻璃胶囊滑动 + 途中外鼓形变
+            // 静止时只加强描边（无顶栏模糊会看不清），底色始终与底栏色渗同源
+            Builder(
+              builder: (context) {
+                final idle = _scrollT < 0.02;
+                final borderA = idle
+                    ? (scheme.brightness == Brightness.light ? 0.55 : 0.40)
+                    : (scheme.brightness == Brightness.light ? 0.40 : 0.20);
+                return LiquidGlassSegmented(
+                  segments: const ['网格', '列表'],
+                  selectedIndex: shell.bookshelfGrid ? 0 : 1,
+                  onChanged: (i) {
+                    final grid = i == 0;
+                    if (grid != shell.bookshelfGrid) {
+                      setState(() => _scrollT = 0);
+                    }
+                    notifier.setBookshelfGrid(grid);
+                  },
+                  width: 96,
+                  height: 40,
+                  segmentBuilder: (context, i, selected, color) {
+                    return Icon(
+                      i == 0 ? AppIcons.grid : AppIcons.list,
+                      size: 18,
+                      color: color,
+                    );
+                  },
+                  style: LiquidGlassStyle(
+                    shape: LiquidGlassShape.continuousRoundedRectangle(
+                      cornerRadius: 20,
+                      borderWidth: idle ? 1.25 : 1,
+                      borderColor: scheme.outlineVariant.withValues(
+                        alpha: borderA,
+                      ),
+                    ),
+                    appearance: LiquidGlassAppearance(
+                      // 与底栏 navGlass 同一套色渗
+                      color: AppGlass.navGlass(scheme, strength: 0.22),
+                      blur: LiquidGlassBlur(
+                        sigmaX: idle ? 0 : 8,
+                        sigmaY: idle ? 0 : 8,
+                      ),
+                    ),
+                  ),
+                  pillStyle: LiquidGlassSegmentedPillStyle(
+                    glass: true,
+                    animated: true,
+                    growHeight: 10,
+                    glassStyle: LiquidGlassStyle(
+                      appearance: LiquidGlassAppearance(
+                        color: scheme.primary.withValues(alpha: 0.28),
+                        blur: const LiquidGlassBlur(sigmaX: 2, sigmaY: 2),
+                      ),
+                    ),
+                  ),
+                  labelStyle: LiquidGlassSegmentedLabelStyle(
+                    selectedColor: scheme.primary,
+                    unselectedColor: scheme.onSurfaceVariant,
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -273,38 +384,72 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       return Material(color: scheme.surface, child: row);
     }
 
-    // 全宽渐变模糊（对齐系统设置参考图）：上雾重、下缘完全消散
-    final h = topPad + 96;
-    final fog = scheme.brightness == Brightness.light
-        ? const Color(0xFFF4F5F3)
-        : const Color(0xFF181B18);
+    // 静止：只画标题行，不叠模糊（避免暗色下「常显滤镜」）
+    // 高度只包标题行，避免 tight 约束把 Row 垂直居中、下压与横幅重叠
+    if (_scrollT < 0.02) {
+      return SizedBox(
+        height: topPad + BookshelfLayout.headerContentH,
+        child: row,
+      );
+    }
+
+    // 全宽渐变模糊：Blur + ShaderMask；雾色随 _scrollT 浮现主色 tint
+    // 向下延伸 topBlurExtend，衰减带盖住内容顶部，范围更长
+    final h = topPad + BookshelfLayout.headerContentH + BookshelfLayout.topBlurExtend;
+    final fog = AppGlass.topTint(scheme);
+    final fogA = _scrollT; // 0 静止 → 1 滚动
     return SizedBox(
       height: h,
       child: ClipRect(
         child: Stack(
           fit: StackFit.expand,
           children: [
-            BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: AppGlass.topBlurSigma,
-                sigmaY: AppGlass.topBlurSigma,
+            // 背景层不抢事件，衰减带下方内容可滚
+            IgnorePointer(
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white,
+                      Colors.white.withValues(alpha: 0.92),
+                      Colors.white.withValues(alpha: 0.72),
+                      Colors.white.withValues(alpha: 0.40),
+                      Colors.white.withValues(alpha: 0.14),
+                      Colors.transparent,
+                    ],
+                    // 顶栏区保持强模糊，延伸带缓慢衰减
+                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.dstIn,
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(
+                    sigmaX: AppGlass.topBlurSigma,
+                    sigmaY: AppGlass.topBlurSigma,
+                  ),
+                  // 子色与雾色同源（topTint）：有模糊、退场时不会闪白
+                  child: ColoredBox(color: fog),
+                ),
               ),
-              child: const SizedBox.expand(),
             ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    fog.withValues(alpha: 0.88),
-                    fog.withValues(alpha: 0.82),
-                    fog.withValues(alpha: 0.68),
-                    fog.withValues(alpha: 0.45),
-                    fog.withValues(alpha: 0.2),
-                    fog.withValues(alpha: 0),
-                  ],
-                  stops: const [0, 0.25, 0.45, 0.65, 0.85, 1],
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      fog.withValues(alpha: 0.58 * fogA),
+                      fog.withValues(alpha: 0.48 * fogA),
+                      fog.withValues(alpha: 0.32 * fogA),
+                      fog.withValues(alpha: 0.16 * fogA),
+                      fog.withValues(alpha: 0.05 * fogA),
+                      Colors.transparent,
+                    ],
+                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                  ),
                 ),
               ),
             ),
@@ -328,8 +473,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final bottomPad = MediaQuery.paddingOf(context).bottom + 96;
     final scheme = Theme.of(context).colorScheme;
     final topPad = MediaQuery.paddingOf(context).top;
-    // 与全宽渐变模糊条同高：topPad + 96
-    final topGlass = topPad + 96;
+    // 仅顶栏玻璃高度；Hero 在滚动区内，随内容上下移动
+    final topGlass = topPad + BookshelfLayout.headerContentH;
+    final contentTop = topGlass + BookshelfLayout.contentTopGap;
+    final showHero = !_loading && _entries.isNotEmpty;
 
     late final Widget content;
     if (_loading) {
@@ -342,44 +489,64 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       final gap = BookshelfLayout.gap;
       final cellW = BookshelfLayout.cellWidth(width, cols);
       final cellH = BookshelfLayout.cellHeight(cellW);
-      content = GridView.builder(
+      content = CustomScrollView(
         key: const ValueKey('grid'),
-        padding: EdgeInsets.fromLTRB(padH, topGlass + 4, padH, bottomPad),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: cols,
-          mainAxisSpacing: gap,
-          crossAxisSpacing: gap,
-          childAspectRatio: BookshelfLayout.childAspectRatio,
-        ),
-        itemCount: _entries.length,
-        itemBuilder: (context, index) {
-          final (book, progress) = _entries[index];
-          final highlighted = _highlightPath == book.filePath;
-          Widget card = BookCoverCard(
-            key: ValueKey(book.filePath),
-            book: book,
-            progress: progress,
-            staggerIndex: index,
-            animateEnter: !_shellEnteredOnce,
-            highlighted: highlighted,
-            onTap: () => _openBook(book),
-            onLongPress: () => _removeBook(book),
-          );
-          final old = _flipArmed ? _prevIndex[book.filePath] : null;
-          final Offset begin;
-          if (old != null && old != index) {
-            begin = _gridOrigin(old, cols: cols, cellW: cellW, cellH: cellH) -
-                _gridOrigin(index, cols: cols, cellW: cellW, cellH: cellH);
-          } else {
-            begin = Offset.zero;
-          }
-          // 稳定外层，避免 FLIP 包装/卸下导致卡片 State remount
-          return _FlipSlot(
-            key: ValueKey('flip-${book.filePath}'),
-            begin: begin,
-            child: card,
-          );
-        },
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(padH, contentTop, padH, 0),
+            sliver: SliverToBoxAdapter(
+              child: showHero
+                  ? RecentHeroBanner(
+                      books: _entries,
+                      onTap: _openBook,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(padH, BookshelfLayout.contentTopGap, padH, bottomPad),
+            sliver: SliverGrid(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                mainAxisSpacing: gap,
+                crossAxisSpacing: gap,
+                childAspectRatio: BookshelfLayout.childAspectRatio,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final (book, progress) = _entries[index];
+                  final highlighted = _highlightPath == book.filePath;
+                  Widget card = BookCoverCard(
+                    key: ValueKey(book.filePath),
+                    book: book,
+                    progress: progress,
+                    staggerIndex: index,
+                    animateEnter: !_shellEnteredOnce,
+                    highlighted: highlighted,
+                    onTap: () => _openBook(book),
+                    onLongPress: () => _removeBook(book),
+                  );
+                  final old = _flipArmed ? _prevIndex[book.filePath] : null;
+                  final Offset begin;
+                  if (old != null && old != index) {
+                    begin = _gridOrigin(old,
+                            cols: cols, cellW: cellW, cellH: cellH) -
+                        _gridOrigin(index,
+                            cols: cols, cellW: cellW, cellH: cellH);
+                  } else {
+                    begin = Offset.zero;
+                  }
+                  return _FlipSlot(
+                    key: ValueKey('flip-${book.filePath}'),
+                    begin: begin,
+                    child: card,
+                  );
+                },
+                childCount: _entries.length,
+              ),
+            ),
+          ),
+        ],
       );
       if (!_shellEnteredOnce) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -387,30 +554,47 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
         });
       }
     } else {
-      content = ListView.separated(
+      content = CustomScrollView(
         key: const ValueKey('list'),
-        padding: EdgeInsets.fromLTRB(0, topGlass + 4, 0, bottomPad),
-        itemCount: _entries.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-        itemBuilder: (context, index) {
-          final (book, progress) = _entries[index];
-          Widget tile = BookListTile(
-            key: ValueKey(book.filePath),
-            book: book,
-            subtitle: _subtitle(book, progress),
-            onTap: () => _openBook(book),
-            onRemove: () => _removeBook(book),
-          );
-          final old = _flipArmed ? _prevIndex[book.filePath] : null;
-          final Offset begin = (old != null && old != index)
-              ? Offset(0, _listRowTop(old) - _listRowTop(index))
-              : Offset.zero;
-          return _FlipSlot(
-            key: ValueKey('flip-${book.filePath}'),
-            begin: begin,
-            child: tile,
-          );
-        },
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              BookshelfLayout.padH,
+              contentTop,
+              BookshelfLayout.padH,
+              0,
+            ),
+            sliver: SliverToBoxAdapter(
+              child: showHero
+                  ? RecentHeroBanner(books: _entries, onTap: _openBook)
+                  : const SizedBox.shrink(),
+            ),
+          ),
+          SliverList.separated(
+            itemCount: _entries.length,
+            separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
+            itemBuilder: (context, index) {
+              final (book, progress) = _entries[index];
+              Widget tile = BookListTile(
+                key: ValueKey(book.filePath),
+                book: book,
+                subtitle: _subtitle(book, progress),
+                onTap: () => _openBook(book),
+                onRemove: () => _removeBook(book),
+              );
+              final old = _flipArmed ? _prevIndex[book.filePath] : null;
+              final Offset begin = (old != null && old != index)
+                  ? Offset(0, _listRowTop(old) - _listRowTop(index))
+                  : Offset.zero;
+              return _FlipSlot(
+                key: ValueKey('flip-${book.filePath}'),
+                begin: begin,
+                child: tile,
+              );
+            },
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: bottomPad)),
+        ],
       );
     }
 
@@ -424,26 +608,29 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       body: Stack(
         children: [
           Positioned.fill(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 240),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween(
-                      begin: const Offset(0, 0.04),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                );
-              },
-              child: content,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _onScrollNotification,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 240),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween(
+                        begin: const Offset(0, 0.04),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: content,
+              ),
             ),
           ),
-          // 顶栏渐变毛玻璃叠在内容上，滚动时封面从下穿入
+          // 顶栏渐变毛玻璃叠在内容上，滚动时封面/横幅从下穿入
           Positioned(
             top: 0,
             left: 0,
@@ -541,47 +728,50 @@ class _EmptyShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 120, 32, 100),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Icon(
-                AppIcons.emptyBook,
-                size: 42,
-                color: scheme.primary,
+    final top = MediaQuery.paddingOf(context).top + BookshelfLayout.headerContentH;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(32, top + 48, 32, 100),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: scheme.primary.withValues(alpha: 0.2),
               ),
             ),
-            const SizedBox(height: 20),
-            Text(
-              '书架是空的',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+            child: Icon(
+              AppIcons.emptyBook,
+              size: 42,
+              color: scheme.primary,
             ),
-            const SizedBox(height: 8),
-            Text(
-              '从文件导入 TXT 或 EPUB，开始阅读',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: onImport,
-              icon: const Icon(AppIcons.importFile),
-              label: const Text('导入书籍'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '书架是空的',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '从文件导入 TXT 或 EPUB，开始阅读',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onImport,
+            icon: const Icon(AppIcons.importFile),
+            label: const Text('导入书籍'),
+          ),
+        ],
       ),
     );
   }

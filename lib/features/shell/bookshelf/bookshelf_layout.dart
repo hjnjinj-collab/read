@@ -7,6 +7,14 @@ class BookshelfLayout {
   static const double padH = 12;
   static const double gap = 12;
   static const double childAspectRatio = 0.68;
+  /// 顶栏玻璃内容区高度（不含 status bar）
+  static const double headerContentH = 72;
+  /// 顶栏 blur 向下延伸的衰减带（只盖内容、不占布局）
+  static const double topBlurExtend = 64;
+  /// 书架顶部 Hero 轮换横幅（随内容滚动）
+  static const double heroBannerH = 120;
+  /// 网格/横幅区顶边相对屏幕顶 y = statusPad + header + gap
+  static const double contentTopGap = 4;
 
   static int columnsForWidth(double width) {
     if (width < 360) return 2;

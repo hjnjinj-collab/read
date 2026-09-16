@@ -2632,9 +2632,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _resourceMonitorTimer?.cancel();
     _resourceMonitorTimer = null;
 
-    if (state.bookId != null) {
-      await _bookService.releaseBook(state.bookId!);
-    }
+    // 不 releaseBook：会话按 source_path 复用，重开同一本避免全量 parse
+    // （换新书时 Rust parse 会淘汰其它会话）
     BookImageStore.instance.clear();
     _invalidatePageCountCache(); // M8-P4：关书清页数缓存
     _rawCurrentPage = null;
