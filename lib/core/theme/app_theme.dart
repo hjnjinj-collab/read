@@ -12,17 +12,27 @@ class AppTheme {
 
   static const Color seed = Color(0xFF5B6C5A);
 
-  static ThemeData light({Color? dynamicSeed}) {
+  /// 预置主题色（松绿为首，默认）
+  static const List<({String id, String label, Color color})> seedPresets = [
+    (id: 'pine', label: '松绿', color: Color(0xFF5B6C5A)),
+    (id: 'indigo', label: '靛青', color: Color(0xFF3D5A80)),
+    (id: 'plum', label: '梅紫', color: Color(0xFF6B4E71)),
+    (id: 'clay', label: '陶土', color: Color(0xFF8B5E3C)),
+    (id: 'teal', label: '湖青', color: Color(0xFF2F6F6A)),
+    (id: 'rose', label: '绯红', color: Color(0xFF8C3A4A)),
+  ];
+
+  static ThemeData light({Color? dynamicSeed, Color? seedOverride}) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: dynamicSeed ?? seed,
+      seedColor: dynamicSeed ?? seedOverride ?? seed,
       brightness: Brightness.light,
     );
     return _base(scheme);
   }
 
-  static ThemeData dark({Color? dynamicSeed}) {
+  static ThemeData dark({Color? dynamicSeed, Color? seedOverride}) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: dynamicSeed ?? seed,
+      seedColor: dynamicSeed ?? seedOverride ?? seed,
       brightness: Brightness.dark,
     );
     return _base(scheme);
@@ -124,7 +134,8 @@ class AppTheme {
   }
 }
 
-/// 毛玻璃准则：模糊层必须叠主色滤镜。
+/// 毛玻璃准则：模糊层必须叠主色滤镜；滤镜必须是**低透明度着色**，
+/// 禁止「半实色板」盖在 blur 上（会读成两层叠加）。
 class AppGlass {
   AppGlass._();
 
@@ -136,13 +147,30 @@ class AppGlass {
         .withValues(alpha: 0.5);
   }
 
+  /// 悬浮导航柔光玻璃：主色只作「色渗」，不形成第二层色板
+  /// [strength] = primaryContainer 混入比例 0–1；alpha 同步抬升，100% 才有可见色渗
+  static Color navGlass(ColorScheme scheme, {double strength = 0.38}) {
+    final base = scheme.brightness == Brightness.light
+        ? scheme.surface
+        : scheme.surfaceContainerHighest;
+    final mixed = Color.lerp(base, scheme.primaryContainer, strength)!;
+    // 色相 + 浓度都随 strength：否则 100% 仍像隔了一层纱
+    final a = scheme.brightness == Brightness.light
+        ? 0.24 + 0.36 * strength // 0→0.24, 1→0.60
+        : 0.28 + 0.34 * strength; // 0→0.28, 1→0.62
+    return mixed.withValues(alpha: a);
+  }
+
   static Color topTint(ColorScheme scheme) {
     final base = scheme.brightness == Brightness.light
         ? const Color(0xFFF7F8F5)
         : const Color(0xFF151815);
-    return Color.lerp(base, scheme.primary, 0.06)!
-        .withValues(alpha: scheme.brightness == Brightness.light ? 0.84 : 0.8);
+    // 顶栏主色滤镜：混入 primary 更重
+    return Color.lerp(base, scheme.primary, 0.52)!;
   }
+
+  /// 底栏液态玻璃：更高圆角 + 内侧高光
+  static const double navBarRadius = 32;
 
   static const double bottomAmbientHeight = 160;
 
@@ -163,9 +191,11 @@ class AppMotion {
   // 网格重排：直接位移，禁止回弹/缩放
   static const Curve reorder = Curves.easeOutCubic;
   static const Duration reorderDuration = Duration(milliseconds: 300);
-  // 阅读页 ↔ 书架：整页缩向第一本槽位（偏慢，便于看清「从哪来到哪去」）
-  static const Curve readerShrink = Curves.easeInOutCubic;
-  static const Duration readerShrinkDuration = Duration(milliseconds: 620);
+  // 阅读页 ↔ 书架：整页缩向第一本槽位
+  // push：起点慢（看清从哪本放大）；pop：末段慢（细腻落回封面）
+  static const Curve readerShrinkPush = Curves.easeInOutQuart;
+  static const Curve readerShrinkPop = Curves.easeInOutQuart;
+  static const Duration readerShrinkDuration = Duration(milliseconds: 720);
   static const double readerShrinkEndScale = 0.22;
   /// pop 时 reverse 动画的前 (1 - hold) 段保持不透明，仅末段淡出
   static const double readerShrinkFadeHold = 0.28;

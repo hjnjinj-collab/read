@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import 'core/database/app_database.dart';
 import 'core/database/app_settings_service.dart';
@@ -33,13 +34,28 @@ void main() async {
   await BookService.init();
   await ReaderFont.initialize();
   await initCoverCacheDir();
+  await initHotPageCacheDir();
 
   final db = AppDatabase();
   await AppSettingsService.instance.load(db);
   final settings = ReaderSettings.tryParse(
       AppSettingsService.instance.raw('reader'));
 
+  // 液态/毛玻璃引擎开关须在首个 Lens 构建前生效
+  ShellSettings.tryParse(AppSettingsService.instance.raw(ShellSettings.storageKey))
+      .applyGlassEngine();
+
   unawaited(PageTurnComposerState.preloadShaders());
+  // 液态模式预编译 lens shader；Windows/lite 下跳过，避免 Impeller GL 崩进程
+  if (!Platform.isWindows) {
+    unawaited(() async {
+      try {
+        await LiquidGlassShaders.ensureLoaded();
+      } catch (e) {
+        debugPrint('liquid_glass shader preload skipped: $e');
+      }
+    }());
+  }
 
   if (settings.customFontFamily.isNotEmpty &&
       settings.customFontPath.isNotEmpty) {
@@ -90,6 +106,12 @@ class MyApp extends ConsumerWidget {
     final dynamicOn = ref.watch(
       shellSettingsProvider.select((s) => s.dynamicColor),
     );
+    final themeMode = ref.watch(
+      shellSettingsProvider.select((s) => s.resolvedThemeMode),
+    );
+    final seedOverride = ref.watch(
+      shellSettingsProvider.select((s) => s.seedArgb),
+    );
 
     return FutureBuilder<({Color? light, Color? dark})>(
       future: dynamicOn
@@ -98,12 +120,20 @@ class MyApp extends ConsumerWidget {
       builder: (context, snapshot) {
         final lightSeed = snapshot.data?.light;
         final darkSeed = snapshot.data?.dark;
+        final custom =
+            seedOverride != null ? Color(seedOverride) : null;
         return MaterialApp.router(
           title: 'Legado Flutter',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.light(dynamicSeed: lightSeed),
-          darkTheme: AppTheme.dark(dynamicSeed: darkSeed),
-          themeMode: ThemeMode.system,
+          theme: AppTheme.light(
+            dynamicSeed: lightSeed,
+            seedOverride: custom,
+          ),
+          darkTheme: AppTheme.dark(
+            dynamicSeed: darkSeed,
+            seedOverride: custom,
+          ),
+          themeMode: themeMode,
           routerConfig: router,
         );
       },
