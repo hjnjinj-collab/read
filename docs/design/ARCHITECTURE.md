@@ -86,6 +86,7 @@ Dart `ReaderSerif`（rootBundle 加载 assets/fonts/NotoSansSC-Regular.otf）。
 │ │ TXT:  layout_text（行级分页，ab_glyph 测宽 + GlyphCache LRU 10K）   │    │
 │ │ EPUB: layout_items（混合分页：图片原子/出血/锚点文本累加/css_lite） │    │
 │ │ 缓存：PAGINATION_CACHE (10章 LRU) + STRUCTURED_PAGINATION_CACHE      │    │
+│ │       + 热分页磁盘 legado_page_hot（跨重启，邻居±1 预写）             │    │
 │ │       + 跨章共享 GlyphCache + Dart PageFrame 体系（M9）              │    │
 │ └────────────────────────────────────────────────────────────────────┘  │
 │   │                                                                      │
@@ -314,20 +315,39 @@ void main() async {
                 └──────────────────────────────────────┘
 ```
 
-### 5.2 缓存体系（5 层）
+### 5.2 缓存体系（6 层）
 
 ```
+┌─ L0 BOOKS 会话 ───────────────────────────────────────────┐
+│ HashMap + recency LRU(10)                                  │
+│ parse 按 source_path 复用；closeBook 不 release            │
+│ 换新书时按 recency 挤出超 cap 会话                          │
+└───────────────────────────────────────────────────────────┘
+
 ┌─ L1 PAGINATION_CACHE ─────────────────────────────────────┐
 │ reader_core::PaginationCache                              │
 │ LRU(10) 按 (book_id, chapter, options_hash, para_format)│
 │ CachedChapterPages.pages: Arc<Vec<Page>>（命中零克隆）    │
-│ 容量淘汰为主，TTL 300s 为辅（M9）                         │
+│ 容量淘汰为主，TTL 900s 为辅                                 │
+│ miss → 先读 L1b 磁盘热缓存                                  │
+└───────────────────────────────────────────────────────────┘
+
+┌─ L1b 热分页磁盘（跨重启）─────────────────────────────────┐
+│ {support}/legado_page_hot/                                  │
+│ EPUB: {source_fp}_{layout_fp}_{ch}.json                    │
+│ TXT:  txt_{source_fp}_{config_hash}_{options_hash}_{ch}.json│
+│ 键不含 book_id（UUID 每次 parse 新建）                       │
+│ 写：分页成功后后台 tmp+rename；邻居±1 章一并预写              │
+│ 读：内存 miss 注入 LRU；指纹/布局变更自然 miss                │
+│ 淘汰：mtime 保留最近 400 个 json                             │
+│ 启动：书架后台 parse 最近 3 本，开书命中热缓存                 │
 └───────────────────────────────────────────────────────────┘
 
 ┌─ L2 STRUCTURED_PAGINATION_CACHE ─────────────────────────┐
 │ reader_core::StructuredPaginationCache (桥接层)          │
 │ LRU(10) 按 StructuredPageKey 含布局配置                   │
 │ 值类型 Arc<Vec<PageInfo>>（含 backgroundHref）            │
+│ miss → 先读 L1b（EPUB 同目录）                            │
 └───────────────────────────────────────────────────────────┘
 
 ┌─ L3 SHARED_GLYPH_CACHE ──────────────────────────────────┐
@@ -624,6 +644,13 @@ process_structured_chapter 的 IR→布局链路禁止任何文本改写——�
 ### D11 双分页核心有意分离（2026-08-23）
 layout_text（TXT 进度锚点字符偏移精确）与 layout_items（EPUB 富内容）禁止合并重构。
 
+### D13 跨重启热分页与会话 LRU（2026-09-15）
+- `BOOKS` 按 `source_path` 复用 parse；closeBook 不 release；recency LRU(10)
+- 分页结果落盘 `legado_page_hot/`（EPUB+TXT，邻居±1 预写；mtime 淘汰 400）
+- 磁盘键 = source_path + 布局指纹（**不含 book_id**）
+- 书架启动后台 parse 最近 3 本，开书先命中热缓存
+- 详见 `docs/compose/spec/hot-page-cache.md`
+
 ### D12 双引擎字体同源（M7，2026-08-28）
 Rust ab_glyph 测量与 Dart TextPainter 绘制必须使用同一份字体字节。默认 embedded_default ⇄ ReaderSerif（同字节）；切换时 Rust FontManager + Dart FontLoader 同步注册。
 
@@ -670,8 +697,8 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 |------|------|-----------|
 | **book_parser** | `rust/crates/book_parser/src/` | 加载工厂、TXT 主解析、EPUB 解析 (roxmltree 结构解析 + 结构化提取主路径)、JS 章节规则、置信度识别器(未接线)、导入级净化 (JS 规则主路径)、EPUB 净化缓存、zhconv 简繁权威实现、编码检测、XHTML→JSON DOM、结构化提取 JS 规则集、CSS 子集解析物化、图片头尺寸探测、内容 IR v2 定义 |
 | **layout_engine** | `rust/crates/layout_engine/src/` | 排版分页（layout_text = TXT 承重路径逐字节不动；layout_items = 结构化富内容路径：样式化文本/图片原子/表格多列）、智能分页、字形测宽缓存、**MeasureCache (M10-B, Skia 实测宽度缓存)**、FontManager (embed + 三级 fallback)、多章并行 (未接线)、GB2312 预热 (未接线) |
-| **reader_core** | `rust/crates/reader_core/src/` | 阅读级六阶段预处理、段落格式化（共享切分器）、富流水线 + JS 池、ReadSessionManager、位置追踪、PaginationCache (LRU + TTL 300s)、PreloadExecutor (try_submit_dedup) |
-| **bridge** | `rust/crates/bridge/src/` | 全部 FFI 入口：parse / get_chapter / get_page / get_page_processed / get_page_structured / get_page_count_processed / get_page_count_structured / prefetch_structured_chapter / get_book_resource / get_book_cover / get_book_format / font_*, session_*, cache_*, process_*, batch_*, search_*, book_source_* |
+| **reader_core** | `rust/crates/reader_core/src/` | 阅读级六阶段预处理、段落格式化（共享切分器）、富流水线 + JS 池、ReadSessionManager、位置追踪、PaginationCache (LRU + TTL 900s)、PreloadExecutor (try_submit_dedup) |
+| **bridge** | `rust/crates/bridge/src/` | 全部 FFI 入口：parse / get_chapter / get_page / get_page_processed / get_page_structured / get_page_count_processed / get_page_count_structured / prefetch_structured_chapter / get_book_resource / get_book_cover / get_book_format / font_*, session_*, cache_*, process_*, batch_*, search_*, book_source_*, set_hot_page_cache_dir |
 | **book_source_engine** | `rust/crates/book_source_engine/src/` | CSS/JSONPath/Regex 分析器（书源规则无 JS，与章节识别 JS 是两回事） |
 | **lib/core/ffi** | `lib/core/ffi/` | Rust 端 FFI 的 Dart 封装：book_service.dart 调 Rust API；rust_bridge.dart/ FRB 自动生成 |
 | **lib/core/services** | `lib/core/services/` | reader_font.dart（字体管理）+ font_provider.dart（file_picker 入口）+ **measure_text_service.dart (M10-B, TextPainter 实测宽度服务)**+ book_source_service.dart |
@@ -701,6 +728,7 @@ LayoutConfig.page_fill_threshold 默认 0.9 双路径统一门槛；标题按 h1
 14. **oneshot sender drop 会误发取消信号**——PreloadHandle 不可 fire-and-forget（A16）
 15. **AGP 9 强制 compileSdk ≥ 36**——AAR metadata 强约束，所有 plugin `compileSdk flutter.compileSdkVersion` 改 `compileSdk = 36`（build_apk.ps1 自动扫所有 plugin）
 16. **`reqwest` Android 编译必须 `default-features = false + rustls-tls`**——`default-tls` = `native-tls` = `openssl-sys` 必 fail
+17. **磁盘热分页键必须用 `source_path` + 布局指纹，禁止 `book_id`**——parse 每次生成新 UUID，用 book_id 落盘跨重启必 miss（hot-page-cache）
 
 ---
 

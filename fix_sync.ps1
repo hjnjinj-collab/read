@@ -10,6 +10,13 @@ if (Test-Path $gitUsrBin) {
     Write-Host "✓ 已添加 patch 到 PATH" -ForegroundColor Green
 }
 
+# pub.dev 直连易超时；未自定义时走 flutter-io 国内镜像
+if (-not $env:PUB_HOSTED_URL) {
+    $env:PUB_HOSTED_URL = 'https://pub.flutter-io.cn'
+    $env:FLUTTER_STORAGE_BASE_URL = 'https://storage.flutter-io.cn'
+    Write-Host "✓ 使用 pub.flutter-io.cn 镜像" -ForegroundColor Green
+}
+
 # 修复 PROGRAMFILES(X86) 环境变量（Flutter Windows 构建需要）
 if (-not [Environment]::GetEnvironmentVariable("PROGRAMFILES(X86)", "Process")) {
     [Environment]::SetEnvironmentVariable("PROGRAMFILES(X86)", "C:\Program Files (x86)", "Process")

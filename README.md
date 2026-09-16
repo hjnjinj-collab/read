@@ -152,7 +152,10 @@ cargo test -p bridge --test epub_flow  # 集成
 
 | 层 | 机制 |
 |----|------|
+| 会话 | `BOOKS` LRU **10 本**（`source_path` 复用 parse，关书不 release） |
 | 分页缓存 | `PAGINATION_CACHE`（10 章 LRU）· `STRUCTURED_PAGINATION_CACHE`（TTL 900s） |
+| 热分页（跨重启） | `legado_page_hot/` 落盘：EPUB+TXT 当前章 + 邻居±1；键=`source_path`+布局指纹；mtime 淘汰 400 文件 |
+| 启动预热 | 书架首帧后台 parse 最近 3 本；开书分页先命中磁盘热缓存 |
 | 预处理缓存 | `PREPROCESSED_CACHE`（20 章 LRU，键含排版配置） |
 | 净化缓存 | TXT 内存/mmap `cleaned_chapter_cache` · EPUB 落盘 `epub_cleaned`（跨启动） |
 | 字体/测量 | `SHARED_GLYPH_CACHE`（10K + GB2312 预热）· `MEASURE_CACHE`（50K） |
