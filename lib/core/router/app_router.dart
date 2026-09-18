@@ -11,7 +11,12 @@ import '../../features/shell/book_sources_page.dart';
 import '../../features/shell/bookshelf/book_cover_card.dart' show kCoverRadius;
 import '../../features/shell/bookshelf/bookshelf_layout.dart';
 import '../../features/shell/bookshelf/bookshelf_page.dart';
-import '../../features/shell/settings_page.dart';
+import '../../features/shell/settings/glass_settings_page.dart';
+import '../../features/shell/settings/motion_settings_page.dart';
+import '../../features/shell/settings/appearance_settings_page.dart';
+import '../../features/shell/settings/reading_settings_page.dart';
+import '../../features/shell/settings/settings_hub_page.dart';
+import '../../features/shell/settings/storage_settings_page.dart';
 import '../../core/theme/app_theme.dart';
 
 /// 路由表：StatefulShell 三 Tab（状态保活）+ 全屏阅读/关于
@@ -46,7 +51,44 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/settings',
                 pageBuilder: (context, state) =>
-                    const NoTransitionPage(child: SettingsPage()),
+                    const NoTransitionPage(child: SettingsHubPage()),
+                routes: [
+                  GoRoute(
+                    path: 'appearance',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const AppearanceSettingsPage(),
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'glass',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const GlassSettingsPage(),
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'motion',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const MotionSettingsPage(),
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'reading',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const ReadingSettingsPage(),
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'storage',
+                    pageBuilder: (context, state) => NoTransitionPage(
+                      key: state.pageKey,
+                      child: const StorageSettingsPage(),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

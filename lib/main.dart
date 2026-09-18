@@ -17,6 +17,7 @@ import 'features/reader/presentation/providers/reader_provider.dart';
 import 'features/reader/presentation/providers/reader_settings.dart';
 import 'features/reader/presentation/widgets/page_turn_composer.dart';
 import 'features/shell/providers/shell_settings.dart';
+import 'features/shell/widgets/circular_reveal.dart' show appRepaintKey;
 
 /// P6：清掉自定义字体持久化（副本丢失/恢复失败时回退内置），其余设置原样保留
 void _clearCustomFontPersisted() {
@@ -112,6 +113,15 @@ class MyApp extends ConsumerWidget {
     final seedOverride = ref.watch(
       shellSettingsProvider.select((s) => s.seedArgb),
     );
+    final pageTintOn = ref.watch(
+      shellSettingsProvider.select((s) => s.pageTintOn),
+    );
+    final tintLight = ref.watch(
+      shellSettingsProvider.select((s) => s.pageTintLight),
+    );
+    final tintDark = ref.watch(
+      shellSettingsProvider.select((s) => s.pageTintDark),
+    );
 
     return FutureBuilder<({Color? light, Color? dark})>(
       future: dynamicOn
@@ -122,19 +132,24 @@ class MyApp extends ConsumerWidget {
         final darkSeed = snapshot.data?.dark;
         final custom =
             seedOverride != null ? Color(seedOverride) : null;
-        return MaterialApp.router(
-          title: 'Legado Flutter',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light(
-            dynamicSeed: lightSeed,
-            seedOverride: custom,
+        return RepaintBoundary(
+          key: appRepaintKey,
+          child: MaterialApp.router(
+            title: 'Legado Flutter',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light(
+              dynamicSeed: lightSeed,
+              seedOverride: custom,
+              pageTint: pageTintOn ? tintLight : 0,
+            ),
+            darkTheme: AppTheme.dark(
+              dynamicSeed: darkSeed,
+              seedOverride: custom,
+              pageTint: pageTintOn ? tintDark : 0,
+            ),
+            themeMode: themeMode,
+            routerConfig: router,
           ),
-          darkTheme: AppTheme.dark(
-            dynamicSeed: darkSeed,
-            seedOverride: custom,
-          ),
-          themeMode: themeMode,
-          routerConfig: router,
         );
       },
     );

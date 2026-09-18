@@ -314,13 +314,10 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
               ),
             ),
             // 液态分段：选中玻璃胶囊滑动 + 途中外鼓形变
-            // 静止时只加强描边（无顶栏模糊会看不清），底色始终与底栏色渗同源
+            // 顶栏用 secondary 渗色 + 描边，与底栏 primary 渗区分
             Builder(
               builder: (context) {
                 final idle = _scrollT < 0.02;
-                final borderA = idle
-                    ? (scheme.brightness == Brightness.light ? 0.55 : 0.40)
-                    : (scheme.brightness == Brightness.light ? 0.40 : 0.20);
                 return LiquidGlassSegmented(
                   segments: const ['网格', '列表'],
                   selectedIndex: shell.bookshelfGrid ? 0 : 1,
@@ -343,14 +340,19 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
                   style: LiquidGlassStyle(
                     shape: LiquidGlassShape.continuousRoundedRectangle(
                       cornerRadius: 20,
-                      borderWidth: idle ? 1.25 : 1,
-                      borderColor: scheme.outlineVariant.withValues(
-                        alpha: borderA,
+                      borderWidth: idle ? 1.35 : 1.1,
+                      borderColor: AppGlass.chromeBorder(
+                        scheme,
+                        alpha: idle
+                            ? (scheme.brightness == Brightness.light
+                                ? 0.55
+                                : 0.40)
+                            : 0.28,
                       ),
                     ),
                     appearance: LiquidGlassAppearance(
-                      // 与底栏 navGlass 同一套色渗
-                      color: AppGlass.navGlass(scheme, strength: 0.22),
+                      // secondary 色调（非 container）+ 描边
+                      color: AppGlass.chromeGlass(scheme, strength: 0.45),
                       blur: LiquidGlassBlur(
                         sigmaX: idle ? 0 : 8,
                         sigmaY: idle ? 0 : 8,

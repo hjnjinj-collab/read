@@ -20,32 +20,64 @@ class AppTheme {
     (id: 'clay', label: '陶土', color: Color(0xFF8B5E3C)),
     (id: 'teal', label: '湖青', color: Color(0xFF2F6F6A)),
     (id: 'rose', label: '绯红', color: Color(0xFF8C3A4A)),
+    (id: 'navy', label: '藏蓝', color: Color(0xFF2C3E6B)),
+    (id: 'amber', label: '琥珀', color: Color(0xFFB8860B)),
+    (id: 'mint', label: '薄荷', color: Color(0xFF3D8B6E)),
+    (id: 'coral', label: '珊瑚', color: Color(0xFFC46A5A)),
+    (id: 'graphite', label: '石墨', color: Color(0xFF4A5568)),
+    (id: 'gold', label: '玫瑰金', color: Color(0xFFA67C6D)),
   ];
 
-  static ThemeData light({Color? dynamicSeed, Color? seedOverride}) {
+  static ThemeData light({
+    Color? dynamicSeed,
+    Color? seedOverride,
+    double pageTint = 0.35,
+  }) {
     final scheme = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seedOverride ?? seed,
       brightness: Brightness.light,
     );
-    return _base(scheme);
+    return _base(scheme, pageTint: pageTint);
   }
 
-  static ThemeData dark({Color? dynamicSeed, Color? seedOverride}) {
+  static ThemeData dark({
+    Color? dynamicSeed,
+    Color? seedOverride,
+    double pageTint = 0.0,
+  }) {
     final scheme = ColorScheme.fromSeed(
       seedColor: dynamicSeed ?? seedOverride ?? seed,
       brightness: Brightness.dark,
     );
-    return _base(scheme);
+    return _base(scheme, pageTint: pageTint);
   }
 
-  static ThemeData _base(ColorScheme scheme) {
+  /// 整页均匀主色倾向底（非底部堆色）：
+  /// 浅色 = 带色相的纸；深色 = 黑底偏主色的夜灰（如蓝 seed → 蓝灰）
+  static Color pageSurface(
+    ColorScheme scheme, {
+    double? lightTint,
+    double? darkTint,
+  }) {
+    final amount = scheme.brightness == Brightness.light
+        ? (lightTint ?? 0.35)
+        : (darkTint ?? 0.0);
+    return Color.lerp(scheme.surface, scheme.primary, amount)!;
+  }
+
+  static ThemeData _base(ColorScheme scheme, {required double pageTint}) {
+    final page = pageSurface(
+      scheme,
+      lightTint: scheme.brightness == Brightness.light ? pageTint : null,
+      darkTint: scheme.brightness == Brightness.dark ? pageTint : null,
+    );
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      scaffoldBackgroundColor: scheme.surface,
+      scaffoldBackgroundColor: page,
       splashFactory: InkSparkle.splashFactory,
       appBarTheme: AppBarTheme(
-        backgroundColor: scheme.surface,
+        backgroundColor: page,
         foregroundColor: scheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -159,6 +191,132 @@ class AppGlass {
         ? 0.24 + 0.36 * strength // 0→0.24, 1→0.60
         : 0.28 + 0.34 * strength; // 0→0.28, 1→0.62
     return mixed.withValues(alpha: a);
+  }
+
+  /// 顶栏/次级控件色渗：混 **secondary**（非 container，避免色相被稀释）。
+  /// secondary 饱和高，混入比例压低；再叠轻描边保证静止可读。
+  static Color chromeGlass(ColorScheme scheme, {double strength = 0.4}) {
+    final base = scheme.brightness == Brightness.light
+        ? scheme.surface
+        : scheme.surfaceContainerHighest;
+    final mixed = Color.lerp(base, scheme.secondary, strength * 0.55)!;
+    final a = scheme.brightness == Brightness.light
+        ? 0.32 + 0.42 * strength
+        : 0.36 + 0.38 * strength;
+    return mixed.withValues(alpha: a);
+  }
+
+  /// 顶栏控件描边：secondary 系，比 outlineVariant 更贴色相
+  static Color chromeBorder(ColorScheme scheme, {double alpha = 0.45}) {
+    return scheme.secondary.withValues(alpha: alpha);
+  }
+
+  /// 悬浮卡多层阴影（明/暗分档）。
+  /// 浅色：冷灰软影；深色：更重 ambient + 主色微渗，避免纯黑压死页底。
+  static List<BoxShadow> floatShadows(ColorScheme scheme) {
+    final light = scheme.brightness == Brightness.light;
+    if (light) {
+      return [
+        // 环境大影：拉开「离开纸面」
+        BoxShadow(
+          color: const Color(0xFF1A2A22).withValues(alpha: 0.08),
+          blurRadius: 28,
+          offset: const Offset(0, 14),
+          spreadRadius: -6,
+        ),
+        // 接触短影：贴地
+        BoxShadow(
+          color: const Color(0xFF1A2A22).withValues(alpha: 0.10),
+          blurRadius: 8,
+          offset: const Offset(0, 3),
+          spreadRadius: -1,
+        ),
+        // 顶缘极淡反光影（负 offset 近似）
+        BoxShadow(
+          color: Colors.white.withValues(alpha: 0.35),
+          blurRadius: 0,
+          offset: const Offset(0, 1),
+          spreadRadius: 0,
+        ),
+      ];
+    }
+    final tint = Color.lerp(scheme.shadow, scheme.primary, 0.22)!;
+    return [
+      BoxShadow(
+        color: tint.withValues(alpha: 0.55),
+        blurRadius: 32,
+        offset: const Offset(0, 16),
+        spreadRadius: -8,
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.45),
+        blurRadius: 10,
+        offset: const Offset(0, 4),
+        spreadRadius: -2,
+      ),
+    ];
+  }
+
+  /// 行块填色：更透，让下层霜面渐变透上来
+  static Color floatRowFill(ColorScheme scheme) {
+    final light = scheme.brightness == Brightness.light;
+    return (light ? scheme.surface : scheme.surfaceContainerHighest)
+        .withValues(alpha: light ? 0.16 : 0.20);
+  }
+
+  /// 行块描边：淡轮廓
+  static Color floatRowRim(ColorScheme scheme) {
+    final light = scheme.brightness == Brightness.light;
+    return light
+        ? Colors.white.withValues(alpha: 0.35)
+        : Colors.white.withValues(alpha: 0.10);
+  }
+
+  /// 子栏行缝（两套方案共用）
+  static const double floatRowGap = 5;
+
+  /// 霜层渐变：低透明度双息。
+  /// [colorA]/[colorB] 可覆盖起点/终点色（null = primary/tertiary）。
+  /// [depth] 整体透明度倍率 0.3–1.8（默认 1.0）。
+  static List<Color> frostShellGradient(
+    ColorScheme scheme, {
+    Color? colorA,
+    Color? colorB,
+    double depth = 1.0,
+  }) {
+    final light = scheme.brightness == Brightness.light;
+    final base = light ? scheme.surface : scheme.surfaceContainerHighest;
+    final d = depth.clamp(0.3, 1.8);
+    final a = Color.lerp(base, colorA ?? scheme.primary, light ? 0.55 : 0.45)!
+        .withValues(alpha: (light ? 0.40 : 0.36) * d);
+    final mid = base.withValues(alpha: (light ? 0.28 : 0.30) * d);
+    final b = Color.lerp(base, colorB ?? scheme.tertiary, light ? 0.48 : 0.38)!
+        .withValues(alpha: (light ? 0.36 : 0.32) * d);
+    return [a, mid, b];
+  }
+
+  /// 组内第 [i]/[n] 段的霜层色（连续渐变切片，缝不铺色）。
+  static List<Color> frostRowSlice(
+    ColorScheme scheme,
+    int i,
+    int n, {
+    Color? colorA,
+    Color? colorB,
+    double depth = 1.0,
+  }) {
+    final stops = frostShellGradient(
+      scheme,
+      colorA: colorA,
+      colorB: colorB,
+      depth: depth,
+    );
+    double t(int k) => n <= 1 ? 0.5 : k / n;
+    Color at(double u) {
+      if (u <= 0.5) return Color.lerp(stops[0], stops[1], u * 2)!;
+      return Color.lerp(stops[1], stops[2], (u - 0.5) * 2)!;
+    }
+
+    return [at(t(i)), at(t(i + 1))];
   }
 
   static Color topTint(ColorScheme scheme) {

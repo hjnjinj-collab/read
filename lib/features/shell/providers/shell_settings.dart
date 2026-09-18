@@ -20,6 +20,19 @@ class ShellSettings {
     this.navBlurSigma = 12,
     this.navTintStrength = 0.38,
     this.glassMode = 'liquid',
+    this.pageTintOn = true,
+    this.pageTintLight = 0.35,
+    this.pageTintDark = 0.0,
+    this.ambientOn = true,
+    this.ambientDir = 'tlbr',
+    this.frostOn = true,
+    this.frostDir = 'tlbr',
+    this.frostStyle = 'unified',
+    this.frostRowPadV = 20,
+    this.frostGradA,
+    this.frostGradB,
+    this.frostGradDepth = 1.0,
+    this.lgMotionOn = true,
   });
 
   final bool bookshelfGrid;
@@ -40,6 +53,55 @@ class ShellSettings {
   /// liquid = 液态折射（Impeller 实时；Skia 无 View 时自动退化为霜面）
   /// lite   = 毛玻璃霜面（无 shader / 无 capture，性能优先）
   final String glassMode;
+
+  /// 整页均匀主色**色渗**开关（pageSurface）；关则强制 0
+  final bool pageTintOn;
+
+  /// 浅色页底主色混入 0–0.35（整页均匀色相）
+  final double pageTintLight;
+
+  /// 深色页底主色混入 0–0.40（黑底偏主色夜灰）
+  final double pageTintDark;
+
+  /// **斜向双息渐变**开关（ShellAmbient，叠在色渗之上）
+  final bool ambientOn;
+
+  /// 渐变方向：
+  /// tlbr | trbl | top | bottom | left | right
+  final String ambientDir;
+
+  /// 设置根页霜层渐变开关
+  final bool frostOn;
+
+  /// 设置根页霜层渐变方向（同 ambientDirs 枚举）
+  final String frostDir;
+
+  /// 霜层方案：unified = 整组连续渐变（默认）；slice = 每栏切片
+  final String frostStyle;
+
+  /// 设置根页子栏上下 padding（控制每栏高度，左右不变）
+  final double frostRowPadV;
+
+  /// 霜层渐变起点颜色（ARGB int）；null = 跟随 scheme.primary
+  final int? frostGradA;
+
+  /// 霜层渐变终点颜色（ARGB int）；null = 跟随 scheme.tertiary
+  final int? frostGradB;
+
+  /// 霜层渐变整体深度倍率 0.3–1.8（默认 1.0）；调 alpha 而非换色
+  final double frostGradDepth;
+
+  /// 液态玻璃果冻/形变效果开关（滑杆 squash、分段鼓动等）
+  final bool lgMotionOn;
+
+  static const List<String> ambientDirs = [
+    'tlbr',
+    'trbl',
+    'top',
+    'bottom',
+    'left',
+    'right',
+  ];
 
   static const String storageKey = 'shell';
 
@@ -82,6 +144,33 @@ class ShellSettings {
           'liquid' => 'liquid',
           _ => 'liquid',
         },
+        pageTintOn: map['pageTintOn'] as bool? ?? true,
+        pageTintLight:
+            (map['pageTintLight'] as num?)?.toDouble() ?? 0.35,
+        pageTintDark: (map['pageTintDark'] as num?)?.toDouble() ?? 0.0,
+        ambientOn: map['ambientOn'] as bool? ?? true,
+        ambientDir: switch (map['ambientDir'] as String?) {
+          'tlbr' || 'trbl' || 'top' || 'bottom' || 'left' || 'right' =>
+            map['ambientDir'] as String,
+          _ => 'tlbr',
+        },
+        frostOn: map['frostOn'] as bool? ?? true,
+        frostDir: switch (map['frostDir'] as String?) {
+          'tlbr' || 'trbl' || 'top' || 'bottom' || 'left' || 'right' =>
+            map['frostDir'] as String,
+          _ => 'tlbr',
+        },
+        frostStyle: switch (map['frostStyle'] as String?) {
+          'unified' || 'slice' => map['frostStyle'] as String,
+          _ => 'unified',
+        },
+        frostRowPadV:
+            (map['frostRowPadV'] as num?)?.toDouble() ?? 20,
+        frostGradA: map['frostGradA'] as int?,
+        frostGradB: map['frostGradB'] as int?,
+        frostGradDepth:
+            (map['frostGradDepth'] as num?)?.toDouble() ?? 1.0,
+        lgMotionOn: map['lgMotionOn'] as bool? ?? true,
       );
     } catch (_) {
       return const ShellSettings();
@@ -96,6 +185,19 @@ class ShellSettings {
         'navBlurSigma': navBlurSigma,
         'navTintStrength': navTintStrength,
         'glassMode': glassMode,
+        'pageTintOn': pageTintOn,
+        'pageTintLight': pageTintLight,
+        'pageTintDark': pageTintDark,
+        'ambientOn': ambientOn,
+        'ambientDir': ambientDir,
+        'frostOn': frostOn,
+        'frostDir': frostDir,
+        'frostStyle': frostStyle,
+        'frostRowPadV': frostRowPadV,
+        'frostGradA': frostGradA,
+        'frostGradB': frostGradB,
+        'frostGradDepth': frostGradDepth,
+        'lgMotionOn': lgMotionOn,
       });
 
   ShellSettings copyWith({
@@ -107,6 +209,21 @@ class ShellSettings {
     double? navBlurSigma,
     double? navTintStrength,
     String? glassMode,
+    bool? pageTintOn,
+    double? pageTintLight,
+    double? pageTintDark,
+    bool? ambientOn,
+    String? ambientDir,
+    bool? frostOn,
+    String? frostDir,
+    String? frostStyle,
+    double? frostRowPadV,
+    int? frostGradA,
+    bool clearFrostGradA = false,
+    int? frostGradB,
+    bool clearFrostGradB = false,
+    double? frostGradDepth,
+    bool? lgMotionOn,
   }) {
     return ShellSettings(
       bookshelfGrid: bookshelfGrid ?? this.bookshelfGrid,
@@ -116,6 +233,21 @@ class ShellSettings {
       navBlurSigma: navBlurSigma ?? this.navBlurSigma,
       navTintStrength: navTintStrength ?? this.navTintStrength,
       glassMode: glassMode ?? this.glassMode,
+      pageTintOn: pageTintOn ?? this.pageTintOn,
+      pageTintLight: pageTintLight ?? this.pageTintLight,
+      pageTintDark: pageTintDark ?? this.pageTintDark,
+      ambientOn: ambientOn ?? this.ambientOn,
+      ambientDir: ambientDir ?? this.ambientDir,
+      frostOn: frostOn ?? this.frostOn,
+      frostDir: frostDir ?? this.frostDir,
+      frostStyle: frostStyle ?? this.frostStyle,
+      frostRowPadV: frostRowPadV ?? this.frostRowPadV,
+      frostGradA:
+          clearFrostGradA ? null : (frostGradA ?? this.frostGradA),
+      frostGradB:
+          clearFrostGradB ? null : (frostGradB ?? this.frostGradB),
+      frostGradDepth: frostGradDepth ?? this.frostGradDepth,
+      lgMotionOn: lgMotionOn ?? this.lgMotionOn,
     );
   }
 }
@@ -176,6 +308,88 @@ class ShellSettingsNotifier extends Notifier<ShellSettings> {
     final next = state.copyWith(glassMode: m);
     next.applyGlassEngine();
     _persist(next);
+  }
+
+  void setPageTintOn(bool value) {
+    if (state.pageTintOn == value) return;
+    _persist(state.copyWith(pageTintOn: value));
+  }
+
+  void setPageTintLight(double value) {
+    final v = value.clamp(0.0, 0.60);
+    if ((state.pageTintLight - v).abs() < 0.005) return;
+    _persist(state.copyWith(pageTintLight: v));
+  }
+
+  void setPageTintDark(double value) {
+    final v = value.clamp(0.0, 0.40);
+    if ((state.pageTintDark - v).abs() < 0.005) return;
+    _persist(state.copyWith(pageTintDark: v));
+  }
+
+  void setAmbientOn(bool value) {
+    if (state.ambientOn == value) return;
+    _persist(state.copyWith(ambientOn: value));
+  }
+
+  void setAmbientDir(String dir) {
+    final d = ShellSettings.ambientDirs.contains(dir) ? dir : 'tlbr';
+    if (state.ambientDir == d) return;
+    _persist(state.copyWith(ambientDir: d));
+  }
+
+  void setFrostOn(bool value) {
+    if (state.frostOn == value) return;
+    _persist(state.copyWith(frostOn: value));
+  }
+
+  void setFrostDir(String dir) {
+    final d = ShellSettings.ambientDirs.contains(dir) ? dir : 'tlbr';
+    if (state.frostDir == d) return;
+    _persist(state.copyWith(frostDir: d));
+  }
+
+  void setFrostStyle(String style) {
+    final s = style == 'slice' ? 'slice' : 'unified';
+    if (state.frostStyle == s) return;
+    _persist(state.copyWith(frostStyle: s));
+  }
+
+  void setFrostRowPadV(double value) {
+    final v = value.clamp(8.0, 36.0);
+    if ((state.frostRowPadV - v).abs() < 0.5) return;
+    _persist(state.copyWith(frostRowPadV: v));
+  }
+
+  void setFrostGradA(Color? color) {
+    if (color == null) {
+      if (state.frostGradA == null) return;
+      _persist(state.copyWith(clearFrostGradA: true));
+      return;
+    }
+    if (state.frostGradA == color.toARGB32()) return;
+    _persist(state.copyWith(frostGradA: color.toARGB32()));
+  }
+
+  void setFrostGradB(Color? color) {
+    if (color == null) {
+      if (state.frostGradB == null) return;
+      _persist(state.copyWith(clearFrostGradB: true));
+      return;
+    }
+    if (state.frostGradB == color.toARGB32()) return;
+    _persist(state.copyWith(frostGradB: color.toARGB32()));
+  }
+
+  void setFrostGradDepth(double value) {
+    final v = value.clamp(0.3, 1.8);
+    if ((state.frostGradDepth - v).abs() < 0.02) return;
+    _persist(state.copyWith(frostGradDepth: v));
+  }
+
+  void setLgMotionOn(bool value) {
+    if (state.lgMotionOn == value) return;
+    _persist(state.copyWith(lgMotionOn: value));
   }
 }
 

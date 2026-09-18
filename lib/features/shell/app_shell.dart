@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import 'providers/shell_actions.dart';
 import 'providers/shell_settings.dart';
 import 'widgets/expandable_glass_nav.dart';
+import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
 /// 三 Tab 应用壳（StatefulShell 状态保活）。
 /// 底栏：书架/书源 胶囊 + 右侧「更多」（设置 / 添加书籍）。
@@ -83,29 +84,17 @@ class _AppShellState extends ConsumerState<AppShell> {
       extendBody: true,
       body: Stack(
         children: [
-          navigationShell,
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: AppGlass.bottomAmbientHeight,
+          // 三 Tab 共用细腻主色氛围（全高缓坡，非底部硬条）
+          Positioned.fill(
             child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      scheme.primary.withValues(alpha: 0.16),
-                      scheme.primary.withValues(alpha: 0.06),
-                      scheme.primary.withValues(alpha: 0),
-                    ],
-                    stops: const [0, 0.4, 1],
-                  ),
-                ),
+              child: ShellAmbient(
+                enabled: shell.ambientOn,
+                dir: AmbientDir.parse(shell.ambientDir),
+                child: const SizedBox.expand(),
               ),
             ),
           ),
+          navigationShell,
         ],
       ),
       bottomNavigationBar: Padding(

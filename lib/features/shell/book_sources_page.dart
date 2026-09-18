@@ -13,8 +13,13 @@ class BookSourcesPage extends StatelessWidget {
       backgroundColor: Colors.transparent,
       body: CustomScrollView(
         slivers: [
-          const SliverAppBar.large(
+          // 紧凑顶栏：标题贴顶，不用 large（大标题会空一大截）
+          const SliverAppBar(
             title: Text('书源'),
+            pinned: false,
+            floating: false,
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
           ),
           SliverFillRemaining(
             hasScrollBody: false,
