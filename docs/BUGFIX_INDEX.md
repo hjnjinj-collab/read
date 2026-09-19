@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-09-15
+> 最后更新: 2026-09-19
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -47,6 +47,7 @@
 | **翻页动画完成瞬间闪烁一下（新旧两模式均见过）** | ①Flutter Ticker 尾随帧：progress 触顶后回退 0.9996~0.9999，完成短路阈值 `>=1.0` 不命中 → 残迹帧（仿真翻页 8-28 报告，阈值放宽 0.9995）②水波纹：短路路径直绘漏纸色底 + 渲染参数用默认值而非 notifier 同源 → trailing 帧与正式渲染不一致 | [bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹](./bugfixes/2026-08-28_翻页动画完成瞬间纹理闪烁震荡TickerTrailing帧残迹.md) + [bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影](./bugfixes/2026-09-03_水波纹翻页快照透明背景文字重影.md)（v16.9.5 段）⭐ 短路直绘必须与正式渲染逐像素同源（纸色底+渲染参数） |
 | **翻页动画卡死在中途某帧，之后所有翻页手势永久失效（调慢速度档位后必现）** | 双缺陷叠加：①`onDragUpdate` 只查 `_isActive` 不查 `isAnimating`——动画播放中第二次触摸的 dragTo 走到 `AnimationController.value setter`（内部隐式 `stop()`）静默打断动画 ②裸 `await animateTo` 的 TickerFuture 被取消后**永不完成** → `_runAuto` 挂死 → `_turnEndInFlight`/`_isActive` 永久 true → 后续手势全被守卫吞 | [bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持](./bugfixes/2026-09-04_翻页动画卡死_TickerFuture裸await挂死与拖拽劫持.md) ⭐ `animateTo` 必须 `.orCancel`+catch；拖拽驱动入口必须挡 `isAnimating`；调慢动画是时序竞态的时间放大镜 |
 | **TXT 章节标题不显示在正文开头（标题被跳过）** | 章节边界计算中 `start_offset = line_start(line_number + 1)` **跳过标题行**——JS 引擎路径（`chapter_extractor.rs`）和 Rust 回退路径（`txt_parser.rs`）均存在；`remove_duplicate_title` 功能关闭时标题仍不显示（标题从不在内容中）；`align_offsets_by_title` 的 `tl + 1` 同源缺陷 | [bugfixes/2026-09-09_TXT章节标题不显示_章节边界跳过标题行](./bugfixes/2026-09-09_TXT章节标题不显示_章节边界跳过标题行.md) ⭐ 两路径统一：`line_number + 1` → `line_number`；`tl + 1` → `tl` |
+| **设置页开关视觉不靠右（右边距 44.5px，调 padding/结构全无效）** | `LiquidGlassSwitch` 的 `reserveSwellRoom: true` 把布局占位撑到 120px（可视轨道 63px 居中，两侧各 28.5px 隐形空白），偏差在组件布局框而非外层结构 | [bugfixes/2026-09-19_LiquidGlassSwitch预留膨胀区致开关不靠右](./bugfixes/2026-09-19_LiquidGlassSwitch预留膨胀区致开关不靠右.md) ⭐ `reserveSwellRoom: false` + 裁切余量论证（膨胀最大 8.5px < 距壳边 16px） |
 
 ## 二、按错误信息查找
 
@@ -101,6 +102,10 @@
 9. **`AnimationController.value` 赋值 = 隐式 `stop()`** —— 任何可能发生在动画播放期间的
    拖拽驱动入口（dragTo → value setter）都会静默杀死动画。驱动入口必须显式挡住
    `isAnimating`；"非空闲"包含拖拽中与动画中两种相位，只有前者接受 dragTo。
+10. **liquid_glass_easy 控件的 `reserveSwellRoom: true` 会改变布局占位** ——
+    布局占位（120px）≠ 视觉尺寸（63px 轨道），两侧各多出隐形空白。对齐敏感的
+    场景必须用 `false`，并用"膨胀最大超出量 vs 距裁切祖先边缘的余量"论证不裁切，
+    而不是调外层 padding 补偿。（2026-09-19 设置页开关不靠右根因）
 
 ## 四、记录规范
 
