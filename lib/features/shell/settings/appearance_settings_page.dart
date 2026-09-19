@@ -528,7 +528,7 @@ class _PaletteSwatch extends StatelessWidget {
   }
 }
 
-/// 自定义取色器按钮：点击弹出 HSV 取色对话框
+/// 自定义取色器按钮：点击弹出 flex_color_picker 取色对话框
 class _ColorPickerButton extends StatelessWidget {
   const _ColorPickerButton({
     required this.current,
@@ -625,7 +625,9 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
       child: AlertDialog(
         title: const Text('自定义主色调'),
         contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 0),
-        content: ColorPicker(
+        // 矮屏（横屏）下 wheel+色板+色码叠加内容较高，滚动兜底防溢出
+        content: SingleChildScrollView(
+          child: ColorPicker(
           color: _color,
           onColorChanged: (Color c) => setState(() => _color = c),
           pickersEnabled: const <ColorPickerType, bool>{
@@ -639,6 +641,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
           showColorCode: true,
           copyPasteBehavior: const ColorPickerCopyPasteBehavior(
             copyButton: true,
+          ),
           ),
         ),
         actions: [
@@ -666,23 +669,15 @@ class _SchemeTintsGrid extends StatelessWidget {
 
   final ColorScheme scheme;
 
-  List<(String, Color, Color)> get _tints => [
-        ('primary', scheme.primary, scheme.onPrimary),
-        ('primaryContainer', scheme.primaryContainer, scheme.onPrimaryContainer),
-        ('secondary', scheme.secondary, scheme.onSecondary),
-        (
-          'secondaryContainer',
-          scheme.secondaryContainer,
-          scheme.onSecondaryContainer
-        ),
-        ('tertiary', scheme.tertiary, scheme.onTertiary),
-        (
-          'tertiaryContainer',
-          scheme.tertiaryContainer,
-          scheme.onTertiaryContainer
-        ),
-        ('error', scheme.error, scheme.onError),
-        ('errorContainer', scheme.errorContainer, scheme.onErrorContainer),
+  List<(String, Color)> get _tints => [
+        ('primary', scheme.primary),
+        ('primaryContainer', scheme.primaryContainer),
+        ('secondary', scheme.secondary),
+        ('secondaryContainer', scheme.secondaryContainer),
+        ('tertiary', scheme.tertiary),
+        ('tertiaryContainer', scheme.tertiaryContainer),
+        ('error', scheme.error),
+        ('errorContainer', scheme.errorContainer),
       ];
 
   @override
@@ -696,8 +691,8 @@ class _SchemeTintsGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
       children: [
-        for (final (name, color, onColor) in _tints)
-          _TintSwatch(name: name, color: color, onColor: onColor),
+        for (final (name, color) in _tints)
+          _TintSwatch(name: name, color: color),
       ],
     );
   }
@@ -707,12 +702,10 @@ class _TintSwatch extends StatelessWidget {
   const _TintSwatch({
     required this.name,
     required this.color,
-    required this.onColor,
   });
 
   final String name;
   final Color color;
-  final Color onColor;
 
   @override
   Widget build(BuildContext context) {
@@ -750,7 +743,7 @@ class _TintSwatch extends StatelessWidget {
               child: Text(
                 name,
                 style: TextStyle(fontSize: 9, color: fg),
-                maxLines: 1,
+                maxLines: 2,
               ),
             ),
             const Spacer(),
