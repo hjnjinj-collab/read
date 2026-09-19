@@ -1,9 +1,9 @@
 ---
 feature: appearance-scheme-preview-picker
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..61bb105
+commits: cdf94df..0829b87
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -11,29 +11,33 @@ commits: cdf94df..61bb105
 ## Report
 
 **What was built** — 外观页三类容器尺寸统一到液态玻璃导航栏高度 64px：
-明暗分段撤销上轮误加的垫高（分段贴壳边）且 48→64；`SettingSwitchRow`
-垂直 8→14（行高 64，书架/动态取色/玻璃设置页 6 处统一）。主题容器末尾
-新增「派生色系」分区：当前 ColorScheme 的 8 个 MD3 角色 4 列网格，色值
-实时跟随主题来源切换，点击复制 8 位 hex。自定义取色对话框迁移到
-flex_color_picker 3.8（色板+色轮+色码，外层 SingleChildScrollView
-矮屏滚动兜底），自写 HSV 滑杆删除；applySeed 来源互斥流程不变。
+明暗分段撤销误加的垫高（贴壳边）且 48→64；`SettingSwitchRow` 垂直
+8→14（行高 64，6 处统一）。主题容器末尾「派生色系」分区：8 个 MD3
+角色 4 列网格实时跟随主题来源，点击复制 8 位 hex，底距 14px 不贴底。
+自定义取色迁移 flex_color_picker 3.8 并包进 `SettingsFrostShell`
+液态玻璃壳（霜向/渐变经 Consumer 跟随用户外观自定义），标题下显示
+「英文色名 · 中文名」（HSV 12 段色相映射），顶部冗余复制按钮移除；
+applySeed 来源互斥流程不变。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
-改动文件零新增；独立审查三项 PASS、无 critical（括号平衡、
-ColorPicker 对话框宽度按包 README 自适应、Clipboard/maybeOf 空安全、
-glass 页 64px 行协调性、grid tile 无溢出均核对）；轻微项已处理：
-onColor 死参数删除、色卡角色名允许两行、取色对话框滚动兜底、HSV
-过时注释同步。真机视觉验收由用户执行中（T4 部分）。
+改动文件零新增；两轮独立审查三项 PASS、无 critical（滚动兜底范式、
+透明 Dialog 上 BackdropFilter 采样链、_colorNameZh 边界数学、
+无死导入均核对）；真机反馈四项（贴底/色名中文/玻璃壳/冗余按钮）
+全部落地。转场动画瞬间霜面可能闪一下（BackdropFilter 采样转场
+saveLayer，瞬时项）与 ExcludeSemantics 使对话框按钮对 TalkBack
+不可见（压制取色器巨量语义树的取舍）两项已记录，真机观察。
 
 **Journey log** —
 - flex_color_scheme v9 迁移 material_ui 是作者有意设计（用户确认）；
-  本项目借用其色彩体系与算法，v9 类型分叉不迁移，8.x 锁定维持。
-- 明暗模式容器的设计语义是「复刻导航栏尺寸」——对这类液态玻璃容器
-  加通用 padding 前先确认设计意图，上一轮的 vertical:10 垫高即误判。
-- ColorPicker 在 AlertDialog 内自适应内容宽（包 README 460-466），但
-  wheel 切换会改变对话框尺寸，矮屏需滚动兜底；真机验收时留意横屏。
-- 审查子代理 bash 受限时的「终点文件状态核对」模式连续两轮可用且
-  结论经主代理抽验成立；抽验重点 = 审查者引用的行号与 diff 摘要。
+  本项目借用其色彩体系与算法，8.x 锁定维持。
+- 明暗模式容器的语义是「复刻导航栏尺寸」——对液态玻璃容器加通用
+  padding 前先确认设计意图，上轮 vertical:10 垫高即误判。
+- ColorPicker 在 AlertDialog/Dialog 内自适应内容宽；wheel 切换改变
+  对话框尺寸，矮屏需 Flexible+SingleChildScrollView 兜底。
+- Dialog 透明底 + FrostShell 组合成立：BackdropFilter 采样同合成树
+  先行内容（下层页面 + barrier），透明底是必要条件而非障碍。
+- 审查子代理 bash 受限时「终点文件状态 + 全库交叉 grep」模式连续
+  三轮可用，结论经主代理抽验成立。
 
 ## [S1] Problem
 
