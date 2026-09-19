@@ -1,6 +1,6 @@
 ---
 feature: appearance-scheme-preview-picker
-status: delivered
+status: in-progress
 updated: 2026-09-19
 branch: master
 commits: cdf94df..61bb105
@@ -88,6 +88,18 @@ onColor 死参数删除、色卡角色名允许两行、取色对话框滚动兜
   「确定 → onPick → applySeed(source:'picker')」流程不变。
 - 自写 `_SliderRow`、HSV state 全部删除。
 
+### 真机验收修正（T5/T6，同 feature 打磨）
+
+- 派生色系作为主题容器末分区，网格底距 2 → 14px，消除贴底。
+- 对话框改用 `SettingsFrostShell` 液态玻璃壳（与设置容器/底栏同语言），
+  Dialog 透明底 + maxWidth 380；内部 Column：标题行 / 中英色名行 /
+  Flexible 滚动 ColorPicker / 底部操作行。
+- 色名双语：关闭包内 `showColorName`，自定义行显示
+  `ColorTools.nameThatColor` 英文名 + `_colorNameZh` 中文
+  （HSV 色相 12 段 + 深/浅/灰修饰，覆盖任意色）。
+- 删除 `copyPasteBehavior(copyButton)`——色码行自带复制，顶部工具栏
+  复制按钮冗余。
+
 ## [S3] Out of Scope
 
 - flex_color_scheme v9 迁移（用户确认借鉴算法即可，8.x 锁定维持）。
@@ -99,4 +111,6 @@ onColor 死参数删除、色卡角色名允许两行、取色对话框滚动兜
 - [x] T1: 撤明暗垫高 + 分段 64 + SettingSwitchRow vertical 14 — acceptance: 明暗与书架容器均 64px，与导航栏同高；分段贴壳边（代码落地+审查核对，视觉待真机） (covers: S2 尺寸)
 - [x] T2: 派生色系预览卡（8 角色网格 + tap 复制 hex） — acceptance: 切主题色/动态取色时色卡即时刷新；点击复制 hex（落地+审查核对） (covers: S2 预览)
 - [x] T3: FlexColorPicker 替换自写 HSV 对话框 — acceptance: 色轮/色板/色码可用，确定后来源切到 picker 且其余组置灰（落地+审查核对） (covers: S2 取色器)
+- [x] T5: 派生色系网格底距 14px — acceptance: 主题容器末分区不再贴底（真机反馈修正） (covers: S2 真机修正)
+- [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)

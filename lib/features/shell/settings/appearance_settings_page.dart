@@ -185,7 +185,8 @@ class _AppearanceSettingsPageState
                         subtitle: '当前主题色派生的 MD3 色彩角色',
                       ),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+                        // 底距 14：作为主题容器末分区，与其他容器末行呼吸一致
+                        padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
                         child: _SchemeTintsGrid(scheme: scheme),
                       ),
                     ],
@@ -596,7 +597,7 @@ class _ColorPickerButton extends StatelessWidget {
   }
 }
 
-/// 取色对话框：flex_color_picker（Material 色板 + 色轮 + 色码）
+/// 取色对话框：flex_color_picker + 液态玻璃壳（与设置容器/底栏同语言）
 class _ColorPickerDialog extends StatefulWidget {
   const _ColorPickerDialog({
     required this.initialColor,
@@ -621,44 +622,108 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return ExcludeSemantics(
-      child: AlertDialog(
-        title: const Text('自定义主色调'),
-        contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 0),
-        // 矮屏（横屏）下 wheel+色板+色码叠加内容较高，滚动兜底防溢出
-        content: SingleChildScrollView(
-          child: ColorPicker(
-          color: _color,
-          onColorChanged: (Color c) => setState(() => _color = c),
-          pickersEnabled: const <ColorPickerType, bool>{
-            ColorPickerType.primary: true,
-            ColorPickerType.accent: true,
-            ColorPickerType.wheel: true,
-          },
-          width: 40,
-          height: 40,
-          showColorName: true,
-          showColorCode: true,
-          copyPasteBehavior: const ColorPickerCopyPasteBehavior(
-            copyButton: true,
-          ),
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: SettingsFrostShell(
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                    child: Text(
+                      '自定义主色调',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: Text(
+                      '${ColorTools.nameThatColor(_color)}'
+                      ' · ${_colorNameZh(_color)}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                  // 矮屏（横屏）下内容较高，滚动兜底防溢出
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: ColorPicker(
+                        color: _color,
+                        onColorChanged: (Color c) =>
+                            setState(() => _color = c),
+                        pickersEnabled: const <ColorPickerType, bool>{
+                          ColorPickerType.primary: true,
+                          ColorPickerType.accent: true,
+                          ColorPickerType.wheel: true,
+                        },
+                        width: 40,
+                        height: 40,
+                        // 色名走标题下的中英双语行，关闭包内英文行
+                        showColorName: false,
+                        showColorCode: true,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('取消'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: () {
+                            widget.onPick(_color);
+                            Navigator.pop(context);
+                          },
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              widget.onPick(_color);
-              Navigator.pop(context);
-            },
-            child: const Text('确定'),
-          ),
-        ],
       ),
     );
+  }
+
+  /// 按色相/饱和度/明度给任意颜色取中文名：12 段色相 + 深/浅/灰修饰
+  String _colorNameZh(Color c) {
+    final hsv = HSVColor.fromColor(c);
+    final s = hsv.saturation;
+    final v = hsv.value;
+    if (s < 0.12) {
+      if (v < 0.15) return '黑';
+      if (v > 0.88) return '白';
+      return v < 0.5 ? '深灰' : '浅灰';
+    }
+    const names = [
+      '红', '橙', '黄', '黄绿', '绿', '青绿',
+      '青', '蓝', '靛蓝', '紫', '品红', '粉',
+    ];
+    // 从 -7.5° 起每 30° 一段，红居中跨越 0°
+    final idx = ((hsv.hue + 7.5) % 360) ~/ 30;
+    final base = names[idx.clamp(0, 11)];
+    if (v < 0.4) return '深$base';
+    if (v > 0.82 && s < 0.45) return '浅$base';
+    return base;
   }
 }
 
