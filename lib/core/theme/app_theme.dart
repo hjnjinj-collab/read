@@ -2,7 +2,7 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// 应用主题：松绿 seed 主导全应用色系（明暗均由 fromSeed 派生）。
+/// 应用主题：松绿 seed 主导全应用色系（明暗均由 flex_color_scheme 引擎派生）。
 /// 阅读页纸色/夜间仍在阅读菜单，不在此覆盖。
 ///
 /// 玻璃准则：任何 BackdropFilter 必须叠加 [AppGlass.tint] 主色滤镜，

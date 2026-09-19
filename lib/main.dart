@@ -155,8 +155,8 @@ class MyApp extends ConsumerWidget {
     );
   }
 
-  /// 只取壁纸 primary 作为 seed，再用 Flutter ColorScheme.fromSeed 派生，
-  /// 避免 material_ui.ColorScheme 与 framework ColorScheme 类型分叉。
+  /// 只取壁纸 primary 作为 seed，再由 flex_color_scheme 引擎派生完整方案，
+  /// 避免 material_ui.ColorScheme（flex v9 类型体系）与 framework 分叉。
   Future<({Color? light, Color? dark})> _loadDynamicSeeds() async {
     try {
       final palette = await DynamicColorPlugin.getCorePalette();
