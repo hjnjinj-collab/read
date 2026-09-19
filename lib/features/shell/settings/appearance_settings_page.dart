@@ -1,4 +1,7 @@
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 // ignore: implementation_imports
@@ -174,6 +177,17 @@ class _AppearanceSettingsPageState
                           ),
                         ),
                       ),
+                      const SettingsDivider(indent: 16),
+                      // 派生色系：当前 scheme 的 MD3 角色色实时预览
+                      SettingIconLabel(
+                        icon: AppIcons.schemeTints,
+                        title: '派生色系',
+                        subtitle: '当前主题色派生的 MD3 色彩角色',
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+                        child: _SchemeTintsGrid(scheme: scheme),
+                      ),
                     ],
                   ),
                 ),
@@ -199,12 +213,9 @@ class _AppearanceSettingsPageState
                   colorB: frostB,
                   gradDepth: frostDepth,
                   showShadow: false,
-                  child: Padding(
-                    // 分段上下垫高，与开关行垂直节奏一致
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Listener(
-                      onPointerDown: (e) => _lastTapPosition = e.position,
-                      child: LiquidGlassSegmented(
+                  child: Listener(
+                    onPointerDown: (e) => _lastTapPosition = e.position,
+                    child: LiquidGlassSegmented(
                       segments: const ['跟随系统', '浅色', '深色'],
                       selectedIndex: themeIndex,
                       onChanged: (i) {
@@ -247,7 +258,8 @@ class _AppearanceSettingsPageState
                         });
                       },
                       width: double.infinity,
-                      height: 48,
+                      // 与液态玻璃导航栏同高（64），容器即分段、无垫高
+                      height: 64,
                       segmentBuilder: (context, i, selected, color) {
                         final unselectedIcons = [
                           Icons.brightness_auto_outlined,
@@ -335,7 +347,6 @@ class _AppearanceSettingsPageState
                         selectedFontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
                   ),
                 ),
               ],
@@ -585,7 +596,7 @@ class _ColorPickerButton extends StatelessWidget {
   }
 }
 
-/// HSV 取色对话框：色相 + 饱和度 + 明度滑杆
+/// 取色对话框：flex_color_picker（Material 色板 + 色轮 + 色码）
 class _ColorPickerDialog extends StatefulWidget {
   const _ColorPickerDialog({
     required this.initialColor,
@@ -600,147 +611,160 @@ class _ColorPickerDialog extends StatefulWidget {
 }
 
 class _ColorPickerDialogState extends State<_ColorPickerDialog> {
-  late HSVColor _hsv;
+  late Color _color;
 
   @override
   void initState() {
     super.initState();
-    _hsv = HSVColor.fromColor(widget.initialColor);
+    _color = widget.initialColor;
   }
 
   @override
   Widget build(BuildContext context) {
-    final previewColor = _hsv.toColor();
-
     return ExcludeSemantics(
       child: AlertDialog(
         title: const Text('自定义主色调'),
-        content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: double.infinity,
-            height: 48,
-            decoration: BoxDecoration(
-              color: previewColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outlineVariant,
-              ),
-            ),
+        contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 0),
+        content: ColorPicker(
+          color: _color,
+          onColorChanged: (Color c) => setState(() => _color = c),
+          pickersEnabled: const <ColorPickerType, bool>{
+            ColorPickerType.primary: true,
+            ColorPickerType.accent: true,
+            ColorPickerType.wheel: true,
+          },
+          width: 40,
+          height: 40,
+          showColorName: true,
+          showColorCode: true,
+          copyPasteBehavior: const ColorPickerCopyPasteBehavior(
+            copyButton: true,
           ),
-          const SizedBox(height: 16),
-          _SliderRow(
-            label: '色相',
-            value: _hsv.hue,
-            max: 360,
-            onChanged: (v) => setState(() => _hsv = _hsv.withHue(v)),
-            gradient: LinearGradient(
-              colors: [
-                for (var i = 0; i <= 12; i++)
-                  HSVColor.fromAHSV(1, i * 30.0, 1, 1).toColor(),
-              ],
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
           ),
-          const SizedBox(height: 8),
-          _SliderRow(
-            label: '饱和度',
-            value: _hsv.saturation,
-            max: 1,
-            onChanged: (v) => setState(() => _hsv = _hsv.withSaturation(v)),
-            gradient: LinearGradient(
-              colors: [
-                HSVColor.fromAHSV(1, _hsv.hue, 0, _hsv.value).toColor(),
-                HSVColor.fromAHSV(1, _hsv.hue, 1, _hsv.value).toColor(),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          _SliderRow(
-            label: '明度',
-            value: _hsv.value,
-            max: 1,
-            onChanged: (v) => setState(() => _hsv = _hsv.withValue(v)),
-            gradient: LinearGradient(
-              colors: [
-                HSVColor.fromAHSV(1, _hsv.hue, _hsv.saturation, 0).toColor(),
-                HSVColor.fromAHSV(1, _hsv.hue, _hsv.saturation, 1).toColor(),
-              ],
-            ),
+          FilledButton(
+            onPressed: () {
+              widget.onPick(_color);
+              Navigator.pop(context);
+            },
+            child: const Text('确定'),
           ),
         ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () {
-            widget.onPick(previewColor);
-            Navigator.pop(context);
-          },
-          child: const Text('确定'),
-        ),
-      ],
       ),
     );
   }
 }
 
-class _SliderRow extends StatelessWidget {
-  const _SliderRow({
-    required this.label,
-    required this.value,
-    required this.max,
-    required this.onChanged,
-    required this.gradient,
-  });
+/// 派生色系预览：当前 ColorScheme 的 8 个 MD3 角色，点击复制 hex。
+/// 色值实时取自 Theme——任何主题色来源切换即时反映。
+class _SchemeTintsGrid extends StatelessWidget {
+  const _SchemeTintsGrid({required this.scheme});
 
-  final String label;
-  final double value;
-  final double max;
-  final ValueChanged<double> onChanged;
-  final Gradient gradient;
+  final ColorScheme scheme;
+
+  List<(String, Color, Color)> get _tints => [
+        ('primary', scheme.primary, scheme.onPrimary),
+        ('primaryContainer', scheme.primaryContainer, scheme.onPrimaryContainer),
+        ('secondary', scheme.secondary, scheme.onSecondary),
+        (
+          'secondaryContainer',
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer
+        ),
+        ('tertiary', scheme.tertiary, scheme.onTertiary),
+        (
+          'tertiaryContainer',
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer
+        ),
+        ('error', scheme.error, scheme.onError),
+        ('errorContainer', scheme.errorContainer, scheme.onErrorContainer),
+      ];
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return GridView.count(
+      crossAxisCount: 4,
+      mainAxisSpacing: 6,
+      crossAxisSpacing: 6,
+      childAspectRatio: 1.45,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
       children: [
-        Text(
-          '$label: ${(value / max * 100).round()}%',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          height: 20,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            gradient: gradient,
-          ),
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 20,
-              activeTrackColor: Colors.transparent,
-              inactiveTrackColor: Colors.transparent,
-              thumbColor: Colors.white,
-              thumbShape: const RoundSliderThumbShape(
-                enabledThumbRadius: 10,
-              ),
-              overlayShape: SliderComponentShape.noOverlay,
-            ),
-            child: Slider(
-              value: value.clamp(0, max),
-              max: max,
-              onChanged: onChanged,
-            ),
-          ),
-        ),
+        for (final (name, color, onColor) in _tints)
+          _TintSwatch(name: name, color: color, onColor: onColor),
       ],
+    );
+  }
+}
+
+class _TintSwatch extends StatelessWidget {
+  const _TintSwatch({
+    required this.name,
+    required this.color,
+    required this.onColor,
+  });
+
+  final String name;
+  final Color color;
+  final Color onColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final hex =
+        '#${color.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0')}';
+    final fg =
+        color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
+    final outline = Theme.of(context).colorScheme.outlineVariant;
+    return InkWell(
+      onTap: () {
+        Clipboard.setData(ClipboardData(text: hex));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text('已复制 $hex'),
+            duration: const Duration(milliseconds: 1200),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: outline.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                name,
+                style: TextStyle(fontSize: 9, color: fg),
+                maxLines: 1,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              hex,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

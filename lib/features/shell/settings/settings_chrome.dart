@@ -903,9 +903,9 @@ class SettingSwitchRow extends ConsumerWidget {
             expandedThumbHeight: 24,
           );
     return Padding(
-      // 左右对称：文字距左 16，开关距右 16；垂直 8 保证两行副标题
-      // 不贴壳底（作为末行时约 12px 视觉呼吸）
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      // 左右对称：文字距左 16，开关距右 16；垂直 14 → 行高 64，
+      // 与明暗分段、液态玻璃导航栏统一（书架/动态取色/玻璃设置页共用）
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
           Expanded(

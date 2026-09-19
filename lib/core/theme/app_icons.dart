@@ -24,4 +24,5 @@ class AppIcons {
   static const themeMode = Iconsax.sun_1;
   static const bookshelfLayout = Iconsax.element_3;
   static const colorPicker = Iconsax.color_swatch;
+  static const schemeTints = Iconsax.category;
 }
