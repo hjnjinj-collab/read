@@ -598,7 +598,7 @@ class _ColorPickerButton extends StatelessWidget {
 }
 
 /// 取色对话框：flex_color_picker + 液态玻璃壳（与设置容器/底栏同语言）
-class _ColorPickerDialog extends StatefulWidget {
+class _ColorPickerDialog extends ConsumerStatefulWidget {
   const _ColorPickerDialog({
     required this.initialColor,
     required this.onPick,
@@ -608,10 +608,11 @@ class _ColorPickerDialog extends StatefulWidget {
   final ValueChanged<Color> onPick;
 
   @override
-  State<_ColorPickerDialog> createState() => _ColorPickerDialogState();
+  ConsumerState<_ColorPickerDialog> createState() =>
+      _ColorPickerDialogState();
 }
 
-class _ColorPickerDialogState extends State<_ColorPickerDialog> {
+class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
   late Color _color;
 
   @override
@@ -623,12 +624,22 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final shell = ref.watch(shellSettingsProvider);
     return ExcludeSemantics(
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
           child: SettingsFrostShell(
+            // 霜向/渐变跟随用户外观自定义，与页面容器同源
+            dir: AmbientDir.parse(shell.frostDir),
+            colorA: shell.frostGradA != null
+                ? Color(shell.frostGradA!)
+                : null,
+            colorB: shell.frostGradB != null
+                ? Color(shell.frostGradB!)
+                : null,
+            gradDepth: shell.frostGradDepth,
             child: Padding(
               padding: const EdgeInsets.all(4),
               child: Column(
@@ -718,7 +729,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
       '红', '橙', '黄', '黄绿', '绿', '青绿',
       '青', '蓝', '靛蓝', '紫', '品红', '粉',
     ];
-    // 从 -7.5° 起每 30° 一段，红居中跨越 0°
+    // 从 -7.5° 起每 30° 一段，红窗 [-7.5°, 22.5°) 跨越 0°
     final idx = ((hsv.hue + 7.5) % 360) ~/ 30;
     final base = names[idx.clamp(0, 11)];
     if (v < 0.4) return '深$base';
