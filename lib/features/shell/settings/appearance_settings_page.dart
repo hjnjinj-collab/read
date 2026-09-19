@@ -31,6 +31,8 @@ class _AppearanceSettingsPageState
     final shell = ref.watch(shellSettingsProvider);
     final n = ref.read(shellSettingsProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
+    // 当前生效的主题色来源：dynamic | preset | palette | picker
+    final activeSource = shell.effectiveSeedSource;
     final themeIndex = _pendingThemeIndex ??
         switch (shell.themeMode) {
           'light' => 1,
@@ -70,27 +72,51 @@ class _AppearanceSettingsPageState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 首行距顶垫高：SettingIconLabel 自带 4px，合计 14px，
+                      // 消除贴着壳顶的溢出感
+                      const SizedBox(height: 10),
                       // 主题色
                       SettingIconLabel(
                         icon: AppIcons.themeColor,
                         title: '主题色',
                       ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-                        child: _EvenWrap(
-                          children: [
-                            for (final p in AppTheme.seedPresets)
-                              _SeedChip(
-                                label: p.label,
-                                color: p.color,
-                                selected: shell.seedArgb == null
-                                    ? p.color.toARGB32() ==
-                                        AppTheme.seed.toARGB32()
-                                    : shell.seedArgb ==
-                                        p.color.toARGB32(),
-                                onTap: () => n.setSeed(p.color),
-                              ),
-                          ],
+                      Opacity(
+                        // 来源互斥：非「预置」来源时整组降权（MD3 disabled 38%），仍可点击切换
+                        opacity: activeSource == 'preset' ? 1 : 0.38,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+                          child: _EvenWrap(
+                            children: [
+                              for (final p in AppTheme.seedPresets)
+                                ChoiceChip(
+                                  avatar: Container(
+                                    width: 16,
+                                    height: 16,
+                                    decoration: BoxDecoration(
+                                      color: p.color,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.35),
+                                      ),
+                                    ),
+                                  ),
+                                  label: Text(p.label),
+                                  labelStyle: Theme.of(context)
+                                      .textTheme
+                                      .labelMedium,
+                                  showCheckmark: true,
+                                  selected: activeSource == 'preset' &&
+                                      (shell.seedArgb != null
+                                              ? Color(shell.seedArgb!)
+                                              : AppTheme.seed)
+                                          .toARGB32() ==
+                                          p.color.toARGB32(),
+                                  onSelected: (_) => n
+                                      .applySeed(p.color, source: 'preset'),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                       const SettingsDivider(indent: 16),
@@ -99,13 +125,18 @@ class _AppearanceSettingsPageState
                         icon: AppIcons.palette,
                         title: '调色板',
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _ColorPalette(
-                          current: shell.seedArgb != null
-                              ? Color(shell.seedArgb!)
-                              : null,
-                          onPick: (c) => n.setSeed(c),
+                      Opacity(
+                        opacity: activeSource == 'palette' ? 1 : 0.38,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: _ColorPalette(
+                            current: activeSource == 'palette' &&
+                                    shell.seedArgb != null
+                                ? Color(shell.seedArgb!)
+                                : null,
+                            onPick: (c) =>
+                                n.applySeed(c, source: 'palette'),
+                          ),
                         ),
                       ),
                       const SettingsDivider(indent: 16),
@@ -115,13 +146,17 @@ class _AppearanceSettingsPageState
                         title: '自定义取色',
                         subtitle: '手动选择任意主色调',
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _ColorPickerButton(
-                          current: shell.seedArgb != null
-                              ? Color(shell.seedArgb!)
-                              : AppTheme.seed,
-                          onPick: (c) => n.setSeed(c),
+                      Opacity(
+                        opacity: activeSource == 'picker' ? 1 : 0.38,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: _ColorPickerButton(
+                            current: shell.seedArgb != null
+                                ? Color(shell.seedArgb!)
+                                : AppTheme.seed,
+                            active: activeSource == 'picker',
+                            onPick: (c) => n.applySeed(c, source: 'picker'),
+                          ),
                         ),
                       ),
                       const SettingsDivider(indent: 16),
@@ -367,70 +402,15 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _SeedChip extends StatelessWidget {
-  const _SeedChip({
-    required this.label,
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? scheme.primary : scheme.outlineVariant,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.35),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(label, style: Theme.of(context).textTheme.labelMedium),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// 均分布局：子元素保持自然宽度，通过调整间距均分可用宽度
 class _EvenWrap extends StatelessWidget {
-  const _EvenWrap({
-    required this.children,
-    this.rowCount = 3,
-  });
+  const _EvenWrap({required this.children});
 
   final List<Widget> children;
-  final int rowCount;
 
   @override
   Widget build(BuildContext context) {
+    const rowCount = 3;
     return LayoutBuilder(
       builder: (context, constraints) {
         final rows = <Widget>[];
@@ -471,13 +451,6 @@ class _ColorPalette extends StatelessWidget {
   final Color? current;
   final ValueChanged<Color> onPick;
 
-  static const List<Color> _palette = [
-    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
-    Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DD0E1),
-    Color(0xFF4DB6AC), Color(0xFF81C784), Color(0xFFAED581), Color(0xFFFFD54F),
-    Color(0xFFFFB74D), Color(0xFFA1887F), Color(0xFF90A4AE), Color(0xFF607D8B),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -486,7 +459,7 @@ class _ColorPalette extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
-          for (final c in _palette)
+          for (final c in AppTheme.palettePresets)
             _PaletteSwatch(
               color: c,
               selected: current?.toARGB32() == c.toARGB32(),
@@ -538,9 +511,16 @@ class _PaletteSwatch extends StatelessWidget {
 
 /// 自定义取色器按钮：点击弹出 HSV 取色对话框
 class _ColorPickerButton extends StatelessWidget {
-  const _ColorPickerButton({required this.current, required this.onPick});
+  const _ColorPickerButton({
+    required this.current,
+    required this.active,
+    required this.onPick,
+  });
 
   final Color current;
+
+  /// 当前来源是否为本取色器：真时用主色描边强调
+  final bool active;
   final ValueChanged<Color> onPick;
 
   @override
@@ -555,7 +535,10 @@ class _ColorPickerButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: scheme.outlineVariant),
+            border: Border.all(
+              color: active ? scheme.primary : scheme.outlineVariant,
+              width: active ? 1.5 : 1,
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

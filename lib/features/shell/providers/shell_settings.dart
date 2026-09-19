@@ -17,6 +17,7 @@ class ShellSettings {
     this.dynamicColor = false,
     this.themeMode = 'system',
     this.seedArgb,
+    this.seedSource = 'preset',
     this.navBlurSigma = 12,
     this.navTintStrength = 0.38,
     this.glassMode = 'liquid',
@@ -43,6 +44,10 @@ class ShellSettings {
 
   /// 自定义 seed（ARGB int）；null = 用 AppTheme.seed 松绿
   final int? seedArgb;
+
+  /// 主题色来源：preset = 预置 chips；palette = 调色板；picker = 自定义取色。
+  /// 仅在 dynamicColor 关闭时有意义——动态取色开启时覆盖一切。
+  final String seedSource;
 
   /// 底栏玻璃模糊 sigma（0=关模糊只留着色；默认 12）
   final double navBlurSigma;
@@ -113,6 +118,9 @@ class ShellSettings {
         _ => ThemeMode.system,
       };
 
+  /// 当前生效的主题色来源：动态取色优先，其余回落 seedSource
+  String get effectiveSeedSource => dynamicColor ? 'dynamic' : seedSource;
+
   /// 动态取色优先；否则自定义 seed；否则默认松绿
   Color get effectiveSeed {
     if (seedArgb != null) return Color(seedArgb!);
@@ -127,16 +135,32 @@ class ShellSettings {
     LiquidGlassEngine.liteGlassOnImpeller = forceLite;
   }
 
+  static String _migrateSeedSource(String? raw, int? seedArgb) {
+    switch (raw) {
+      case 'preset':
+      case 'palette':
+      case 'picker':
+        return raw!;
+    }
+    if (seedArgb == null) return 'preset';
+    final inPalette =
+        AppTheme.palettePresets.any((c) => c.toARGB32() == seedArgb);
+    return inPalette ? 'palette' : 'picker';
+  }
+
   static ShellSettings tryParse(String? raw) {
     if (raw == null || raw.isEmpty) return const ShellSettings();
     try {
       final map = jsonDecode(raw);
       if (map is! Map<String, dynamic>) return const ShellSettings();
+      final seedArgb = map['seedArgb'] as int?;
       return ShellSettings(
         bookshelfGrid: map['bookshelfGrid'] as bool? ?? true,
         dynamicColor: map['dynamicColor'] as bool? ?? false,
         themeMode: map['themeMode'] as String? ?? 'system',
-        seedArgb: map['seedArgb'] as int?,
+        seedArgb: seedArgb,
+        // 旧数据无 seedSource：按色值能否命中调色板推断 palette/picker
+        seedSource: _migrateSeedSource(map['seedSource'] as String?, seedArgb),
         navBlurSigma: (map['navBlurSigma'] as num?)?.toDouble() ?? 12,
         navTintStrength: (map['navTintStrength'] as num?)?.toDouble() ?? 0.38,
         glassMode: switch (map['glassMode'] as String?) {
@@ -182,6 +206,7 @@ class ShellSettings {
         'dynamicColor': dynamicColor,
         'themeMode': themeMode,
         'seedArgb': seedArgb,
+        'seedSource': seedSource,
         'navBlurSigma': navBlurSigma,
         'navTintStrength': navTintStrength,
         'glassMode': glassMode,
@@ -205,7 +230,7 @@ class ShellSettings {
     bool? dynamicColor,
     String? themeMode,
     int? seedArgb,
-    bool clearSeed = false,
+    String? seedSource,
     double? navBlurSigma,
     double? navTintStrength,
     String? glassMode,
@@ -229,7 +254,8 @@ class ShellSettings {
       bookshelfGrid: bookshelfGrid ?? this.bookshelfGrid,
       dynamicColor: dynamicColor ?? this.dynamicColor,
       themeMode: themeMode ?? this.themeMode,
-      seedArgb: clearSeed ? null : (seedArgb ?? this.seedArgb),
+      seedArgb: seedArgb ?? this.seedArgb,
+      seedSource: seedSource ?? this.seedSource,
       navBlurSigma: navBlurSigma ?? this.navBlurSigma,
       navTintStrength: navTintStrength ?? this.navTintStrength,
       glassMode: glassMode ?? this.glassMode,
@@ -280,14 +306,21 @@ class ShellSettingsNotifier extends Notifier<ShellSettings> {
     _persist(state.copyWith(themeMode: mode));
   }
 
-  void setSeed(Color? color) {
-    if (color == null) {
-      if (state.seedArgb == null) return;
-      _persist(state.copyWith(clearSeed: true));
+  /// 应用一个主题色并记录来源；动态取色开着时自动让位（关闭），单次持久化
+  void applySeed(Color color, {required String source}) {
+    final argb = color.toARGB32();
+    if (!state.dynamicColor &&
+        state.seedArgb == argb &&
+        state.seedSource == source) {
       return;
     }
-    if (state.seedArgb == color.toARGB32()) return;
-    _persist(state.copyWith(seedArgb: color.toARGB32()));
+    _persist(
+      state.copyWith(
+        dynamicColor: false,
+        seedArgb: argb,
+        seedSource: source,
+      ),
+    );
   }
 
   void setNavBlurSigma(double value) {

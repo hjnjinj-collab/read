@@ -28,6 +28,14 @@ class AppTheme {
     (id: 'gold', label: '玫瑰金', color: Color(0xFFA67C6D)),
   ];
 
+  /// 调色板 16 色扩展色板（外观页取色用；seedSource 旧数据迁移也按它推断）
+  static const List<Color> palettePresets = [
+    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
+    Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DD0E1),
+    Color(0xFF4DB6AC), Color(0xFF81C784), Color(0xFFAED581), Color(0xFFFFD54F),
+    Color(0xFFFFB74D), Color(0xFFA1887F), Color(0xFF90A4AE), Color(0xFF607D8B),
+  ];
+
   static ThemeData light({
     Color? dynamicSeed,
     Color? seedOverride,

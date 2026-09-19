@@ -756,7 +756,9 @@ class SettingNavRow extends StatelessWidget {
   }
 }
 
-/// 设置容器内部分隔线：细线，左右缩进对齐内容
+/// 设置容器内部分隔线：细线，左右缩进对齐内容。
+///
+/// MD3：分隔线取强调色派生（primary 低透明度），标准 1dp 厚度。
 class SettingsDivider extends StatelessWidget {
   const SettingsDivider({super.key, this.indent = 4});
 
@@ -769,8 +771,8 @@ class SettingsDivider extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: indent, vertical: 8),
       child: Divider(
         height: 1,
-        thickness: 0.8,
-        color: scheme.outlineVariant.withValues(alpha: 0.60),
+        thickness: 1,
+        color: scheme.primary.withValues(alpha: 0.18),
       ),
     );
   }
