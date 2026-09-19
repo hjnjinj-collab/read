@@ -795,7 +795,8 @@ class SettingIconLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+      // 水平 16 与容器内容网格对齐（此前 4px 导致标签贴壳边）
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Row(
         children: [
           Icon(icon, size: 16, color: scheme.primary),
@@ -902,8 +903,9 @@ class SettingSwitchRow extends ConsumerWidget {
             expandedThumbHeight: 24,
           );
     return Padding(
-      // 左右对称：文字距左 16，开关距右 16
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      // 左右对称：文字距左 16，开关距右 16；垂直 8 保证两行副标题
+      // 不贴壳底（作为末行时约 12px 视觉呼吸）
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           Expanded(

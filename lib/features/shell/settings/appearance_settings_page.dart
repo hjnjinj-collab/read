@@ -72,9 +72,9 @@ class _AppearanceSettingsPageState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 首行距顶垫高：SettingIconLabel 自带 4px，合计 14px，
+                      // 首行距顶垫高：SettingIconLabel 自带 6px，合计 14px，
                       // 消除贴着壳顶的溢出感
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       // 主题色
                       SettingIconLabel(
                         icon: AppIcons.themeColor,
@@ -160,14 +160,18 @@ class _AppearanceSettingsPageState
                         ),
                       ),
                       const SettingsDivider(indent: 16),
-                      // 动态取色：SizedBox 撑满宽度，开关才能靠右
-                      SizedBox(
-                        width: double.infinity,
-                        child: SettingSwitchRow(
-                          title: '动态取色',
-                          subtitle: 'Android 12+ 跟随壁纸（开启时覆盖主题色）',
-                          value: shell.dynamicColor,
-                          onChanged: n.setDynamicColor,
+                      // 动态取色：纳入来源互斥——非当前来源时整行降权，
+                      // 开关仍可点（点开即切到 dynamic 来源）
+                      Opacity(
+                        opacity: activeSource == 'dynamic' ? 1 : 0.38,
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: SettingSwitchRow(
+                            title: '动态取色',
+                            subtitle: 'Android 12+ 跟随壁纸（开启时覆盖主题色）',
+                            value: shell.dynamicColor,
+                            onChanged: n.setDynamicColor,
+                          ),
                         ),
                       ),
                     ],
@@ -195,9 +199,12 @@ class _AppearanceSettingsPageState
                   colorB: frostB,
                   gradDepth: frostDepth,
                   showShadow: false,
-                  child: Listener(
-                    onPointerDown: (e) => _lastTapPosition = e.position,
-                    child: LiquidGlassSegmented(
+                  child: Padding(
+                    // 分段上下垫高，与开关行垂直节奏一致
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Listener(
+                      onPointerDown: (e) => _lastTapPosition = e.position,
+                      child: LiquidGlassSegmented(
                       segments: const ['跟随系统', '浅色', '深色'],
                       selectedIndex: themeIndex,
                       onChanged: (i) {
@@ -328,6 +335,7 @@ class _AppearanceSettingsPageState
                         selectedFontWeight: FontWeight.w600,
                       ),
                     ),
+                  ),
                   ),
                 ),
               ],

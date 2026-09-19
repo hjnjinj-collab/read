@@ -1,3 +1,4 @@
+import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
@@ -41,10 +42,12 @@ class AppTheme {
     Color? seedOverride,
     double pageTint = 0.35,
   }) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: dynamicSeed ?? seedOverride ?? seed,
-      brightness: Brightness.light,
-    );
+    // flex_color_scheme 引擎：默认 FlexKeyColors + FlexTones.material 与
+    // ColorScheme.fromSeed 同源，但派生出完整的 M3 surfaceContainer 角色
+    final scheme = FlexColorScheme.light(
+      primary: dynamicSeed ?? seedOverride ?? seed,
+      keyColors: const FlexKeyColors(),
+    ).toScheme;
     return _base(scheme, pageTint: pageTint);
   }
 
@@ -53,10 +56,14 @@ class AppTheme {
     Color? seedOverride,
     double pageTint = 0.0,
   }) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: dynamicSeed ?? seedOverride ?? seed,
-      brightness: Brightness.dark,
-    );
+    final key = dynamicSeed ?? seedOverride ?? seed;
+    // primaryLightRef 与 primary 同值：seed 即浅色 primary 引用，
+    // 消除 flex 引擎 fixed 色派生警告
+    final scheme = FlexColorScheme.dark(
+      primary: key,
+      primaryLightRef: key,
+      keyColors: const FlexKeyColors(),
+    ).toScheme;
     return _base(scheme, pageTint: pageTint);
   }
 
