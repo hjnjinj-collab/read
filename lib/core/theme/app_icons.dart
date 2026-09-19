@@ -16,4 +16,12 @@ class AppIcons {
   static const emptyBook = Iconsax.book;
   static const emptyCloud = Iconsax.cloud;
   static const chevronRight = Iconsax.arrow_right_2;
+
+  // 设置页栏目图标
+  static const themeColor = Iconsax.colorfilter;
+  static const palette = Iconsax.brush_1;
+  static const dynamicColor = Iconsax.magicpen;
+  static const themeMode = Iconsax.sun_1;
+  static const bookshelfLayout = Iconsax.element_3;
+  static const colorPicker = Iconsax.color_swatch;
 }

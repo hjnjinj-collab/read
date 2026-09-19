@@ -756,6 +756,74 @@ class SettingNavRow extends StatelessWidget {
   }
 }
 
+/// 设置容器内部分隔线：细线，左右缩进对齐内容
+class SettingsDivider extends StatelessWidget {
+  const SettingsDivider({super.key, this.indent = 4});
+
+  final double indent;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: indent, vertical: 8),
+      child: Divider(
+        height: 1,
+        thickness: 0.8,
+        color: scheme.outlineVariant.withValues(alpha: 0.60),
+      ),
+    );
+  }
+}
+
+/// 带图标的栏目标签行
+class SettingIconLabel extends StatelessWidget {
+  const SettingIconLabel({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 子页内的标签行（标题 + 副文案），控件由调用方放在下方 padding 里
 class SettingLabel extends StatelessWidget {
   const SettingLabel({
@@ -832,7 +900,8 @@ class SettingSwitchRow extends ConsumerWidget {
             expandedThumbHeight: 24,
           );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+      // 左右对称：文字距左 16，开关距右 16
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
           Expanded(
@@ -861,7 +930,11 @@ class SettingSwitchRow extends ConsumerWidget {
             activeColor: scheme.primary,
             inactiveColor: scheme.outlineVariant.withValues(alpha: 0.9),
             layout: layout,
-            reserveSwellRoom: shell.lgMotionOn,
+            // 布局占位必须等于轨道（63×28）：reserveSwellRoom 会把占位
+            // 撑到 120px（两侧各 28.5px 隐形空白），视觉右边距变成
+            // 16+28.5px，与文字左边距 16px 不对称。按住时玻璃膨胀
+            // 最多超出轨道 8.5px，仍在 FrostShell 裁切边内，无需预留。
+            reserveSwellRoom: false,
           ),
         ],
       ),
