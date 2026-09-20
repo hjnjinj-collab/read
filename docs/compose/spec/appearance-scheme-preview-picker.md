@@ -156,6 +156,17 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 取色器验收修正四（T14，用户验收反馈七）
+
+- **pill 饱满度与鼓动恢复**：上轮 pill 22（32−5×2）过扁、且
+  `growHeight: 0` 误关了液态鼓动——调整为 `height 36`、组件
+  `padding 4`（pill 高 28 饱满）、`growHeight: lgMotionOn ? 6 : 0`
+  （切换时 pill 峰值 28+6=34 < 36，不溢出壳）；底衬 Padding 4
+  保持，总高 44。
+- **色码条收缩居中**：全宽条 + 内容居中 → 条两侧空白过大。改为
+  `Row(mainAxisSize.min)` 收缩贴合内容 + 外层 `Align(center)`
+  ——条自身紧凑，整体在对话框内水平居中。
+
 ### 取色器验收修正三（T13，用户验收反馈六）
 
 - **面板居中**：包内 MainColors 的 Wrap 无 alignment 参数（末行
@@ -218,4 +229,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
 - [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
 - [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
+- [ ] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出；色码条紧凑贴内容整体居中 (covers: S2 取色器验收修正四)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)

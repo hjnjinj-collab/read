@@ -670,8 +670,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                   ),
                   // 液态玻璃切换器：与明暗模式同组件同语言，外包
                   // 派生色底衬容器（SettingsRowShell，非霜壳）。
-                  // 瘦身：height 32 + 胶囊内边距 5（pill 22 纤细比例）、
-                  // 底衬内衬 4 → 总高 40
+                  // height 36 + padding 4 → pill 28 饱满；grow 6 恢复
+                  // 液态鼓动（峰值 34 < 36 不溢出）；底衬内衬 4 → 总高 44
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                     child: SettingsRowShell(
@@ -685,8 +685,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                       selectedIndex: _pickerIndex,
                       onChanged: (i) => setState(() => _pickerIndex = i),
                       width: double.infinity,
-                      height: 32,
-                      padding: 5,
+                      height: 36,
+                      padding: 4,
                       style: LiquidGlassStyle(
                         shape: LiquidGlassShape.continuousRoundedRectangle(
                           cornerRadius: 14,
@@ -716,7 +716,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                       pillStyle: LiquidGlassSegmentedPillStyle(
                         glass: shell.lgMotionOn,
                         animated: true,
-                        growHeight: 0,
+                        // 液态鼓动：与明暗分段一致，峰值不溢出壳
+                        growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
                             color: scheme.primary.withValues(alpha: 0.28),
@@ -793,11 +794,13 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                       ],
                     ),
                   ),
-                  // 色码行：包内 fillColor 写死不可定制（colorCodeHasColor
-                  // ? 当前色 : 灰），自绘 primaryContainer 派生色容器
+                  // 色码行：包内 fillColor 写死不可定制，自绘
+                  // primaryContainer 条——条收缩贴内容，整体居中
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                    child: InkWell(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: InkWell(
                       borderRadius: BorderRadius.circular(12),
                       onTap: () {
                         final hex = _hexArgb(_color);
@@ -820,8 +823,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
-                          // 容器全宽（Row 默认 max）+ 内容组水平居中
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          // 条收缩贴内容（min），由外层 Align 整体居中
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
                               AppIcons.colorPicker,
@@ -847,6 +850,7 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                             ),
                           ],
                         ),
+                      ),
                       ),
                     ),
                   ),
