@@ -152,12 +152,12 @@ class SettingsFrostShell extends StatelessWidget {
       depth: gradDepth,
     );
     final (begin, end) = dir.alignment;
-    // 描边按明暗分档：浅色维持 0.5px 细腻；深色 0.8px α0.28，
+    // 描边按明暗分档：浅色 0.5px 细腻；深色 0.8px α0.28，
     // 否则白色 rim 在暗底上轮廓不可读、圆角边界消失
     final rim = light
         ? Colors.white.withValues(alpha: 0.32)
         : Colors.white.withValues(alpha: 0.28);
-    final rimWidth = light ? 0.5 : 0.8;
+    final rimWidth = AppGlass.rimWidth(scheme);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -224,10 +224,10 @@ class SettingsRowShell extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: borderRadius,
-        // 描边与 FrostShell 同语言：浅 0.5 / 深 0.8
+        // 描边与 FrostShell 同语言（宽度走 AppGlass.rimWidth 分档）
         border: Border.all(
           color: AppGlass.floatRowRim(scheme),
-          width: scheme.brightness == Brightness.light ? 0.5 : 0.8,
+          width: AppGlass.rimWidth(scheme),
         ),
         gradient: gradient,
         color: gradient == null ? fill : null,

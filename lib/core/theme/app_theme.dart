@@ -287,6 +287,10 @@ class AppGlass {
         : Colors.white.withValues(alpha: 0.26);
   }
 
+  /// 玻璃描边宽度：浅色 0.5 细腻，深色 0.8 保证轮廓/圆角可辨
+  static double rimWidth(ColorScheme scheme) =>
+      scheme.brightness == Brightness.light ? 0.5 : 0.8;
+
   /// 子栏行缝（两套方案共用）
   static const double floatRowGap = 5;
 
