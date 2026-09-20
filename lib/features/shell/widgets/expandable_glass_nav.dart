@@ -43,14 +43,15 @@ class ExpandableGlassNav extends StatelessWidget {
 
   static const double _barW = 196;
 
-  LiquidGlassSegmentedPillStyle _pill(double grow) =>
+  LiquidGlassSegmentedPillStyle _pill(double grow, Color pillBase) =>
       LiquidGlassSegmentedPillStyle(
         glass: true,
         animated: true,
         growHeight: grow,
         glassStyle: LiquidGlassStyle(
           appearance: LiquidGlassAppearance(
-            color: selectedColor.withValues(alpha: 0.22),
+            // 派生色选中底（primaryContainer α0.9），与设置页切换器同语言
+            color: pillBase,
             blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
             shadow: LiquidGlassShadow(
               blur: 12,
@@ -63,6 +64,11 @@ class ExpandableGlassNav extends StatelessWidget {
             distortion: 0.07,
             distortionWidth: 14,
           ),
+        ),
+        // 静止选中态走 restStyle 的 tinted pill——
+        // 不设则回落组件默认白色（T16 同款根因）
+        restStyle: LiquidGlassStyle(
+          appearance: LiquidGlassAppearance(color: pillBase),
         ),
       );
 
@@ -77,6 +83,8 @@ class ExpandableGlassNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 选中 pill 派生色底：glassStyle/restStyle 双层同色（设置页 T16 同语言）
+    final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
     final circle = height;
     // 父级已 pad 16；展开时右侧吃满剩余宽，与左圆键只留 8px
     final total = (MediaQuery.sizeOf(context).width - 32).clamp(280.0, 480.0);
@@ -90,7 +98,7 @@ class ExpandableGlassNav extends StatelessWidget {
       width: _barW,
       height: height - 4,
       style: barStyle,
-      pillStyle: _pill(12),
+      pillStyle: _pill(12, pillBase),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {
         final icons = [AppIcons.bookshelf, AppIcons.sources];
@@ -114,9 +122,13 @@ class ExpandableGlassNav extends StatelessWidget {
       width: panelW,
       height: height - 4,
       style: barStyle,
-      pillStyle: const LiquidGlassSegmentedPillStyle(
+      pillStyle: LiquidGlassSegmentedPillStyle(
         glass: false,
         animated: false,
+        // glass:false 绘制的就是 rest pill，同样补派生色
+        restStyle: LiquidGlassStyle(
+          appearance: LiquidGlassAppearance(color: pillBase),
+        ),
       ),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {

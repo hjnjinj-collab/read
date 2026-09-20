@@ -1,6 +1,6 @@
 ---
 feature: appearance-scheme-preview-picker
-status: delivered
+status: in-progress
 updated: 2026-09-19
 branch: master
 commits: cdf94df..782b925
@@ -163,6 +163,19 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 底栏静止 pill 派生色（T17，用户验收反馈十）
+
+- T16 根因的扩散面：底栏 `ExpandableGlassNav` 两处
+  `LiquidGlassSegmented` 的 pillStyle 均未设 restStyle——主胶囊
+  （书架/书源）静止选中态回落包默认白色 `0x3CFFFFFF`；展开面板
+  （设置/添加书籍）`glass: false` 时绘制的就是 rest pill，同样白色。
+- 修复：两处 pillStyle 统一 T16 双层同色语言——`glassStyle.color`
+  与 `restStyle.color` 均为 `scheme.primaryContainer.withValues(
+  alpha: 0.9)`（glassStyle 保留自身 blur/shadow/refraction 仅统一
+  色，避免动画→静止色跳）；shape 省略走包默认胶囊圆角。选中字形/
+  文字维持 `scheme.primary`（深浅两档在 primaryContainer 底上均可
+  读），不动 homeCircle 前景与 glyph 动画配色。
+
 ### 选中 pill 静止态派生色（T16，用户验收反馈九）
 
 - **根因（用户判断正确）**：包内 pill 为双层结构——`glassStyle`
@@ -266,4 +279,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
 - [x] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（落地+审查 PASS；shadow cornerRadius 已按 pillH/2 派生） (covers: S2 目标台账与明暗选中态派生化)
 - [x] T16: pill 静止态 restStyle 派生色 + 明暗 padding 10 — acceptance: 动画回落静止选中态为 primaryContainer 派生色（不再被白色 rest pill 取代）；明暗 pill 40/60 按钮感（落地+审查 PASS：双层交接无叠色，lgMotionOn=false 时 restStyle 为唯一指示同样必要） (covers: S2 选中 pill 静止态派生色)
+- [ ] T17: 底栏静止 pill 派生色 — acceptance: 底栏主胶囊（书架/书源）与展开面板（设置/添加书籍）选中 pill 静止态为 primaryContainer 派生色，不再回落包默认白色 0x3CFFFFFF（落地+审查核对，视觉待真机） (covers: S2 底栏静止 pill 派生色)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
