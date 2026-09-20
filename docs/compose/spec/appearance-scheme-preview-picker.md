@@ -1,9 +1,9 @@
 ---
 feature: appearance-scheme-preview-picker
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..782b925
+commits: cdf94df..0c1e865
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -26,13 +26,18 @@ AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角（内容�
 40/60（padding 10）按钮感明确，两处切换器选中态
 primaryContainer α0.9 / onPrimaryContainer——**glassStyle（玻璃动画态）
 与 restStyle（动画回落静止态）双层同色**，shadow cornerRadius
-按 pillH/2 派生（20/14）。
+按 pillH/2 派生（20/14）。底栏同步 T17：`ExpandableGlassNav` 主胶囊
+（书架/书源）与展开面板（设置/添加书籍，`glass: false` 绘制即
+rest pill）选中 pill 双层统一 `primaryContainer α0.9`，静止态不再
+回落包默认白色 `0x3CFFFFFF`。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
 改动文件零新增；`flutter test` 主题冒烟 2 PASS；各轮独立审查均三项
 PASS、无 critical（包源码层核对：pickersEnabled `?? true` 陷阱、
 SelectPicker 亮度取字、BackdropFilter 采样链、Stack biggest 陷阱、
-rim 层序、Segmented padding/pill 数学、ColorPicker Column 对齐）。
+rim 层序、Segmented padding/pill 数学、ColorPicker Column 对齐；
+T17 审查三项 PASS、无 critical——glass:false 分支包内
+`_restOpacity`/`_tintedPill` 渲染路径核对，双层同色无色跳）。
 已知边界：色板末行靠左为包 WrapAlignment.start（Center 不修正，
 自绘可解暂未做）；色板在色轮取任意色时回退首个 swatch 高亮（包行为）；
 色块对号为包内按亮度自适应黑白；IndexedStack 三面板同时 build；
@@ -279,5 +284,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
 - [x] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（落地+审查 PASS；shadow cornerRadius 已按 pillH/2 派生） (covers: S2 目标台账与明暗选中态派生化)
 - [x] T16: pill 静止态 restStyle 派生色 + 明暗 padding 10 — acceptance: 动画回落静止选中态为 primaryContainer 派生色（不再被白色 rest pill 取代）；明暗 pill 40/60 按钮感（落地+审查 PASS：双层交接无叠色，lgMotionOn=false 时 restStyle 为唯一指示同样必要） (covers: S2 选中 pill 静止态派生色)
-- [ ] T17: 底栏静止 pill 派生色 — acceptance: 底栏主胶囊（书架/书源）与展开面板（设置/添加书籍）选中 pill 静止态为 primaryContainer 派生色，不再回落包默认白色 0x3CFFFFFF（落地+审查核对，视觉待真机） (covers: S2 底栏静止 pill 派生色)
+- [x] T17: 底栏静止 pill 派生色 — acceptance: 底栏主胶囊（书架/书源）与展开面板（设置/添加书籍）选中 pill 静止态为 primaryContainer 派生色，不再回落包默认白色 0x3CFFFFFF（落地+审查 PASS：glass:false 分支包内 _restOpacity=1、_tintedPill 读 rest.appearance.color，restStyle 为唯一指示；restStyle 无 shape 走包默认胶囊圆角兜底） (covers: S2 底栏静止 pill 派生色)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
