@@ -1,43 +1,42 @@
 ---
 feature: appearance-scheme-preview-picker
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..0829b87
+commits: cdf94df..2870ade
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
 
 ## Report
 
-**What was built** — 外观页三类容器尺寸统一到液态玻璃导航栏高度 64px：
-明暗分段撤销误加的垫高（贴壳边）且 48→64；`SettingSwitchRow` 垂直
-8→14（行高 64，6 处统一）。主题容器末尾「派生色系」分区：8 个 MD3
-角色 4 列网格实时跟随主题来源，点击复制 8 位 hex，底距 14px 不贴底。
-自定义取色迁移 flex_color_picker 3.8 并包进 `SettingsFrostShell`
-液态玻璃壳（霜向/渐变经 Consumer 跟随用户外观自定义），标题下显示
-「英文色名 · 中文名」（HSV 12 段色相映射），顶部冗余复制按钮移除；
-applySeed 来源互斥流程不变。
+**What was built** — 外观页三类容器尺寸统一到液态玻璃导航栏高度 64px
+（明暗分段贴壳边 64、开关行 6×64）。主题容器末尾「派生色系」分区：
+8 个 MD3 角色 4 列网格实时跟随主题来源，点击复制 hex，底距 14px。
+自定义取色迁移 flex_color_picker 3.8，外包 SettingsFrostShell 玻璃壳
+（radius 24、霜向/渐变经 Consumer 跟随用户自定义），标题下「英文色名 ·
+中文名」双语行（HSV 12 段映射），分段选择器 thumb 用 scheme.primary
+且标签中文化，顶部冗余复制按钮移除；「选择颜色」按钮右移贴容器右缘。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
-改动文件零新增；两轮独立审查三项 PASS、无 critical（滚动兜底范式、
-透明 Dialog 上 BackdropFilter 采样链、_colorNameZh 边界数学、
-无死导入均核对）；真机反馈四项（贴底/色名中文/玻璃壳/冗余按钮）
-全部落地。转场动画瞬间霜面可能闪一下（BackdropFilter 采样转场
-saveLayer，瞬时项）与 ExcludeSemantics 使对话框按钮对 TalkBack
-不可见（压制取色器巨量语义树的取舍）两项已记录，真机观察。
+改动文件零新增；三轮独立审查均三项 PASS、无 critical（包源码层核对：
+SelectPicker 按 thumb 亮度自动黑白文字、透明 Dialog 上 BackdropFilter
+采样链、_colorNameZh 边界数学、0.5px rim 全局影响面）；轻微项已同步
+（SettingsRowShell 描边 0.5px 与 FrostShell 语言统一）。真机观察项：
+深色 rim α0.08 边缘定义感、1x DPR 下 0.5px 描边贴边表现、中等亮度
+自定义 seed 时分段文字对比度（包设计边界）。
 
 **Journey log** —
 - flex_color_scheme v9 迁移 material_ui 是作者有意设计（用户确认）；
   本项目借用其色彩体系与算法，8.x 锁定维持。
-- 明暗模式容器的语义是「复刻导航栏尺寸」——对液态玻璃容器加通用
-  padding 前先确认设计意图，上轮 vertical:10 垫高即误判。
-- ColorPicker 在 AlertDialog/Dialog 内自适应内容宽；wheel 切换改变
-  对话框尺寸，矮屏需 Flexible+SingleChildScrollView 兜底。
+- 液态玻璃容器的 padding/尺寸语义先问设计意图再动手（明暗分段
+  「复刻导航栏」的 vertical:10 垫高误判教训）。
 - Dialog 透明底 + FrostShell 组合成立：BackdropFilter 采样同合成树
-  先行内容（下层页面 + barrier），透明底是必要条件而非障碍。
-- 审查子代理 bash 受限时「终点文件状态 + 全库交叉 grep」模式连续
-  三轮可用，结论经主代理抽验成立。
+  先行内容，透明底是必要条件；对话框独立感靠 radius 24 与页面 16 区分。
+- frost 描边是全局视觉语言：FrostShell rim 调细时同步 SettingsRowShell
+  等兄弟壳体，避免外壳 0.5 / 子行 1 的不统一。
+- 审查子代理 bash 受限时「终点文件状态 + 全库交叉 grep + 包源码」
+  模式连续多轮可用，结论经主代理抽验成立。
 
 ## [S1] Problem
 
@@ -128,5 +127,5 @@ saveLayer，瞬时项）与 ExcludeSemantics 使对话框按钮对 TalkBack
 - [x] T3: FlexColorPicker 替换自写 HSV 对话框 — acceptance: 色轮/色板/色码可用，确定后来源切到 picker 且其余组置灰（落地+审查核对） (covers: S2 取色器)
 - [x] T5: 派生色系网格底距 14px — acceptance: 主题容器末分区不再贴底（真机反馈修正） (covers: S2 真机修正)
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
-- [ ] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右 (covers: S2 收尾打磨)
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T7 后复审）；真机确认（待用户执行） (covers: S1 全部)
+- [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
