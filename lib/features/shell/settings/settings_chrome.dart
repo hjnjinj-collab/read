@@ -79,24 +79,31 @@ class _GlowOverscrollBehavior extends MaterialScrollBehavior {
 class SettingsChrome {
   SettingsChrome._();
 
-  /// 标题行高度（不含 status bar）
-  static const double headerContentH = 56;
+  /// 标题带高度（不含系统 inset）——略高于 56，标题光学中心落在雾区内
+  static const double headerContentH = 64;
 
   /// blur 向下延伸的衰减带（只盖内容、不占布局）
   static const double topBlurExtend = 64;
 
   /// 滚动显现区间（与书架 _scrollT 同源）
   static const double scrollRevealPx = 56;
+
+  /// 系统顶 inset：edge-to-edge 下 padding 可能为 0，优先 viewPadding
+  static double sysTop(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final v = mq.viewPadding.top;
+    final p = mq.padding.top;
+    return v > p ? v : p;
+  }
 }
 
 /// 书架同款顶栏：滚动显现的**滤镜色渐变模糊**。
 ///
-/// 静止 `scrollT < 0.02` 只画标题行；滚动时
-/// `ShaderMask(dstIn) → BackdropFilter(topBlurSigma) → fog(topTint)`，
-/// 叠层雾渐变 α 随 `scrollT` 浮现。背景层 `IgnorePointer`。
+/// 层序契约：模糊/雾在 `ClipRect` 内；**标题与返回键在最外层 Stack 上
+/// `Positioned` 叠放**，z 序高于模糊，垂直落在 `sysTop + headerContentH`
+/// 标题带上（雾区上部），避免「文字在模糊下方 / 顶部留空」。
 ///
-/// 前景：标题全宽水平居中；二级页返回键浮在左侧。液态玻璃返回键
-/// **仅在模糊生效时**（`scrollT ≥ 0.02`）出现，静止为普通箭头。
+/// 液态玻璃返回键仅在 `scrollT ≥ 0.02` 时出现，静止为普通箭头。
 class SettingsTopChrome extends StatelessWidget {
   const SettingsTopChrome({
     super.key,
@@ -180,39 +187,43 @@ class SettingsTopChrome extends StatelessWidget {
     );
   }
 
-  Widget _foreground(
+  /// 标题带前景：sysTop 安全区 + headerContentH，标题光学居中，返回键浮左。
+  /// 必须作为模糊层**之后**的 Positioned 子节点绘制。
+  Widget _titleBand(
     BuildContext context,
     ColorScheme scheme, {
     required bool disableBlur,
   }) {
-    final topPad = MediaQuery.paddingOf(context).top;
-    final chromeH = topPad + SettingsChrome.headerContentH;
+    final sysTop = SettingsChrome.sysTop(context);
+    final bandH = sysTop + SettingsChrome.headerContentH;
     final glassOn = showBack && scrollT >= _blurEpsilon;
 
     return SizedBox(
-      height: chromeH,
-      child: Padding(
-        padding: EdgeInsets.only(top: topPad),
-        child: Stack(
-          children: [
-            // 标题全宽水平居中，不被返回键挤偏
-            Center(child: _title(context, scheme)),
-            if (showBack)
-              Positioned(
-                left: 6,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _back(
-                    context,
-                    scheme,
-                    // disableAnimations 下滚动态也不挂 Lens
-                    glass: glassOn && !disableBlur,
-                  ),
+      height: bandH,
+      child: Stack(
+        children: [
+          // 标题全宽水平居中；垂直落在标题带中心（含安全区上沿补白）
+          Positioned(
+            left: 0,
+            right: 0,
+            top: sysTop,
+            height: SettingsChrome.headerContentH,
+            child: Center(child: _title(context, scheme)),
+          ),
+          if (showBack)
+            Positioned(
+              left: 6,
+              top: sysTop,
+              height: SettingsChrome.headerContentH,
+              child: Center(
+                child: _back(
+                  context,
+                  scheme,
+                  glass: glassOn && !disableBlur,
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -220,84 +231,96 @@ class SettingsTopChrome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final topPad = MediaQuery.paddingOf(context).top;
     final disableBlur = MediaQuery.disableAnimationsOf(context);
-    final chromeH = topPad + SettingsChrome.headerContentH;
-    final fg = _foreground(context, scheme, disableBlur: disableBlur);
+    final sysTop = SettingsChrome.sysTop(context);
+    final bandH = sysTop + SettingsChrome.headerContentH;
+    final band = _titleBand(context, scheme, disableBlur: disableBlur);
 
     if (disableBlur) {
       return Material(
-        color: scheme.surface.withValues(alpha: scrollT > _blurEpsilon ? 0.92 : 0),
-        child: fg,
+        color: scheme.surface.withValues(
+          alpha: scrollT > _blurEpsilon ? 0.92 : 0,
+        ),
+        child: band,
       );
     }
 
-    // 静止：不叠模糊（与书架一致，避免暗色下常显滤镜）
+    // 静止：不叠模糊，标题带仍占位（与 spacer 一致）
     if (scrollT < _blurEpsilon) {
-      return SizedBox(height: chromeH, child: fg);
+      return SizedBox(height: bandH, child: band);
     }
 
-    final h = chromeH + SettingsChrome.topBlurExtend;
+    final h = bandH + SettingsChrome.topBlurExtend;
     final fog = AppGlass.topTint(scheme);
     final fogA = scrollT;
     return SizedBox(
       height: h,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            IgnorePointer(
-              child: ShaderMask(
-                shaderCallback: (rect) {
-                  return LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.white,
-                      Colors.white.withValues(alpha: 0.92),
-                      Colors.white.withValues(alpha: 0.72),
-                      Colors.white.withValues(alpha: 0.40),
-                      Colors.white.withValues(alpha: 0.14),
-                      Colors.transparent,
-                    ],
-                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
-                  ).createShader(rect);
-                },
-                blendMode: BlendMode.dstIn,
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: AppGlass.topBlurSigma,
-                    sigmaY: AppGlass.topBlurSigma,
-                  ),
-                  child: ColoredBox(color: fog),
+      child: Stack(
+        children: [
+          // 模糊 + 雾：ClipRect 内，z 序在下
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ClipRect(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (rect) {
+                        return LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white,
+                            Colors.white.withValues(alpha: 0.92),
+                            Colors.white.withValues(alpha: 0.72),
+                            Colors.white.withValues(alpha: 0.40),
+                            Colors.white.withValues(alpha: 0.14),
+                            Colors.transparent,
+                          ],
+                          stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                        ).createShader(rect);
+                      },
+                      blendMode: BlendMode.dstIn,
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(
+                          sigmaX: AppGlass.topBlurSigma,
+                          sigmaY: AppGlass.topBlurSigma,
+                        ),
+                        child: ColoredBox(color: fog),
+                      ),
+                    ),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            // 顶栏区雾更实，盖住标题带上沿内容渗色
+                            fog.withValues(alpha: 0.72 * fogA),
+                            fog.withValues(alpha: 0.58 * fogA),
+                            fog.withValues(alpha: 0.40 * fogA),
+                            fog.withValues(alpha: 0.20 * fogA),
+                            fog.withValues(alpha: 0.06 * fogA),
+                            Colors.transparent,
+                          ],
+                          stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      fog.withValues(alpha: 0.58 * fogA),
-                      fog.withValues(alpha: 0.48 * fogA),
-                      fog.withValues(alpha: 0.32 * fogA),
-                      fog.withValues(alpha: 0.16 * fogA),
-                      fog.withValues(alpha: 0.05 * fogA),
-                      Colors.transparent,
-                    ],
-                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
-                  ),
-                ),
-              ),
-            ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: fg,
-            ),
-          ],
-        ),
+          ),
+          // 标题/返回键：最外层 Positioned，叠在模糊之上
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: bandH,
+            child: band,
+          ),
+        ],
       ),
     );
   }
@@ -340,8 +363,9 @@ class _SettingsScaffoldState extends State<SettingsScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.paddingOf(context).top;
-    final chromeH = topPad + SettingsChrome.headerContentH;
+    // 与顶栏前景同一几何：sysTop + headerContentH
+    final chromeH =
+        SettingsChrome.sysTop(context) + SettingsChrome.headerContentH;
     final showBack =
         widget.showBack ?? (ModalRoute.of(context)?.canPop ?? false);
 
