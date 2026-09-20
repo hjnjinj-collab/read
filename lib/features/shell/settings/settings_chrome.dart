@@ -115,7 +115,9 @@ class SettingsScaffold extends StatelessWidget {
 /// 同宽外霜层：blur + 渐变，`ClipRRect` 贴合轮廓。
 /// 可作**垫在子栏下面**的背景层（child 可为空），也可包内容。
 ///
-/// 裁剪契约：阴影 → Clip → BackdropFilter → 渐变 → 内容。
+/// 裁剪契约：阴影 → Clip → Stack[BackdropFilter → 渐变 → 内容，
+/// 前景 rim 描边层]。描边层画在模糊/渐变之上，整圈完整可见；
+/// 内容层为非定位子节点，壳体由内容撑起。
 class SettingsFrostShell extends StatelessWidget {
   const SettingsFrostShell({
     super.key,
@@ -182,26 +184,26 @@ class SettingsFrostShell extends StatelessWidget {
         borderRadius: r,
         child: Stack(
           children: [
-            // 模糊 + 渐变层
-            Positioned.fill(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: blurSigma,
-                  sigmaY: blurSigma,
+            // 模糊 + 渐变层：非定位子节点，壳体由内容撑起
+            // （Stack 全定位子节点会取 biggest，在 Column/Dialog
+            // 的无界或松弛高度下崩溃/撑满，不可用）
+            BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: blurSigma,
+                sigmaY: blurSigma,
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: begin,
+                    end: end,
+                    colors: stops,
+                    stops: const [0, 0.48, 1],
+                  ),
                 ),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: begin,
-                      end: end,
-                      colors: stops,
-                      stops: const [0, 0.48, 1],
-                    ),
-                  ),
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: child,
-                  ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: child,
                 ),
               ),
             ),
