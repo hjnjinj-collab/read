@@ -154,6 +154,21 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 取色器验收修正二（T12，用户验收反馈五）
+
+- **双切换器重复根因**：包内 `_pickers` 对未传入的 `accent` 键
+  `?? true` 默认开启（flex_color_picker-3.8.0 color_picker.dart:1534-1537），
+  单类型 map 只传一键时实际 count=2 → 包 selector 仍显示。修复：
+  三个面板的 `pickersEnabled` map **显式关闭**其余类型
+  （primary/accent/wheel 各只开一个），count=1 后包 selector 隐藏。
+- **切换器底衬容器**：液态切换器外包 `SettingsRowShell`
+  （非霜壳——无 blur/渐变），`fill: scheme.surfaceContainerLow
+  α0.45` 派生色 + 圆角 18 + 既有 0.5px 描边语言，内衬 padding 6。
+- **色码行派生色**：包内色码背景写死（colorCodeHasColor ? 当前色 :
+  黑/白低透明），不可定制——关闭 `showColorCode`，自绘色码行：
+  `primaryContainer` 圆角容器 + `onPrimaryContainer` 文字 + 复制
+  图标，点按复制 hex（与派生色卡同一 hex 计算逻辑）。
+
 ### 圆角缺角修复（T9，用户验收反馈三）
 
 - 根因是**层序**而非描边宽度：`BackdropFilter` 的模糊采样在 ClipRRect
@@ -183,5 +198,6 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
 - [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
 - [x] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（落地+复审 PASS：内容层非定位子节点保 child-sizing，rim 前置） (covers: S2 圆角缺角修复)
 - [ ] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（covers: S2 T10/T11）
-- [ ] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态 (covers: S2 T10/T11)
+- [ ] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
+- [ ] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（covers: S2 取色器验收修正二）
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T10/T11 复审）；真机确认（待用户执行） (covers: S1 全部)

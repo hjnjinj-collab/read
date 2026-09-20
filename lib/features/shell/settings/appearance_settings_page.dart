@@ -668,11 +668,18 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           ),
                     ),
                   ),
-                  // 液态玻璃切换器：与明暗模式同组件同语言（不包霜壳），
-                  // 替换包内 Cupertino 灰底 selector
+                  // 液态玻璃切换器：与明暗模式同组件同语言，外包
+                  // 派生色底衬容器（SettingsRowShell，非霜壳——无
+                  // blur/渐变），替换包内 Cupertino 灰底 selector
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                    child: LiquidGlassSegmented(
+                    child: SettingsRowShell(
+                      borderRadius: BorderRadius.circular(18),
+                      fill: scheme.surfaceContainerLow
+                          .withValues(alpha: 0.45),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: LiquidGlassSegmented(
                       segments: const ['主题色', '强调色', '色轮'],
                       selectedIndex: _pickerIndex,
                       onChanged: (i) => setState(() => _pickerIndex = i),
@@ -735,17 +742,34 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                         selectedFontWeight: FontWeight.w600,
                       ),
                     ),
+                    ),
+                    ),
                   ),
-                  // 三个单类型取色器按选择切换：单类型时包内 selector 自动
-                  // 隐藏；IndexedStack 保各面板选中状态，颜色状态共享
+                  // 三个单类型取色器按选择切换：pickersEnabled 必须
+                  // **显式关闭**其余类型——包内未传的 accent 键
+                  // `?? true` 默认开启，只传一键时 count=2 会仍显示
+                  // 包内 selector（与液态切换器功能重复的根因）
                   Flexible(
                     child: IndexedStack(
                       index: _pickerIndex,
                       children: [
-                        for (final enabled in const <Map<ColorPickerType, bool>>[
-                          {ColorPickerType.primary: true},
-                          {ColorPickerType.accent: true},
-                          {ColorPickerType.wheel: true},
+                        for (final enabled
+                            in const <Map<ColorPickerType, bool>>[
+                          {
+                            ColorPickerType.primary: true,
+                            ColorPickerType.accent: false,
+                            ColorPickerType.wheel: false,
+                          },
+                          {
+                            ColorPickerType.primary: false,
+                            ColorPickerType.accent: true,
+                            ColorPickerType.wheel: false,
+                          },
+                          {
+                            ColorPickerType.primary: false,
+                            ColorPickerType.accent: false,
+                            ColorPickerType.wheel: true,
+                          },
                         ])
                           SingleChildScrollView(
                             child: ColorPicker(
@@ -755,16 +779,68 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                               pickersEnabled: enabled,
                               width: 40,
                               height: 40,
-                              // 色名走标题下的中英双语行，关闭包内英文行
+                              // 色名/色码均走自绘行（包内背景不可定制）
                               showColorName: false,
-                              showColorCode: true,
-                              colorCodeTextStyle: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.copyWith(color: scheme.onSurface),
+                              showColorCode: false,
                             ),
                           ),
                       ],
+                    ),
+                  ),
+                  // 色码行：包内 fillColor 写死不可定制（colorCodeHasColor
+                  // ? 当前色 : 灰），自绘 primaryContainer 派生色容器
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        final hex = _hexArgb(_color);
+                        Clipboard.setData(ClipboardData(text: hex));
+                        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                          SnackBar(
+                            content: Text('已复制 $hex'),
+                            duration: const Duration(milliseconds: 1200),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              AppIcons.colorPicker,
+                              size: 16,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _hexArgb(_color),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: scheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                            Icon(
+                              Icons.copy,
+                              size: 14,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   Padding(
@@ -819,6 +895,10 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
   }
 }
 
+/// 8 位 hex（含 alpha），取色器色码行与派生色卡共用
+String _hexArgb(Color c) =>
+    '#${c.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0')}';
+
 /// 派生色系预览：当前 ColorScheme 的 8 个 MD3 角色，点击复制 hex。
 /// 色值实时取自 Theme——任何主题色来源切换即时反映。
 class _SchemeTintsGrid extends StatelessWidget {
@@ -866,8 +946,7 @@ class _TintSwatch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hex =
-        '#${color.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0')}';
+    final hex = _hexArgb(color);
     final fg =
         color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
     final outline = Theme.of(context).colorScheme.outlineVariant;
