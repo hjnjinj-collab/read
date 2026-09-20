@@ -11,7 +11,7 @@ import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
 import 'settings_chrome.dart';
 
-/// 材质与玻璃：模式（液态切换 + 霜壳）/ 底栏（模糊 · 色渗滤镜）/ 其余分组
+/// 材质与玻璃：全页统一「霜壳 + 液态切换/滑杆」
 class GlassSettingsPage extends ConsumerWidget {
   const GlassSettingsPage({super.key});
 
@@ -31,383 +31,318 @@ class GlassSettingsPage extends ConsumerWidget {
     final frostB =
         shell.frostGradB != null ? Color(shell.frostGradB!) : null;
     final frostDepth = shell.frostGradDepth;
+    // 霜壳内滑杆宽：页边距 16×2 + 壳内 padding 12×2
+    final sliderW = width - 32 - 24;
+
+    Widget frostSection({
+      required String header,
+      required List<Widget> children,
+    }) {
+      return _FrostSection(
+        header: header,
+        dir: frostDir,
+        colorA: frostA,
+        colorB: frostB,
+        depth: frostDepth,
+        children: children,
+      );
+    }
+
+    Widget slider({
+      required Key key,
+      required double value,
+      required double min,
+      required double max,
+      required ValueChanged<double> onChanged,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        child: ClipRect(
+          child: LiquidGlassSlider(
+            key: key,
+            value: value.clamp(min, max),
+            onChanged: onChanged,
+            minimumValue: min,
+            maximumValue: max,
+            activeColor: scheme.primary,
+            width: sliderW,
+            height: 56,
+            motion: motion,
+            style: _sliderStyle(),
+          ),
+        ),
+      );
+    }
+
+    Widget valueSeg({
+      required List<String> segments,
+      required List<String> values,
+      required String selected,
+      required ValueChanged<String> onPick,
+      double bottomPad = 14,
+    }) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(12, 0, 12, bottomPad),
+        child: _LiquidValueSegmented(
+          segments: segments,
+          values: values,
+          selected: selected,
+          lgMotionOn: shell.lgMotionOn,
+          navBlurSigma: shell.navBlurSigma,
+          onPick: onPick,
+        ),
+      );
+    }
 
     return SettingsScaffold(
       title: '材质与玻璃',
       slivers: [
-        // ── 模式：霜壳 + 液态玻璃切换 ──
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionHeader(label: '模式'),
-                SettingsFrostShell(
-                  dir: frostDir,
-                  colorA: frostA,
-                  colorB: frostB,
-                  gradDepth: frostDepth,
-                  showShadow: false,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SettingLabel(
-                        title: '渲染材质',
-                        subtitle: forced
-                            ? 'Windows 强制毛玻璃霜面（无 shader）'
-                            : shell.glassMode == 'lite'
-                                ? '毛玻璃霜面：无 shader、省电'
-                                : '液态折射：Impeller 实时',
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-                        child: _GlassModeSegmented(
-                          selected: shell.glassMode,
-                          lgMotionOn: shell.lgMotionOn,
-                          navBlurSigma: shell.navBlurSigma,
-                          onPick: n.setGlassMode,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+        frostSection(
+          header: '模式',
+          children: [
+            SettingLabel(
+              title: '渲染材质',
+              subtitle: forced
+                  ? 'Windows 强制毛玻璃霜面（无 shader）'
+                  : shell.glassMode == 'lite'
+                      ? '毛玻璃霜面：无 shader、省电'
+                      : '液态折射：Impeller 实时',
             ),
-          ),
-        ),
-        // ── 底栏：霜壳 + 模糊 / 色渗滤镜（液态滑杆） ──
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _SectionHeader(label: '底栏'),
-                SettingsFrostShell(
-                  dir: frostDir,
-                  colorA: frostA,
-                  colorB: frostB,
-                  gradDepth: frostDepth,
-                  showShadow: false,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SettingLabel(
-                        title: '模糊',
-                        subtitle: shell.navBlurSigma < 1
-                            ? '关闭（仅着色）'
-                            : '强度 ${shell.navBlurSigma.round()}',
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                        child: ClipRect(
-                          child: LiquidGlassSlider(
-                            key: const ValueKey('nav-blur-slider'),
-                            value: shell.navBlurSigma.clamp(0, 48),
-                            onChanged: n.setNavBlurSigma,
-                            minimumValue: 0,
-                            maximumValue: 48,
-                            activeColor: scheme.primary,
-                            width: width - 32 - 24,
-                            height: 56,
-                            motion: motion,
-                            style: _sliderStyle(),
-                          ),
-                        ),
-                      ),
-                      SettingLabel(
-                        title: '色渗滤镜',
-                        subtitle:
-                            '主色强度 ${(shell.navTintStrength * 100).round()}%',
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                        child: ClipRect(
-                          child: LiquidGlassSlider(
-                            key: const ValueKey('nav-tint-slider'),
-                            value: shell.navTintStrength.clamp(0, 1),
-                            onChanged: n.setNavTintStrength,
-                            minimumValue: 0,
-                            maximumValue: 1,
-                            activeColor: scheme.primary,
-                            width: width - 32 - 24,
-                            height: 56,
-                            motion: motion,
-                            style: _sliderStyle(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            valueSeg(
+              segments: const ['液态玻璃', '毛玻璃'],
+              values: const ['liquid', 'lite'],
+              selected: shell.glassMode,
+              onPick: n.setGlassMode,
             ),
-          ),
+          ],
         ),
-        SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '页面色渗',
-            children: [
-              SettingSwitchRow(
-                title: '均匀主色渗入',
-                subtitle: '整页纸色混入主色（与渐变叠加）',
-                value: shell.pageTintOn,
-                onChanged: n.setPageTintOn,
-              ),
-              SettingLabel(
-                title: '浅色底混入',
-                subtitle:
-                    '主色 ${(shell.pageTintLight * 100).round()}% · 默认 35%',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('page-tint-light'),
-                    value: shell.pageTintLight.clamp(0, 0.60),
-                    onChanged: n.setPageTintLight,
-                    minimumValue: 0,
-                    maximumValue: 0.60,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
-                  ),
-                ),
-              ),
-              SettingLabel(
-                title: '深色底混入',
-                subtitle:
-                    '主色 ${(shell.pageTintDark * 100).round()}% · 默认 0（纯夜底）',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('page-tint-dark'),
-                    value: shell.pageTintDark.clamp(0, 0.40),
-                    onChanged: n.setPageTintDark,
-                    minimumValue: 0,
-                    maximumValue: 0.40,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        frostSection(
+          header: '底栏',
+          children: [
+            SettingLabel(
+              title: '模糊',
+              subtitle: shell.navBlurSigma < 1
+                  ? '关闭（仅着色）'
+                  : '强度 ${shell.navBlurSigma.round()}',
+            ),
+            slider(
+              key: const ValueKey('nav-blur-slider'),
+              value: shell.navBlurSigma,
+              min: 0,
+              max: 48,
+              onChanged: n.setNavBlurSigma,
+            ),
+            SettingLabel(
+              title: '色渗滤镜',
+              subtitle: '主色强度 ${(shell.navTintStrength * 100).round()}%',
+            ),
+            slider(
+              key: const ValueKey('nav-tint-slider'),
+              value: shell.navTintStrength,
+              min: 0,
+              max: 1,
+              onChanged: n.setNavTintStrength,
+            ),
+          ],
         ),
-        SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '页底渐变',
-            children: [
-              SettingSwitchRow(
-                title: '双息氛围渐变',
-                subtitle: 'primary + tertiary 对角/轴向光晕（叠在色渗上）',
-                value: shell.ambientOn,
-                onChanged: n.setAmbientOn,
-              ),
-              SettingLabel(
-                title: '页底渐变方向',
-                subtitle: AmbientDir.parse(shell.ambientDir).label,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: SettingsMd3Segments(
-                  segments: const [
-                    '左上↘右下',
-                    '右上↘左下',
-                    '上下',
-                    '左右',
-                  ],
-                  values: const ['tlbr', 'trbl', 'top', 'left'],
-                  selected: shell.ambientDir,
-                  onPick: n.setAmbientDir,
-                ),
-              ),
-            ],
-          ),
+        frostSection(
+          header: '页面色渗',
+          children: [
+            SettingSwitchRow(
+              title: '均匀渗入',
+              subtitle: '整页纸色混入主色（与渐变叠加）',
+              value: shell.pageTintOn,
+              onChanged: n.setPageTintOn,
+            ),
+            SettingLabel(
+              title: '浅色底',
+              subtitle:
+                  '主色 ${(shell.pageTintLight * 100).round()}% · 默认 35%',
+            ),
+            slider(
+              key: const ValueKey('page-tint-light'),
+              value: shell.pageTintLight,
+              min: 0,
+              max: 0.60,
+              onChanged: n.setPageTintLight,
+            ),
+            SettingLabel(
+              title: '深色底',
+              subtitle:
+                  '主色 ${(shell.pageTintDark * 100).round()}% · 默认 0（纯夜底）',
+            ),
+            slider(
+              key: const ValueKey('page-tint-dark'),
+              value: shell.pageTintDark,
+              min: 0,
+              max: 0.40,
+              onChanged: n.setPageTintDark,
+            ),
+          ],
         ),
-        SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '设置页霜层',
-            children: [
-              SettingSwitchRow(
-                title: '垫底渐变霜层',
-                subtitle: '关闭后子栏无下层渐变，仅轻透填色 + 阴影',
-                value: shell.frostOn,
-                onChanged: n.setFrostOn,
+        frostSection(
+          header: '页底渐变',
+          children: [
+            SettingSwitchRow(
+              title: '氛围渐变',
+              subtitle: 'primary + tertiary 对角/轴向光晕（叠在色渗上）',
+              value: shell.ambientOn,
+              onChanged: n.setAmbientOn,
+            ),
+            SettingLabel(
+              title: '方向',
+              subtitle: AmbientDir.parse(shell.ambientDir).label,
+            ),
+            valueSeg(
+              segments: const ['左上↘右下', '右上↘左下', '上下', '左右'],
+              values: const ['tlbr', 'trbl', 'top', 'left'],
+              selected: shell.ambientDir,
+              onPick: n.setAmbientDir,
+              bottomPad: 8,
+            ),
+          ],
+        ),
+        frostSection(
+          header: '设置页霜层',
+          children: [
+            SettingSwitchRow(
+              title: '垫底霜层',
+              subtitle: '关闭后子栏无下层渐变，仅轻透填色 + 阴影',
+              value: shell.frostOn,
+              onChanged: n.setFrostOn,
+            ),
+            SettingLabel(
+              title: '方案',
+              subtitle: shell.frostStyle == 'slice'
+                  ? '切片：每栏一段渐变'
+                  : '统一：整组一条连续渐变',
+            ),
+            valueSeg(
+              segments: const ['统一连续', '分栏切片'],
+              values: const ['unified', 'slice'],
+              selected: shell.frostStyle,
+              onPick: n.setFrostStyle,
+              bottomPad: 8,
+            ),
+            SettingLabel(
+              title: '方向',
+              subtitle: AmbientDir.parse(shell.frostDir).label,
+            ),
+            valueSeg(
+              segments: const ['左上↘右下', '右上↘左下', '上下', '左右'],
+              values: const ['tlbr', 'trbl', 'top', 'left'],
+              selected: shell.frostDir,
+              onPick: n.setFrostDir,
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '行缝遮住霜层，渐变只从子栏下透出；子栏带悬浮阴影。',
+                style: TextStyle(height: 1.4),
               ),
-              SettingLabel(
-                title: '霜层方案',
-                subtitle: shell.frostStyle == 'slice'
-                    ? '切片：每栏一段渐变'
-                    : '统一：整组一条连续渐变',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: SettingsMd3Segments(
-                  segments: const ['统一连续', '分栏切片'],
-                  values: const ['unified', 'slice'],
-                  selected: shell.frostStyle,
-                  onPick: n.setFrostStyle,
-                ),
-              ),
-              SettingLabel(
-                title: '霜层渐变方向',
-                subtitle: AmbientDir.parse(shell.frostDir).label,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: SettingsMd3Segments(
-                  segments: const [
-                    '左上↘右下',
-                    '右上↘左下',
-                    '上下',
-                    '左右',
-                  ],
-                  values: const ['tlbr', 'trbl', 'top', 'left'],
-                  selected: shell.frostDir,
-                  onPick: n.setFrostDir,
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  '行缝遮住霜层，渐变只从子栏下透出；子栏带悬浮阴影。',
-                  style: TextStyle(height: 1.4),
-                ),
-              ),
-              SettingLabel(
-                title: '子栏高度',
-                subtitle: '上下 padding ${shell.frostRowPadV.round()} · 默认 20',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('frost-row-pad'),
-                    value: shell.frostRowPadV.clamp(8, 36),
-                    onChanged: n.setFrostRowPadV,
-                    minimumValue: 8,
-                    maximumValue: 36,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
+            ),
+            SettingLabel(
+              title: '子栏高度',
+              subtitle: '上下 padding ${shell.frostRowPadV.round()} · 默认 20',
+            ),
+            slider(
+              key: const ValueKey('frost-row-pad'),
+              value: shell.frostRowPadV,
+              min: 8,
+              max: 36,
+              onChanged: n.setFrostRowPadV,
+            ),
+            SettingLabel(
+              title: '渐变深浅',
+              subtitle: shell.frostGradDepth <= 0.95
+                  ? '偏淡 ${(shell.frostGradDepth * 100).round()}%'
+                  : shell.frostGradDepth >= 1.05
+                      ? '偏浓 ${(shell.frostGradDepth * 100).round()}%'
+                      : '标准 100%',
+            ),
+            slider(
+              key: const ValueKey('frost-grad-depth'),
+              value: shell.frostGradDepth,
+              min: 0.3,
+              max: 1.8,
+              onChanged: n.setFrostGradDepth,
+            ),
+            SettingLabel(
+              title: '渐变起点色',
+              subtitle: shell.frostGradA == null
+                  ? '跟随主题 primary'
+                  : '自定义',
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _FrostColorChip(
+                    label: '主题',
+                    color: scheme.primary,
+                    selected: shell.frostGradA == null,
+                    onTap: () => n.setFrostGradA(null),
                   ),
-                ),
-              ),
-              SettingLabel(
-                title: '渐变深浅',
-                subtitle: shell.frostGradDepth <= 0.95
-                    ? '偏淡 ${(shell.frostGradDepth * 100).round()}%'
-                    : shell.frostGradDepth >= 1.05
-                        ? '偏浓 ${(shell.frostGradDepth * 100).round()}%'
-                        : '标准 100%',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('frost-grad-depth'),
-                    value: shell.frostGradDepth.clamp(0.3, 1.8),
-                    onChanged: n.setFrostGradDepth,
-                    minimumValue: 0.3,
-                    maximumValue: 1.8,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
-                  ),
-                ),
-              ),
-              SettingLabel(
-                title: '渐变起点色',
-                subtitle: shell.frostGradA == null
-                    ? '跟随主题 primary'
-                    : '自定义',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
+                  for (final c in _frostColorPresets(scheme))
                     _FrostColorChip(
-                      label: '主题',
-                      color: scheme.primary,
-                      selected: shell.frostGradA == null,
-                      onTap: () => n.setFrostGradA(null),
+                      label: c.label,
+                      color: c.color,
+                      selected: shell.frostGradA == c.color.toARGB32(),
+                      onTap: () => n.setFrostGradA(c.color),
                     ),
-                    for (final c in _frostColorPresets(scheme))
-                      _FrostColorChip(
-                        label: c.label,
-                        color: c.color,
-                        selected: shell.frostGradA == c.color.toARGB32(),
-                        onTap: () => n.setFrostGradA(c.color),
-                      ),
-                  ],
-                ),
+                ],
               ),
-              SettingLabel(
-                title: '渐变终点色',
-                subtitle: shell.frostGradB == null
-                    ? '跟随主题 tertiary'
-                    : '自定义',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
+            ),
+            SettingLabel(
+              title: '渐变终点色',
+              subtitle: shell.frostGradB == null
+                  ? '跟随主题 tertiary'
+                  : '自定义',
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _FrostColorChip(
+                    label: '主题',
+                    color: scheme.tertiary,
+                    selected: shell.frostGradB == null,
+                    onTap: () => n.setFrostGradB(null),
+                  ),
+                  for (final c in _frostColorPresets(scheme))
                     _FrostColorChip(
-                      label: '主题',
-                      color: scheme.tertiary,
-                      selected: shell.frostGradB == null,
-                      onTap: () => n.setFrostGradB(null),
+                      label: c.label,
+                      color: c.color,
+                      selected: shell.frostGradB == c.color.toARGB32(),
+                      onTap: () => n.setFrostGradB(c.color),
                     ),
-                    for (final c in _frostColorPresets(scheme))
-                      _FrostColorChip(
-                        label: c.label,
-                        color: c.color,
-                        selected: shell.frostGradB == c.color.toARGB32(),
-                        onTap: () => n.setFrostGradB(c.color),
-                      ),
-                  ],
-                ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-        SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '说明',
-            children: [
-              SettingSwitchRow(
-                title: '液态玻璃果冻效应',
-                subtitle: '关闭后滑杆/开关/分段无形变鼓动，模糊不溢出',
-                value: shell.lgMotionOn,
-                onChanged: n.setLgMotionOn,
+        frostSection(
+          header: '说明',
+          children: [
+            SettingSwitchRow(
+              title: '果冻效应',
+              subtitle: '关闭后滑杆/开关/分段无形变鼓动，模糊不溢出',
+              value: shell.lgMotionOn,
+              onChanged: n.setLgMotionOn,
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Text(
+                '色渗 = 整页均匀主色；页底渐变 / 设置霜层方向可分别配置。'
+                '液态折射依赖 Impeller；Skia 平台自动退化为霜面。',
+                style: TextStyle(height: 1.5),
               ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: Text(
-                  '色渗 = 整页均匀主色；页底渐变 / 设置霜层方向可分别配置。'
-                  '液态折射依赖 Impeller；Skia 平台自动退化为霜面。',
-                  style: TextStyle(height: 1.5),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );
@@ -424,38 +359,73 @@ class GlassSettingsPage extends ConsumerWidget {
       );
 }
 
-/// 霜壳内分区头：与 SettingsGroup header 同语言
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.label});
+/// 统一分组：分区头 + SettingsFrostShell
+class _FrostSection extends StatelessWidget {
+  const _FrostSection({
+    required this.header,
+    required this.dir,
+    required this.colorA,
+    required this.colorB,
+    required this.depth,
+    required this.children,
+  });
 
-  final String label;
+  final String header;
+  final AmbientDir dir;
+  final Color? colorA;
+  final Color? colorB;
+  final double depth;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: scheme.primary,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.2,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+            child: Text(
+              header,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
             ),
+          ),
+          SettingsFrostShell(
+            dir: dir,
+            colorA: colorA,
+            colorB: colorB,
+            gradDepth: depth,
+            showShadow: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// 渲染材质：液态玻璃切换（外观页 T16 同族：glassStyle/restStyle 双层同色）
-class _GlassModeSegmented extends StatelessWidget {
-  const _GlassModeSegmented({
+/// 液态枚举切换：外观页 T16 同族（glassStyle/restStyle 双层同色）
+class _LiquidValueSegmented extends StatelessWidget {
+  const _LiquidValueSegmented({
+    required this.segments,
+    required this.values,
     required this.selected,
     required this.lgMotionOn,
     required this.navBlurSigma,
     required this.onPick,
   });
 
+  final List<String> segments;
+  final List<String> values;
   final String selected;
   final bool lgMotionOn;
   final double navBlurSigma;
@@ -465,10 +435,13 @@ class _GlassModeSegmented extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
+    final idx = values.indexOf(selected);
     return LiquidGlassSegmented(
-      segments: const ['液态玻璃', '毛玻璃'],
-      selectedIndex: selected == 'lite' ? 1 : 0,
-      onChanged: (i) => onPick(i == 1 ? 'lite' : 'liquid'),
+      segments: segments,
+      selectedIndex: idx < 0 ? 0 : idx,
+      onChanged: (i) {
+        if (i >= 0 && i < values.length) onPick(values[i]);
+      },
       width: double.infinity,
       height: 60,
       padding: 10,
@@ -517,7 +490,6 @@ class _GlassModeSegmented extends StatelessWidget {
             distortionWidth: 12,
           ),
         ),
-        // 静止选中态 restStyle 与 glassStyle 同色（T16）
         restStyle: LiquidGlassStyle(
           appearance: LiquidGlassAppearance(color: pillBase),
         ),
