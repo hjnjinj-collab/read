@@ -258,10 +258,10 @@ class _AppearanceSettingsPageState
                         });
                       },
                       width: double.infinity,
-                      // 与开关行统一 60；padding 7 → pill 46/60≈0.77，
-                      // 比例与取色器切换器一致；grow 6 峰值 52<60 不溢出
+                      // 与开关行统一 60；padding 10 → pill 40/60，
+                      // 四周 10px 按钮感；grow 6 峰值 46<60 不溢出
                       height: 60,
-                      padding: 7,
+                      padding: 10,
                       segmentBuilder: (context, i, selected, color) {
                         final unselectedIcons = [
                           Icons.brightness_auto_outlined,
@@ -336,13 +336,21 @@ class _AppearanceSettingsPageState
                               blur: 8,
                               opacity: 0.20,
                               inset: 0,
-                              // 跟随胶囊半径 pillH/2 = 46/2
-                              cornerRadius: 23,
+                              // 跟随胶囊半径 pillH/2 = 40/2
+                              cornerRadius: 20,
                             ),
                           ),
                           refraction: const LiquidGlassRefraction(
                             distortion: 0.08,
                             distortionWidth: 12,
+                          ),
+                        ),
+                        // 静止选中态走 restStyle 的 tinted pill——
+                        // 不设则回落组件默认白色（动画后派生色消失）
+                        restStyle: LiquidGlassStyle(
+                          appearance: LiquidGlassAppearance(
+                            color: scheme.primaryContainer
+                                .withValues(alpha: 0.9),
                           ),
                         ),
                       ),
@@ -743,6 +751,13 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           refraction: const LiquidGlassRefraction(
                             distortion: 0.08,
                             distortionWidth: 12,
+                          ),
+                        ),
+                        // 静止选中态派生色（同明暗切换器，包默认白色取代问题）
+                        restStyle: LiquidGlassStyle(
+                          appearance: LiquidGlassAppearance(
+                            color: scheme.primaryContainer
+                                .withValues(alpha: 0.9),
                           ),
                         ),
                       ),

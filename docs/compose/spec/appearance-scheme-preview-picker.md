@@ -160,6 +160,22 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 选中 pill 静止态派生色（T16，用户验收反馈九）
+
+- **根因（用户判断正确）**：包内 pill 为双层结构——`glassStyle`
+  只作用于玻璃**动画态**；动画回落后的静止选中态渲染 **`restStyle`**
+  的 tinted pill（liquid_glass_segmented.dart:70-106 类文档 +
+  :327-380 restOpacity/静止停放逻辑 + :533-539 `_tintedPill` 读
+  `rest.appearance.color`）。未设 restStyle 时用组件默认 fill——
+  白色胶囊，视觉上"透明遮罩取代了派生色"。
+- 修复：两处切换器（明暗 + 取色器）pillStyle 均补
+  `restStyle: LiquidGlassStyle(appearance: LiquidGlassAppearance(
+  color: scheme.primaryContainer.withValues(alpha: 0.9)))`
+  ——静止态与玻璃态同为派生色底；shape 不传时包默认
+  `(height-padding*2)/2` 胶囊圆角自动。
+- 明暗比例再加强：`padding 7→10`（pill 40/60，四周 10px 按钮感明显）；
+  grow 6 峰值 46<60 不溢出。
+
 ### 目标台账与明暗选中态派生化（T15，用户验收反馈八）
 
 - 目标任务台账：`docs/compose/appearance-goals-log.md`（外观线
@@ -246,4 +262,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
 - [x] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（落地+审查 PASS；shadow cornerRadius 已按 pillH/2 派生） (covers: S2 目标台账与明暗选中态派生化)
+- [ ] T16: pill 静止态 restStyle 派生色 + 明暗 padding 10 — acceptance: 动画回落静止选中态为 primaryContainer 派生色（不再被白色 rest pill 取代）；明暗 pill 40/60 按钮感 (covers: S2 选中 pill 静止态派生色)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
