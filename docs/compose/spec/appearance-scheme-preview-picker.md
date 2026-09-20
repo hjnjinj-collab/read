@@ -3,7 +3,7 @@ feature: appearance-scheme-preview-picker
 status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..3e28afc
+commits: cdf94df..782b925
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -23,9 +23,10 @@ crossAlignment 支撑）；自绘 primaryContainer 色码行（条收缩贴内�
 AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角（内容层非定位
 子节点保 child-sizing）。派生色系 8 角色预览卡实时跟随主题来源。
 目标台账 `docs/compose/appearance-goals-log.md` 落库；明暗分段 pill
-46/60（padding 7）与取色器比例一致，两处切换器选中态
-primaryContainer α0.9 / onPrimaryContainer + shadow cornerRadius
-按 pillH/2 派生（23/14）。
+40/60（padding 10）按钮感明确，两处切换器选中态
+primaryContainer α0.9 / onPrimaryContainer——**glassStyle（玻璃动画态）
+与 restStyle（动画回落静止态）双层同色**，shadow cornerRadius
+按 pillH/2 派生（20/14）。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
 改动文件零新增；`flutter test` 主题冒烟 2 PASS；各轮独立审查均三项
@@ -46,11 +47,13 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   constraints.biggest，Column 无界高度下崩溃。
 - frost 描边是明暗双档 + 层序问题：深色需更高对比且 rim 必须画在
   模糊层之上（前景层），否则圆角弧线被裁切边缘半透明带吃掉。
-- 视觉观感三教训：「臃肿」常源于组件自身体量（高度 + pill 比例）
-  而非溢出；瘦身过头会失去鼓动观感（pill 22 扁平 + grow 0 无动效）
-  ——液态组件的静态比例与动态动效要一起定；「居中」要分清是
-  Column 对齐、Wrap 行内对齐还是容器收缩后再居中（全宽条+内容居中
-  ≠ 紧凑条居中）。
+- 视觉观感三教训：「臃肿」常源于组件自身体量；瘦身过头失去鼓动观感
+  ——液态组件静态比例与动态动效一起定；「居中」分清 Column 对齐 /
+  Wrap 行内 / 容器收缩后再居中。**液态组件多态样式要逐态核对**：
+  LiquidGlassSegmentedPillStyle 的 glassStyle 只管玻璃动画态，静止
+  回落态走 restStyle（未设即组件默认白）；且包字段文档称
+  「glass=true 时 restStyle unused」与实现矛盾——**以实现为准**，
+  涉及第三方组件多态样式时读渲染路径而非字段注释。
 - flex_color_scheme v9 迁移 material_ui 是作者有意设计；本项目借算法
   维持 8.x 锁定（framework 类型分叉不可用）。
 
@@ -262,5 +265,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
 - [x] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（落地+审查 PASS；shadow cornerRadius 已按 pillH/2 派生） (covers: S2 目标台账与明暗选中态派生化)
-- [ ] T16: pill 静止态 restStyle 派生色 + 明暗 padding 10 — acceptance: 动画回落静止选中态为 primaryContainer 派生色（不再被白色 rest pill 取代）；明暗 pill 40/60 按钮感 (covers: S2 选中 pill 静止态派生色)
+- [x] T16: pill 静止态 restStyle 派生色 + 明暗 padding 10 — acceptance: 动画回落静止选中态为 primaryContainer 派生色（不再被白色 rest pill 取代）；明暗 pill 40/60 按钮感（落地+审查 PASS：双层交接无叠色，lgMotionOn=false 时 restStyle 为唯一指示同样必要） (covers: S2 选中 pill 静止态派生色)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)

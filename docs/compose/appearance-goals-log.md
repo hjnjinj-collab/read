@@ -59,10 +59,13 @@
 
 ## 当前状态（截至本台账）
 
-- **已收口**：G1 / G2 / G3；G4 的 T1–T15 全部落地且各轮审查 PASS
-- **本轮 T15 已交付**：
+- **已收口**：G1 / G2 / G3；G4 的 T1–T16 全部落地且各轮审查 PASS
+- **T15–T16 已交付**：
   1. 目标台账落库（本文档）
-  2. 明暗分段 pill 比例优化（padding 7 → pill 46/60，与取色器一致）
-  3. 两处切换器选中色派生化（primaryContainer α0.9 / onPrimaryContainer）
-     + shadow cornerRadius 按 pillH/2 派生（23 / 14）
-- **待用户**：`appearance-scheme-preview-picker` 的 T4 真机验收（外观线整体视觉确认）
+  2. 明暗分段 pill 比例：padding 10 → pill 40/60 按钮感
+  3. 两处切换器选中态派生色：primaryContainer α0.9 / onPrimaryContainer
+     ——**glassStyle（玻璃动画态）+ restStyle（动画回落静止态）双层同色**
+     （根因：包内静止选中态走 restStyle，未设即默认白色"透明遮罩感"）
+  4. shadow cornerRadius 按 pillH/2 派生（20/14）
+- **待用户**：`appearance-scheme-preview-picker` 的 T4 真机验收
+  （外观线整体视觉确认）
