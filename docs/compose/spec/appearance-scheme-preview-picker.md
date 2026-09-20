@@ -1,6 +1,6 @@
 ---
 feature: appearance-scheme-preview-picker
-status: delivered
+status: in-progress
 updated: 2026-09-19
 branch: master
 commits: cdf94df..2870ade
@@ -114,6 +114,20 @@ SelectPicker 按 thumb 亮度自动黑白文字、透明 Dialog 上 BackdropFilt
   保持 16，独立卡片感）。
 - 「选择颜色」按钮右移贴容器右缘（16px 网格），与开关行布局语言一致。
 
+### 深色描边分档与同行布局（T8，用户验收反馈二）
+
+- 描边按明暗模式分档（T7 的 0.5px/α0.08 在深色下轮廓不可读、圆角
+  可视性丧失）：
+  - `SettingsFrostShell` rim：浅色 0.5px α0.32（维持细腻）；
+    深色 0.8px α0.28（轮廓可读，圆角边界可辨）。
+  - `AppGlass.floatRowRim` 深色 α0.10→0.26；`SettingsRowShell`
+    宽度浅 0.5 / 深 0.8，与 FrostShell 同语言。
+- 「选择颜色」按钮与左侧标签文字同行：`SettingIconLabel` 增加可选
+  `trailing` 参数（组件仅外观页使用），自定义取色区改为单行
+  `SettingIconLabel(..., trailing: 按钮)`，删除下方独占一行的
+  Align 右对齐布局——按钮与「自定义取色」文字水平居中同行，
+  右缘仍距壳 16px。
+
 ## [S3] Out of Scope
 
 - flex_color_scheme v9 迁移（用户确认借鉴算法即可，8.x 锁定维持）。
@@ -128,4 +142,5 @@ SelectPicker 按 thumb 亮度自动黑白文字、透明 Dialog 上 BackdropFilt
 - [x] T5: 派生色系网格底距 14px — acceptance: 主题容器末分区不再贴底（真机反馈修正） (covers: S2 真机修正)
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
+- [ ] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行 (covers: S2 深色分档与同行)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)

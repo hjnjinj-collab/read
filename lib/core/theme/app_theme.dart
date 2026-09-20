@@ -279,12 +279,12 @@ class AppGlass {
         .withValues(alpha: light ? 0.16 : 0.20);
   }
 
-  /// 行块描边：淡轮廓
+  /// 行块描边：淡轮廓（深色提高透明度，保证圆角边界可辨）
   static Color floatRowRim(ColorScheme scheme) {
     final light = scheme.brightness == Brightness.light;
     return light
         ? Colors.white.withValues(alpha: 0.35)
-        : Colors.white.withValues(alpha: 0.10);
+        : Colors.white.withValues(alpha: 0.26);
   }
 
   /// 子栏行缝（两套方案共用）

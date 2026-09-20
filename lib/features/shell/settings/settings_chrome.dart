@@ -152,10 +152,12 @@ class SettingsFrostShell extends StatelessWidget {
       depth: gradDepth,
     );
     final (begin, end) = dir.alignment;
-    // 细描边：0.5px + 低 alpha，玻璃边缘高亮不生硬
+    // 描边按明暗分档：浅色维持 0.5px 细腻；深色 0.8px α0.28，
+    // 否则白色 rim 在暗底上轮廓不可读、圆角边界消失
     final rim = light
         ? Colors.white.withValues(alpha: 0.32)
-        : Colors.white.withValues(alpha: 0.08);
+        : Colors.white.withValues(alpha: 0.28);
+    final rimWidth = light ? 0.5 : 0.8;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -188,7 +190,7 @@ class SettingsFrostShell extends StatelessWidget {
                 colors: stops,
                 stops: const [0, 0.48, 1],
               ),
-              border: Border.all(color: rim, width: 0.5),
+              border: Border.all(color: rim, width: rimWidth),
             ),
             child: Material(
               type: MaterialType.transparency,
@@ -222,8 +224,11 @@ class SettingsRowShell extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: borderRadius,
-        // 描边 0.5px，与 FrostShell rim 的细腻语言统一
-        border: Border.all(color: AppGlass.floatRowRim(scheme), width: 0.5),
+        // 描边与 FrostShell 同语言：浅 0.5 / 深 0.8
+        border: Border.all(
+          color: AppGlass.floatRowRim(scheme),
+          width: scheme.brightness == Brightness.light ? 0.5 : 0.8,
+        ),
         gradient: gradient,
         color: gradient == null ? fill : null,
       ),
@@ -787,11 +792,15 @@ class SettingIconLabel extends StatelessWidget {
     required this.icon,
     required this.title,
     this.subtitle,
+    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final String? subtitle;
+
+  /// 行尾控件（如取色按钮），与标题/副标题水平同行
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -823,6 +832,10 @@ class SettingIconLabel extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            trailing!,
+          ],
         ],
       ),
     );

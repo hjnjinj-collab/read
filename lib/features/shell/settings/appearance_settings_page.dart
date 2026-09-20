@@ -143,22 +143,21 @@ class _AppearanceSettingsPageState
                         ),
                       ),
                       const SettingsDivider(indent: 16),
-                      // 自定义取色器
+                      // 自定义取色器：标签与按钮同行（trailing），与左侧
+                      // 文字水平对齐；互斥降权只作用于按钮（与其余组一致）
                       SettingIconLabel(
                         icon: AppIcons.colorPicker,
                         title: '自定义取色',
                         subtitle: '手动选择任意主色调',
-                      ),
-                      Opacity(
-                        opacity: activeSource == 'picker' ? 1 : 0.38,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                        trailing: Opacity(
+                          opacity: activeSource == 'picker' ? 1 : 0.38,
                           child: _ColorPickerButton(
                             current: shell.seedArgb != null
                                 ? Color(shell.seedArgb!)
                                 : AppTheme.seed,
                             active: activeSource == 'picker',
-                            onPick: (c) => n.applySeed(c, source: 'picker'),
+                            onPick: (c) =>
+                                n.applySeed(c, source: 'picker'),
                           ),
                         ),
                       ),
@@ -546,45 +545,38 @@ class _ColorPickerButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Align(
-        // 按钮贴容器右缘（16px 网格），与开关行布局语言一致
-        alignment: Alignment.centerRight,
-        child: InkWell(
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _showColorPicker(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _showColorPicker(context),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: active ? scheme.primary : scheme.outlineVariant,
-                width: active ? 1.5 : 1,
-              ),
-            ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: current,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.4),
-                  ),
+          border: Border.all(
+            color: active ? scheme.primary : scheme.outlineVariant,
+            width: active ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: current,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.4),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text('选择颜色', style: Theme.of(context).textTheme.labelMedium),
-              const SizedBox(width: 4),
-              Icon(AppIcons.chevronRight,
-                  size: 16, color: scheme.onSurfaceVariant),
-            ],
-          ),
-          ),
+            ),
+            const SizedBox(width: 8),
+            Text('选择颜色', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(width: 4),
+            Icon(AppIcons.chevronRight,
+                size: 16, color: scheme.onSurfaceVariant),
+          ],
         ),
       ),
     );
