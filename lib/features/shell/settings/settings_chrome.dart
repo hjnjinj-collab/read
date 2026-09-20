@@ -113,7 +113,8 @@ class SettingsScaffold extends StatelessWidget {
 }
 
 /// 同宽外霜层：blur + 渐变，`ClipRRect` 贴合轮廓。
-/// 可作**垫在子栏下面**的背景层（child 可为空），也可包内容。
+/// 可作**垫在子栏下面**的背景层（child 可传空内容如 SizedBox.shrink），
+/// 也可包内容。
 ///
 /// 裁剪契约：阴影 → Clip → Stack[BackdropFilter → 渐变 → 内容，
 /// 前景 rim 描边层]。描边层画在模糊/渐变之上，整圈完整可见；

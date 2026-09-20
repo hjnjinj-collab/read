@@ -41,6 +41,10 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
   先行内容，透明底是必要条件；对话框独立感靠 radius 24 与页面 16 区分。
 - frost 描边是全局视觉语言：FrostShell rim 调细时同步 SettingsRowShell
   等兄弟壳体，避免外壳 0.5 / 子行 1 的不统一。
+- **Stack 全定位子节点会取 constraints.biggest**：Column 无界高度下
+  触发框架断言、Dialog 松弛高度下壳体膨胀全高。分层壳体的内容层必须
+  保持非定位子节点（child-sizing），仅覆盖层（rim/遮罩）用
+  Positioned.fill——参照 SettingsFrostGroup 的既有可行结构。
 - 审查子代理 bash 受限时「终点文件状态 + 全库交叉 grep + 包源码」
   模式连续多轮可用，结论经主代理抽验成立。
 
@@ -161,5 +165,5 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
 - [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
-- [ ] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（covers: S2 圆角缺角修复）
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T9 复审）；真机确认（待用户执行） (covers: S1 全部)
+- [x] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（落地+复审 PASS：内容层非定位子节点保 child-sizing，rim 前置） (covers: S2 圆角缺角修复)
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
