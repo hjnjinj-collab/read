@@ -180,23 +180,45 @@ class SettingsFrostShell extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: r,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: begin,
-                end: end,
-                colors: stops,
-                stops: const [0, 0.48, 1],
+        child: Stack(
+          children: [
+            // 模糊 + 渐变层
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: blurSigma,
+                  sigmaY: blurSigma,
+                ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: begin,
+                      end: end,
+                      colors: stops,
+                      stops: const [0, 0.48, 1],
+                    ),
+                  ),
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: child,
+                  ),
+                ),
               ),
-              border: Border.all(color: rim, width: rimWidth),
             ),
-            child: Material(
-              type: MaterialType.transparency,
-              child: child,
+            // 前景描边层：画在模糊/渐变之上。BackdropFilter 的采样在
+            // 裁切边缘有一圈半透明带，描边若画在其下，圆角弧线处会被
+            // 吃掉（视觉"缺一角"）；提到前景后整圈 rim 完整可见。
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: r,
+                    border: Border.all(color: rim, width: rimWidth),
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

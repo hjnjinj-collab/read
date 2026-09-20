@@ -134,6 +134,18 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
   Align 右对齐布局——按钮与「自定义取色」文字水平居中同行，
   右缘仍距壳 16px。
 
+### 圆角缺角修复（T9，用户验收反馈三）
+
+- 根因是**层序**而非描边宽度：`BackdropFilter` 的模糊采样在 ClipRRect
+  裁切边缘有一圈半透明带，描边原先画在渐变层内（模糊层之上但被
+  该带透出），圆角弧线处 rim 被吃掉，深色下视觉「缺一角」。
+- 修复：`SettingsFrostShell` 内部改 Stack 结构——模糊/渐变层与
+  **前景描边层**（`Positioned.fill` + `IgnorePointer` +
+  `DecoratedBox(border)`）分离，rim 画在全部层之上，整圈完整可见；
+  分档数值不变（浅 0.5px α0.32 / 深 0.8px α0.28）。
+- 影响面：全部 FrostShell 容器（外观页三容器、取色对话框、其他设置页），
+  浅色同样受益（圆角弧线更连续）。
+
 ## [S3] Out of Scope
 
 - flex_color_scheme v9 迁移（用户确认借鉴算法即可，8.x 锁定维持）。
@@ -149,4 +161,5 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
 - [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
+- [ ] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（covers: S2 圆角缺角修复）
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T9 复审）；真机确认（待用户执行） (covers: S1 全部)
