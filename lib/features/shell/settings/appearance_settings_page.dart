@@ -669,8 +669,9 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                     ),
                   ),
                   // 液态玻璃切换器：与明暗模式同组件同语言，外包
-                  // 派生色底衬容器（SettingsRowShell，非霜壳——无
-                  // blur/渐变），替换包内 Cupertino 灰底 selector
+                  // 派生色底衬容器（SettingsRowShell，非霜壳）。
+                  // 瘦身：height 32 + 胶囊内边距 5（pill 22 纤细比例）、
+                  // 底衬内衬 4 → 总高 40
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                     child: SettingsRowShell(
@@ -678,13 +679,14 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                       fill: scheme.surfaceContainerLow
                           .withValues(alpha: 0.45),
                       child: Padding(
-                        padding: const EdgeInsets.all(6),
+                        padding: const EdgeInsets.all(4),
                         child: LiquidGlassSegmented(
                       segments: const ['主题色', '强调色', '色轮'],
                       selectedIndex: _pickerIndex,
                       onChanged: (i) => setState(() => _pickerIndex = i),
                       width: double.infinity,
-                      height: 40,
+                      height: 32,
+                      padding: 5,
                       style: LiquidGlassStyle(
                         shape: LiquidGlassShape.continuousRoundedRectangle(
                           cornerRadius: 14,
@@ -772,16 +774,20 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           },
                         ])
                           SingleChildScrollView(
-                            child: ColorPicker(
-                              color: _color,
-                              onColorChanged: (Color c) =>
-                                  setState(() => _color = c),
-                              pickersEnabled: enabled,
-                              width: 40,
-                              height: 40,
-                              // 色名/色码均走自绘行（包内背景不可定制）
-                              showColorName: false,
-                              showColorCode: false,
+                            // 包内色板 Wrap 无 alignment 参数（默认靠左），
+                            // Center 在外层把面板内容水平居中
+                            child: Center(
+                              child: ColorPicker(
+                                color: _color,
+                                onColorChanged: (Color c) =>
+                                    setState(() => _color = c),
+                                pickersEnabled: enabled,
+                                width: 40,
+                                height: 40,
+                                // 色名/色码均走自绘行（包内背景不可定制）
+                                showColorName: false,
+                                showColorCode: false,
+                              ),
                             ),
                           ),
                       ],
@@ -814,6 +820,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
+                          // 容器全宽（Row 默认 max）+ 内容组水平居中
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
                               AppIcons.colorPicker,
@@ -821,18 +829,17 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                               color: scheme.onPrimaryContainer,
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _hexArgb(_color),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: scheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                              ),
+                            Text(
+                              _hexArgb(_color),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: scheme.onPrimaryContainer,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                             ),
+                            const SizedBox(width: 8),
                             Icon(
                               Icons.copy,
                               size: 14,

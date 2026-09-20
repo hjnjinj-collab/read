@@ -154,6 +154,17 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 取色器验收修正三（T13，用户验收反馈六）
+
+- **面板居中**：包内 MainColors 的 Wrap 无 alignment 参数（默认靠左），
+  且无全宽元素——每个 ColorPicker 外包 `Center`，面板内容水平居中。
+- **切换器去臃肿**：体量问题在高度与 pill 比例而非溢出——
+  `LiquidGlassSegmented height 40→32`、组件 `padding 4→5`
+  （pill 高 22，与轨道边距 5，比例纤细），底衬 `Padding 6→4`
+  （总高 40）；明暗模式分段（60）不动。
+- **色码行居中**：`Row(mainAxisSize.min, mainAxisAlignment.center)`
+  ——icon + hex + 复制图标整组水平居中，去掉 Expanded 撑开。
+
 ### 取色器验收修正二（T12，用户验收反馈五）
 
 - **双切换器重复根因**：包内 `_pickers` 对未传入的 `accent` 键
@@ -200,4 +211,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（落地+审查 PASS：(60−8)+6=58≤60） (covers: S2 T10/T11)
 - [x] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
 - [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
+- [ ] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中；切换器总高 40 且 pill 纤细；色码行整组居中 (covers: S2 取色器验收修正三)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
