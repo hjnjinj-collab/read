@@ -3,7 +3,7 @@ feature: appearance-scheme-preview-picker
 status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..05a11c5
+commits: cdf94df..ec3c22c
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -13,38 +13,40 @@ commits: cdf94df..05a11c5
 **What was built** — 外观页三类容器最终统一 60px 高（明暗分段贴壳边、
 pill 增长 6 不溢出；开关行 36+24=60）。自定义取色对话框：FrostShell
 玻璃壳（radius 24、霜向/渐变跟随用户自定义），标题下中英双语色名行，
-液态玻璃三段切换器（主题色/强调色/色轮，外包 SettingsRowShell
-派生色底衬 surfaceContainerLow α0.45，非霜壳）+ IndexedStack 三个
-单类型 ColorPicker（pickersEnabled 显式关闭其余类型——包内未传的
-accent 键 `?? true` 默认开启是双切换器重复的根因）；自绘
-primaryContainer 色码行（点按复制）；「选择颜色」按钮为标签行
-trailing 与文字同行。玻璃描边明暗分档（浅 0.5px α0.32 / 深 0.8px
-α0.28，AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角
-（内容层非定位子节点保 child-sizing）。派生色系 8 角色预览卡实时
-跟随主题来源，点击复制 hex。
+液态玻璃三段切换器（主题色/强调色/色轮；瘦身 height 32 + padding 5
+pill 22、底衬 SettingsRowShell 派生色 surfaceContainerLow α0.45
+内衬 4、总高 40）+ IndexedStack 三个单类型 ColorPicker（pickersEnabled
+显式关闭其余类型——包内未传的 accent 键 `?? true` 默认开启是双切换器
+重复的根因；面板外包 Center，内容居中主要由包内 Column
+crossAlignment 支撑）；自绘 primaryContainer 色码行（条全宽、
+内容组居中、点按复制）；「选择颜色」按钮为标签行 trailing 与文字
+同行。玻璃描边明暗分档（浅 0.5px α0.32 / 深 0.8px α0.28，
+AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角（内容层非定位
+子节点保 child-sizing）。派生色系 8 角色预览卡实时跟随主题来源。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
 改动文件零新增；`flutter test` 主题冒烟 2 PASS；各轮独立审查均三项
 PASS、无 critical（包源码层核对：pickersEnabled `?? true` 陷阱、
 SelectPicker 亮度取字、BackdropFilter 采样链、Stack biggest 陷阱、
-rim 层序、_colorNameZh 边界数学）。已知边界：色板面板在色轮取任意
-色时回退首个 swatch 高亮（包行为）；色块对号为包内按亮度自适应
-黑白；IndexedStack 三面板同时 build（拖轮开销约三倍，规模可接受）；
+rim 层序、Segmented padding/pill 数学、ColorPicker Column 对齐）。
+已知边界：色板末行靠左为包 WrapAlignment.start（Center 不修正，
+自绘可解暂未做）；色板在色轮取任意色时回退首个 swatch 高亮（包行为）；
+色块对号为包内按亮度自适应黑白；IndexedStack 三面板同时 build；
 ExcludeSemantics 使取色对话框对读屏不可见。
 
 **Journey log** —
 - **第三方包 map 参数的 `?? 默认值`陷阱**：flex_color_picker 的
   `pickersEnabled[X] ?? true`（primary/accent 默认开）——传单键 map
-  时其余类型仍启用，selector 不隐藏。对 map 型参数必须显式关闭
-  无关键，不能假设未传=禁用。
+  时其余类型仍启用。对 map 型参数必须显式关闭无关键。
 - Stack 分层壳体：内容层必须非定位子节点（child-sizing），覆盖层
-  （rim/遮罩）才用 Positioned.fill——全定位子节点取 constraints.biggest，
-  Column 无界高度下崩溃、Dialog 下壳体膨胀全高。
-- frost 描边是明暗双档 + 层序问题：深色要更高对比（0.8px α0.28），
-  且 rim 必须画在模糊层之上（前景层），否则圆角弧线被裁切边缘的
-  半透明带吃掉形成"缺角"。
-- 液态玻璃容器的尺寸/padding 语义先问设计意图（明暗分段垫高误判）；
-  视觉"臃肿"常源于 grow 溢出壳而非高度数值本身。
+  （rim/遮罩）才用 Positioned.fill——全定位子节点取
+  constraints.biggest，Column 无界高度下崩溃。
+- frost 描边是明暗双档 + 层序问题：深色需更高对比且 rim 必须画在
+  模糊层之上（前景层），否则圆角弧线被裁切边缘半透明带吃掉。
+- 视觉观感两教训：「臃肿」常源于组件自身体量（高度 + pill 比例）
+  而非溢出；包内 Wrap 末行靠左是 WrapAlignment.start 行为，外层
+  Center 修正不了行内对齐——布局观感问题先定位是 Column 对齐还是
+  Wrap 行内对齐，再决定包内参数 / 外包 / 自绘。
 - flex_color_scheme v9 迁移 material_ui 是作者有意设计；本项目借算法
   维持 8.x 锁定（framework 类型分叉不可用）。
 
@@ -156,14 +158,18 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 
 ### 取色器验收修正三（T13，用户验收反馈六）
 
-- **面板居中**：包内 MainColors 的 Wrap 无 alignment 参数（默认靠左），
-  且无全宽元素——每个 ColorPicker 外包 `Center`，面板内容水平居中。
+- **面板居中**：包内 MainColors 的 Wrap 无 alignment 参数（末行
+  `WrapAlignment.start` 靠左留白）；每个 ColorPicker 外包 `Center`
+  保留（无害）。审查核对：ColorPicker Column 默认 `mainAxisSize.max` +
+  `crossAxisAlignment.center`，intrinsic 宽的色板 Wrap 已在包内被居中；
+  末行仍偏左是包 Wrap 行为，若真机不接受需自绘色板（包外方案，暂留）。
 - **切换器去臃肿**：体量问题在高度与 pill 比例而非溢出——
   `LiquidGlassSegmented height 40→32`、组件 `padding 4→5`
   （pill 高 22，与轨道边距 5，比例纤细），底衬 `Padding 6→4`
   （总高 40）；明暗模式分段（60）不动。
-- **色码行居中**：`Row(mainAxisSize.min, mainAxisAlignment.center)`
-  ——icon + hex + 复制图标整组水平居中，去掉 Expanded 撑开。
+- **色码行居中**：`Row(mainAxisAlignment: center)` 保持默认
+  `mainAxisSize.max`——`primaryContainer` 圆角条占满宽度，内部
+  icon + hex + 复制图标整组水平居中（hex 定长 10 字符无截断风险）。
 
 ### 取色器验收修正二（T12，用户验收反馈五）
 
@@ -211,5 +217,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（落地+审查 PASS：(60−8)+6=58≤60） (covers: S2 T10/T11)
 - [x] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
 - [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
-- [ ] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中；切换器总高 40 且 pill 纤细；色码行整组居中 (covers: S2 取色器验收修正三)
+- [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
