@@ -3,50 +3,50 @@ feature: appearance-scheme-preview-picker
 status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..82cac1f
+commits: cdf94df..05a11c5
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
 
 ## Report
 
-**What was built** — 外观页三类容器尺寸统一到液态玻璃导航栏高度 64px
-（明暗分段贴壳边 64、开关行 6×64）。主题容器末尾「派生色系」分区：
-8 个 MD3 角色 4 列网格实时跟随主题来源，点击复制 hex，底距 14px。
-自定义取色迁移 flex_color_picker 3.8，外包 SettingsFrostShell 玻璃壳
-（radius 24、霜向/渐变经 Consumer 跟随用户自定义），标题下「英文色名 ·
-中文名」双语行（HSV 12 段映射），分段选择器 thumb 用 scheme.primary
-且标签中文化，顶部冗余复制按钮移除。「选择颜色」按钮为标签行
-`SettingIconLabel.trailing` 控件，与左侧文字水平同行。玻璃描边按
-明暗分档：浅色 0.5px α0.32-0.35 细腻，深色 0.8px α0.26-0.28 保证
-轮廓与圆角可辨——FrostShell / floatRowRim / RowShell 三处经
-`AppGlass.rimWidth` 统一宽度语言。
+**What was built** — 外观页三类容器最终统一 60px 高（明暗分段贴壳边、
+pill 增长 6 不溢出；开关行 36+24=60）。自定义取色对话框：FrostShell
+玻璃壳（radius 24、霜向/渐变跟随用户自定义），标题下中英双语色名行，
+液态玻璃三段切换器（主题色/强调色/色轮，外包 SettingsRowShell
+派生色底衬 surfaceContainerLow α0.45，非霜壳）+ IndexedStack 三个
+单类型 ColorPicker（pickersEnabled 显式关闭其余类型——包内未传的
+accent 键 `?? true` 默认开启是双切换器重复的根因）；自绘
+primaryContainer 色码行（点按复制）；「选择颜色」按钮为标签行
+trailing 与文字同行。玻璃描边明暗分档（浅 0.5px α0.32 / 深 0.8px
+α0.28，AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角
+（内容层非定位子节点保 child-sizing）。派生色系 8 角色预览卡实时
+跟随主题来源，点击复制 hex。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
-改动文件零新增；`flutter test` 主题冒烟 2 PASS；四轮独立审查均三项
-PASS、无 critical（包源码层核对：SelectPicker 按 thumb 亮度自动黑白
-文字、透明 Dialog 上 BackdropFilter 采样链、_colorNameZh 边界数学、
-trailing 垂直居中与无双重 padding、分档变量消费）。已知边界：中等
-亮度自定义 seed 时分段文字对比度临界（包设计）、ExcludeSemantics 使
-取色对话框对读屏不可见（压制语义树噪声的取舍）、深色 rim 若仍嫌淡
-可在 AppGlass.rimWidth / rim 调值。
+改动文件零新增；`flutter test` 主题冒烟 2 PASS；各轮独立审查均三项
+PASS、无 critical（包源码层核对：pickersEnabled `?? true` 陷阱、
+SelectPicker 亮度取字、BackdropFilter 采样链、Stack biggest 陷阱、
+rim 层序、_colorNameZh 边界数学）。已知边界：色板面板在色轮取任意
+色时回退首个 swatch 高亮（包行为）；色块对号为包内按亮度自适应
+黑白；IndexedStack 三面板同时 build（拖轮开销约三倍，规模可接受）；
+ExcludeSemantics 使取色对话框对读屏不可见。
 
 **Journey log** —
-- flex_color_scheme v9 迁移 material_ui 是作者有意设计（用户确认）；
-  本项目借用其色彩体系与算法，8.x 锁定维持。
-- 液态玻璃容器的 padding/尺寸/描边语义先问设计意图再动手（明暗分段
-  「复刻导航栏」的垫高误判教训）；描边是明暗双档视觉语言，调一处需
-  同步全部壳体并提取 AppGlass.rimWidth 单点维护。
-- Dialog 透明底 + FrostShell 组合成立：BackdropFilter 采样同合成树
-  先行内容，透明底是必要条件；对话框独立感靠 radius 24 与页面 16 区分。
-- frost 描边是全局视觉语言：FrostShell rim 调细时同步 SettingsRowShell
-  等兄弟壳体，避免外壳 0.5 / 子行 1 的不统一。
-- **Stack 全定位子节点会取 constraints.biggest**：Column 无界高度下
-  触发框架断言、Dialog 松弛高度下壳体膨胀全高。分层壳体的内容层必须
-  保持非定位子节点（child-sizing），仅覆盖层（rim/遮罩）用
-  Positioned.fill——参照 SettingsFrostGroup 的既有可行结构。
-- 审查子代理 bash 受限时「终点文件状态 + 全库交叉 grep + 包源码」
-  模式连续多轮可用，结论经主代理抽验成立。
+- **第三方包 map 参数的 `?? 默认值`陷阱**：flex_color_picker 的
+  `pickersEnabled[X] ?? true`（primary/accent 默认开）——传单键 map
+  时其余类型仍启用，selector 不隐藏。对 map 型参数必须显式关闭
+  无关键，不能假设未传=禁用。
+- Stack 分层壳体：内容层必须非定位子节点（child-sizing），覆盖层
+  （rim/遮罩）才用 Positioned.fill——全定位子节点取 constraints.biggest，
+  Column 无界高度下崩溃、Dialog 下壳体膨胀全高。
+- frost 描边是明暗双档 + 层序问题：深色要更高对比（0.8px α0.28），
+  且 rim 必须画在模糊层之上（前景层），否则圆角弧线被裁切边缘的
+  半透明带吃掉形成"缺角"。
+- 液态玻璃容器的尺寸/padding 语义先问设计意图（明暗分段垫高误判）；
+  视觉"臃肿"常源于 grow 溢出壳而非高度数值本身。
+- flex_color_scheme v9 迁移 material_ui 是作者有意设计；本项目借算法
+  维持 8.x 锁定（framework 类型分叉不可用）。
 
 ## [S1] Problem
 
@@ -197,7 +197,7 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
 - [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
 - [x] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（落地+复审 PASS：内容层非定位子节点保 child-sizing，rim 前置） (covers: S2 圆角缺角修复)
-- [ ] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（covers: S2 T10/T11）
-- [ ] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
-- [ ] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（covers: S2 取色器验收修正二）
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T10/T11 复审）；真机确认（待用户执行） (covers: S1 全部)
+- [x] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（落地+审查 PASS：(60−8)+6=58≤60） (covers: S2 T10/T11)
+- [x] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态（落地+审查 PASS） (covers: S2 T10/T11)
+- [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
