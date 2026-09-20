@@ -222,7 +222,8 @@ class SettingsRowShell extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: borderRadius,
-        border: Border.all(color: AppGlass.floatRowRim(scheme), width: 1),
+        // 描边 0.5px，与 FrostShell rim 的细腻语言统一
+        border: Border.all(color: AppGlass.floatRowRim(scheme), width: 0.5),
         gradient: gradient,
         color: gradient == null ? fill : null,
       ),
