@@ -138,6 +138,22 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
   Align 右对齐布局——按钮与「自定义取色」文字水平居中同行，
   右缘仍距壳 16px。
 
+### 明暗/网格统一 60 与取色器液态切换器（T10/T11，用户验收反馈四）
+
+- 明暗分段 `height 64→60`、`growHeight 10→6`（pill 选中态 60=壳高，
+  不再溢出壳外——上轮的臃肿感来源），开关行 `vertical 14→12`
+  （行高 60）：两容器精确同高、视觉减重；导航栏 64 不变。
+- 取色器切换器换**液态玻璃分段**（与明暗模式同组件、同风格语言，
+  不包霜壳）：包内 Cupertino 灰底 selector 整体废弃——改为外部
+  `LiquidGlassSegmented`（主题色/强调色/色轮三段，labelStyle 派生色）
+  + `IndexedStack` 三个单类型 `ColorPicker` 实例
+  （`pickersEnabled` 各只开一类，单类型时包内 selector 自动隐藏），
+  共享 `_color` 状态，切换不丢选中状态。
+- 删除包 selector 相关参数（selectedPickerTypeColor /
+  pickerTypeTextStyle / pickerTypeLabels——随包 selector 一起消失）；
+  `colorCodeTextStyle` 用 `onSurface` 派生。
+- 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
+
 ### 圆角缺角修复（T9，用户验收反馈三）
 
 - 根因是**层序**而非描边宽度：`BackdropFilter` 的模糊采样在 ClipRRect
@@ -166,4 +182,6 @@ trailing 垂直居中与无双重 padding、分档变量消费）。已知边界
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
 - [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
 - [x] T9: FrostShell 描边提为前景层 — acceptance: 深色下圆角处描边不断裂、无缺角感（落地+复审 PASS：内容层非定位子节点保 child-sizing，rim 前置） (covers: S2 圆角缺角修复)
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
+- [ ] T10: 明暗分段 60 + 开关行 60 统一 — acceptance: 明暗与网格布局容器精确同高、pill 不溢出壳（covers: S2 T10/T11）
+- [ ] T11: 取色器液态玻璃切换器 + 派生色细节 — acceptance: 三段切换为 LiquidGlassSegmented；分段/色码均派生色；IndexedStack 切换不丢状态 (covers: S2 T10/T11)
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T10/T11 复审）；真机确认（待用户执行） (covers: S1 全部)

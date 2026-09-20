@@ -943,9 +943,9 @@ class SettingSwitchRow extends ConsumerWidget {
             expandedThumbHeight: 24,
           );
     return Padding(
-      // 左右对称：文字距左 16，开关距右 16；垂直 14 → 行高 64，
-      // 与明暗分段、液态玻璃导航栏统一（书架/动态取色/玻璃设置页共用）
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      // 左右对称：文字距左 16，开关距右 16；垂直 12 → 行高 60，
+      // 与明暗模式分段容器统一（书架/动态取色/玻璃设置页共用）
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Expanded(

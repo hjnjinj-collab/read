@@ -258,8 +258,9 @@ class _AppearanceSettingsPageState
                         });
                       },
                       width: double.infinity,
-                      // 与液态玻璃导航栏同高（64），容器即分段、无垫高
-                      height: 64,
+                      // 与开关行统一 60：grow 6 时选中 pill 恰为壳高，
+                      // 不再溢出壳外（此前 64+grow10 视觉臃肿）
+                      height: 60,
                       segmentBuilder: (context, i, selected, color) {
                         final unselectedIcons = [
                           Icons.brightness_auto_outlined,
@@ -319,7 +320,7 @@ class _AppearanceSettingsPageState
                       pillStyle: LiquidGlassSegmentedPillStyle(
                         glass: shell.lgMotionOn,
                         animated: true,
-                        growHeight: shell.lgMotionOn ? 10 : 0,
+                        growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
                             color: scheme.primary.withValues(alpha: 0.28),
@@ -611,6 +612,9 @@ class _ColorPickerDialog extends ConsumerStatefulWidget {
 class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
   late Color _color;
 
+  /// 当前取色面板：0 主题色 / 1 强调色 / 2 色轮（默认色轮）
+  int _pickerIndex = 2;
+
   @override
   void initState() {
     super.initState();
@@ -664,36 +668,103 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           ),
                     ),
                   ),
-                  // 矮屏（横屏）下内容较高，滚动兜底防溢出
-                  Flexible(
-                    child: SingleChildScrollView(
-                      child: ColorPicker(
-                        color: _color,
-                        onColorChanged: (Color c) =>
-                            setState(() => _color = c),
-                        pickersEnabled: const <ColorPickerType, bool>{
-                          ColorPickerType.primary: true,
-                          ColorPickerType.accent: true,
-                          ColorPickerType.wheel: true,
-                        },
-                        // 分段选择器采用主题派生色（包内按 thumb 亮度
-                        // 自动取黑白文字）；标签中文化
-                        selectedPickerTypeColor: scheme.primary,
-                        pickerTypeTextStyle:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                        pickerTypeLabels: const <ColorPickerType, String>{
-                          ColorPickerType.primary: '主题色',
-                          ColorPickerType.accent: '强调色',
-                          ColorPickerType.wheel: '色轮',
-                        },
-                        width: 40,
-                        height: 40,
-                        // 色名走标题下的中英双语行，关闭包内英文行
-                        showColorName: false,
-                        showColorCode: true,
+                  // 液态玻璃切换器：与明暗模式同组件同语言（不包霜壳），
+                  // 替换包内 Cupertino 灰底 selector
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                    child: LiquidGlassSegmented(
+                      segments: const ['主题色', '强调色', '色轮'],
+                      selectedIndex: _pickerIndex,
+                      onChanged: (i) => setState(() => _pickerIndex = i),
+                      width: double.infinity,
+                      height: 40,
+                      style: LiquidGlassStyle(
+                        shape: LiquidGlassShape.continuousRoundedRectangle(
+                          cornerRadius: 14,
+                          borderWidth: 0,
+                          borderColor: Colors.transparent,
+                          lightIntensity: 0,
+                          borderType: const OpticalBorder(
+                            borderSolidity: 0,
+                            ambientIntensity: 0,
+                          ),
+                        ),
+                        appearance: LiquidGlassAppearance(
+                          color: Colors.transparent,
+                          blur: const LiquidGlassBlur(sigmaX: 1.5, sigmaY: 1.5),
+                          shadow: LiquidGlassShadow(
+                            blur: 0,
+                            opacity: 0,
+                            cornerRadius: 14,
+                          ),
+                        ),
+                        refraction: const LiquidGlassRefraction(
+                          distortion: 0.06,
+                          distortionWidth: 16,
+                          chromaticAberration: 0.001,
+                        ),
                       ),
+                      pillStyle: LiquidGlassSegmentedPillStyle(
+                        glass: shell.lgMotionOn,
+                        animated: true,
+                        growHeight: 0,
+                        glassStyle: LiquidGlassStyle(
+                          appearance: LiquidGlassAppearance(
+                            color: scheme.primary.withValues(alpha: 0.28),
+                            blur: const LiquidGlassBlur(
+                              sigmaX: 1.5,
+                              sigmaY: 1.5,
+                            ),
+                            shadow: LiquidGlassShadow(
+                              blur: 8,
+                              opacity: 0.20,
+                              inset: 0,
+                              cornerRadius: 12,
+                            ),
+                          ),
+                          refraction: const LiquidGlassRefraction(
+                            distortion: 0.08,
+                            distortionWidth: 12,
+                          ),
+                        ),
+                      ),
+                      labelStyle: LiquidGlassSegmentedLabelStyle(
+                        selectedColor: scheme.primary,
+                        unselectedColor: scheme.onSurfaceVariant,
+                        fontSize: 12,
+                        selectedFontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  // 三个单类型取色器按选择切换：单类型时包内 selector 自动
+                  // 隐藏；IndexedStack 保各面板选中状态，颜色状态共享
+                  Flexible(
+                    child: IndexedStack(
+                      index: _pickerIndex,
+                      children: [
+                        for (final enabled in const <Map<ColorPickerType, bool>>[
+                          {ColorPickerType.primary: true},
+                          {ColorPickerType.accent: true},
+                          {ColorPickerType.wheel: true},
+                        ])
+                          SingleChildScrollView(
+                            child: ColorPicker(
+                              color: _color,
+                              onColorChanged: (Color c) =>
+                                  setState(() => _color = c),
+                              pickersEnabled: enabled,
+                              width: 40,
+                              height: 40,
+                              // 色名走标题下的中英双语行，关闭包内英文行
+                              showColorName: false,
+                              showColorCode: true,
+                              colorCodeTextStyle: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: scheme.onSurface),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   Padding(
