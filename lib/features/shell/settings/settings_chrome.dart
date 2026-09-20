@@ -94,6 +94,9 @@ class SettingsChrome {
 /// 静止 `scrollT < 0.02` 只画标题行；滚动时
 /// `ShaderMask(dstIn) → BackdropFilter(topBlurSigma) → fog(topTint)`，
 /// 叠层雾渐变 α 随 `scrollT` 浮现。背景层 `IgnorePointer`。
+///
+/// 前景：标题全宽水平居中；二级页返回键浮在左侧。液态玻璃返回键
+/// **仅在模糊生效时**（`scrollT ≥ 0.02`）出现，静止为普通箭头。
 class SettingsTopChrome extends StatelessWidget {
   const SettingsTopChrome({
     super.key,
@@ -109,55 +112,129 @@ class SettingsTopChrome extends StatelessWidget {
 
   final bool showBack;
 
+  /// 与模糊显现同一阈值：返回键液态效果同步开关
+  static const double _blurEpsilon = 0.02;
+
+  static const double _backSize = 40;
+
+  Widget _title(BuildContext context, ColorScheme scheme) {
+    return Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
+                color: scheme.onSurface,
+              ) ??
+          TextStyle(
+            color: scheme.onSurface,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+    );
+  }
+
+  /// 静止：普通箭头；模糊生效：液态玻璃圆键（同一时刻只挂一棵 Lens）
+  Widget _back(BuildContext context, ColorScheme scheme, {required bool glass}) {
+    if (glass) {
+      final light = scheme.brightness == Brightness.light;
+      return LiquidGlassTabBarAction(
+        icon: Icons.arrow_back_rounded,
+        size: _backSize,
+        foregroundColor: scheme.onSurface,
+        style: LiquidGlassStyle(
+          shape: LiquidGlassShape.continuousRoundedRectangle(
+            cornerRadius: _backSize / 2,
+            borderWidth: light ? 0.8 : 1.0,
+            borderColor: Colors.white.withValues(alpha: light ? 0.40 : 0.22),
+            lightIntensity: 1.05,
+          ),
+          appearance: LiquidGlassAppearance(
+            // 与底栏圆键同族色渗，叠在顶栏 fog 上仍可辨
+            color: AppGlass.navGlass(scheme, strength: 0.42),
+            blur: const LiquidGlassBlur(sigmaX: 2.5, sigmaY: 2.5),
+            shadow: LiquidGlassShadow(
+              blur: 12,
+              opacity: light ? 0.12 : 0.22,
+              offset: const Offset(0, 4),
+              cornerRadius: _backSize / 2,
+            ),
+          ),
+          refraction: const LiquidGlassRefraction(
+            distortion: 0.08,
+            distortionWidth: 18,
+            chromaticAberration: 0.002,
+          ),
+        ),
+        touch: const LiquidGlassTouch(flex: LiquidGlassFlex()),
+        onTap: () => Navigator.of(context).maybePop(),
+      );
+    }
+    return IconButton(
+      onPressed: () => Navigator.of(context).maybePop(),
+      color: scheme.onSurface,
+      iconSize: 24,
+      icon: const Icon(Icons.arrow_back_rounded),
+      tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+    );
+  }
+
+  Widget _foreground(
+    BuildContext context,
+    ColorScheme scheme, {
+    required bool disableBlur,
+  }) {
+    final topPad = MediaQuery.paddingOf(context).top;
+    final chromeH = topPad + SettingsChrome.headerContentH;
+    final glassOn = showBack && scrollT >= _blurEpsilon;
+
+    return SizedBox(
+      height: chromeH,
+      child: Padding(
+        padding: EdgeInsets.only(top: topPad),
+        child: Stack(
+          children: [
+            // 标题全宽水平居中，不被返回键挤偏
+            Center(child: _title(context, scheme)),
+            if (showBack)
+              Positioned(
+                left: 6,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _back(
+                    context,
+                    scheme,
+                    // disableAnimations 下滚动态也不挂 Lens
+                    glass: glassOn && !disableBlur,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final topPad = MediaQuery.paddingOf(context).top;
     final disableBlur = MediaQuery.disableAnimationsOf(context);
     final chromeH = topPad + SettingsChrome.headerContentH;
-
-    final row = SizedBox(
-      height: chromeH,
-      child: Padding(
-        padding: EdgeInsets.only(left: showBack ? 4 : 16, top: topPad),
-        child: Row(
-          children: [
-            if (showBack)
-              BackButton(
-                color: scheme.onSurface,
-              ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
-                          color: scheme.onSurface,
-                        ) ??
-                    TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.3,
-                    ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    final fg = _foreground(context, scheme, disableBlur: disableBlur);
 
     if (disableBlur) {
       return Material(
-        color: scheme.surface.withValues(alpha: scrollT > 0.02 ? 0.92 : 0),
-        child: row,
+        color: scheme.surface.withValues(alpha: scrollT > _blurEpsilon ? 0.92 : 0),
+        child: fg,
       );
     }
 
     // 静止：不叠模糊（与书架一致，避免暗色下常显滤镜）
-    if (scrollT < 0.02) {
-      return SizedBox(height: chromeH, child: row);
+    if (scrollT < _blurEpsilon) {
+      return SizedBox(height: chromeH, child: fg);
     }
 
     final h = chromeH + SettingsChrome.topBlurExtend;
@@ -217,7 +294,7 @@ class SettingsTopChrome extends StatelessWidget {
             ),
             Align(
               alignment: Alignment.topCenter,
-              child: row,
+              child: fg,
             ),
           ],
         ),
