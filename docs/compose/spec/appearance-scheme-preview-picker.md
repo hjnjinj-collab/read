@@ -1,6 +1,6 @@
 ---
 feature: appearance-scheme-preview-picker
-status: delivered
+status: in-progress
 updated: 2026-09-19
 branch: master
 commits: cdf94df..0829b87
@@ -104,6 +104,17 @@ saveLayer，瞬时项）与 ExcludeSemantics 使对话框按钮对 TalkBack
 - 删除 `copyPasteBehavior(copyButton)`——色码行自带复制，顶部工具栏
   复制按钮冗余。
 
+### 收尾打磨（T7，用户验收反馈）
+
+- 取色器分段选择器派生色：`selectedPickerTypeColor: scheme.primary`
+  （包内 SelectPicker 按 thumb 亮度自动取黑白文字）；分段标签中文化
+  （主题色/强调色/色轮）；`pickerTypeTextStyle` 用 bodySmall +
+  onSurfaceVariant。
+- `SettingsFrostShell` 描边细腻化（全局）：rim width 1→0.5，浅色
+  α0.48→0.32、深色 α0.10→0.08；对话框壳 `radius: 24`（页面容器
+  保持 16，独立卡片感）。
+- 「选择颜色」按钮右移贴容器右缘（16px 网格），与开关行布局语言一致。
+
 ## [S3] Out of Scope
 
 - flex_color_scheme v9 迁移（用户确认借鉴算法即可，8.x 锁定维持）。
@@ -117,4 +128,5 @@ saveLayer，瞬时项）与 ExcludeSemantics 使对话框按钮对 TalkBack
 - [x] T3: FlexColorPicker 替换自写 HSV 对话框 — acceptance: 色轮/色板/色码可用，确定后来源切到 picker 且其余组置灰（落地+审查核对） (covers: S2 取色器)
 - [x] T5: 派生色系网格底距 14px — acceptance: 主题容器末分区不再贴底（真机反馈修正） (covers: S2 真机修正)
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
-- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
+- [ ] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右 (covers: S2 收尾打磨)
+- [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（待 T7 后复审）；真机确认（待用户执行） (covers: S1 全部)

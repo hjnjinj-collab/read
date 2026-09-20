@@ -548,18 +548,21 @@ class _ColorPickerButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _showColorPicker(context),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: active ? scheme.primary : scheme.outlineVariant,
-              width: active ? 1.5 : 1,
+      child: Align(
+        // 按钮贴容器右缘（16px 网格），与开关行布局语言一致
+        alignment: Alignment.centerRight,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showColorPicker(context),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: active ? scheme.primary : scheme.outlineVariant,
+                width: active ? 1.5 : 1,
+              ),
             ),
-          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -580,6 +583,7 @@ class _ColorPickerButton extends StatelessWidget {
               Icon(AppIcons.chevronRight,
                   size: 16, color: scheme.onSurfaceVariant),
             ],
+          ),
           ),
         ),
       ),
@@ -631,6 +635,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
           child: SettingsFrostShell(
+            // 对话框独立卡片感：圆角 24（页面容器保持 16）
+            radius: 24,
             // 霜向/渐变跟随用户外观自定义，与页面容器同源
             dir: AmbientDir.parse(shell.frostDir),
             colorA: shell.frostGradA != null
@@ -677,6 +683,18 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                           ColorPickerType.primary: true,
                           ColorPickerType.accent: true,
                           ColorPickerType.wheel: true,
+                        },
+                        // 分段选择器采用主题派生色（包内按 thumb 亮度
+                        // 自动取黑白文字）；标签中文化
+                        selectedPickerTypeColor: scheme.primary,
+                        pickerTypeTextStyle:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                        pickerTypeLabels: const <ColorPickerType, String>{
+                          ColorPickerType.primary: '主题色',
+                          ColorPickerType.accent: '强调色',
+                          ColorPickerType.wheel: '色轮',
                         },
                         width: 40,
                         height: 40,

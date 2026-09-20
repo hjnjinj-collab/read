@@ -152,9 +152,10 @@ class SettingsFrostShell extends StatelessWidget {
       depth: gradDepth,
     );
     final (begin, end) = dir.alignment;
+    // 细描边：0.5px + 低 alpha，玻璃边缘高亮不生硬
     final rim = light
-        ? Colors.white.withValues(alpha: 0.48)
-        : Colors.white.withValues(alpha: 0.10);
+        ? Colors.white.withValues(alpha: 0.32)
+        : Colors.white.withValues(alpha: 0.08);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -187,7 +188,7 @@ class SettingsFrostShell extends StatelessWidget {
                 colors: stops,
                 stops: const [0, 0.48, 1],
               ),
-              border: Border.all(color: rim, width: 1),
+              border: Border.all(color: rim, width: 0.5),
             ),
             child: Material(
               type: MaterialType.transparency,
