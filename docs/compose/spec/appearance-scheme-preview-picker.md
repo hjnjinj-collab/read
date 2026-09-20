@@ -1,9 +1,9 @@
 ---
 feature: appearance-scheme-preview-picker
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..2870ade
+commits: cdf94df..82cac1f
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -16,21 +16,27 @@ commits: cdf94df..2870ade
 自定义取色迁移 flex_color_picker 3.8，外包 SettingsFrostShell 玻璃壳
 （radius 24、霜向/渐变经 Consumer 跟随用户自定义），标题下「英文色名 ·
 中文名」双语行（HSV 12 段映射），分段选择器 thumb 用 scheme.primary
-且标签中文化，顶部冗余复制按钮移除；「选择颜色」按钮右移贴容器右缘。
+且标签中文化，顶部冗余复制按钮移除。「选择颜色」按钮为标签行
+`SettingIconLabel.trailing` 控件，与左侧文字水平同行。玻璃描边按
+明暗分档：浅色 0.5px α0.32-0.35 细腻，深色 0.8px α0.26-0.28 保证
+轮廓与圆角可辨——FrostShell / floatRowRim / RowShell 三处经
+`AppGlass.rimWidth` 统一宽度语言。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
-改动文件零新增；三轮独立审查均三项 PASS、无 critical（包源码层核对：
-SelectPicker 按 thumb 亮度自动黑白文字、透明 Dialog 上 BackdropFilter
-采样链、_colorNameZh 边界数学、0.5px rim 全局影响面）；轻微项已同步
-（SettingsRowShell 描边 0.5px 与 FrostShell 语言统一）。真机观察项：
-深色 rim α0.08 边缘定义感、1x DPR 下 0.5px 描边贴边表现、中等亮度
-自定义 seed 时分段文字对比度（包设计边界）。
+改动文件零新增；`flutter test` 主题冒烟 2 PASS；四轮独立审查均三项
+PASS、无 critical（包源码层核对：SelectPicker 按 thumb 亮度自动黑白
+文字、透明 Dialog 上 BackdropFilter 采样链、_colorNameZh 边界数学、
+trailing 垂直居中与无双重 padding、分档变量消费）。已知边界：中等
+亮度自定义 seed 时分段文字对比度临界（包设计）、ExcludeSemantics 使
+取色对话框对读屏不可见（压制语义树噪声的取舍）、深色 rim 若仍嫌淡
+可在 AppGlass.rimWidth / rim 调值。
 
 **Journey log** —
 - flex_color_scheme v9 迁移 material_ui 是作者有意设计（用户确认）；
   本项目借用其色彩体系与算法，8.x 锁定维持。
-- 液态玻璃容器的 padding/尺寸语义先问设计意图再动手（明暗分段
-  「复刻导航栏」的 vertical:10 垫高误判教训）。
+- 液态玻璃容器的 padding/尺寸/描边语义先问设计意图再动手（明暗分段
+  「复刻导航栏」的垫高误判教训）；描边是明暗双档视觉语言，调一处需
+  同步全部壳体并提取 AppGlass.rimWidth 单点维护。
 - Dialog 透明底 + FrostShell 组合成立：BackdropFilter 采样同合成树
   先行内容，透明底是必要条件；对话框独立感靠 radius 24 与页面 16 区分。
 - frost 描边是全局视觉语言：FrostShell rim 调细时同步 SettingsRowShell
@@ -142,5 +148,5 @@ SelectPicker 按 thumb 亮度自动黑白文字、透明 Dialog 上 BackdropFilt
 - [x] T5: 派生色系网格底距 14px — acceptance: 主题容器末分区不再贴底（真机反馈修正） (covers: S2 真机修正)
 - [x] T6: 取色器 FrostShell 玻璃壳 + 中英色名 + 删顶部复制按钮 — acceptance: 对话框呈液态玻璃材质；色名显示「英文 · 中文」；顶部无孤立复制按钮 (covers: S2 真机修正)
 - [x] T7: 分段派生色 + 霜层描边/圆角细腻化 + 取色按钮右移 — acceptance: 分段选中态用 scheme.primary；rim 0.5px 更细腻；按钮贴右（落地+审查 PASS） (covers: S2 收尾打磨)
-- [ ] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行 (covers: S2 深色分档与同行)
+- [x] T8: 描边明暗分档 + 取色按钮与文字同行 — acceptance: 深色轮廓/圆角可辨；按钮与标签文字同一水平行（落地+审查 PASS） (covers: S2 深色分档与同行)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
