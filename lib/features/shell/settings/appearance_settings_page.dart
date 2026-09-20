@@ -258,9 +258,10 @@ class _AppearanceSettingsPageState
                         });
                       },
                       width: double.infinity,
-                      // 与开关行统一 60：grow 6 时选中 pill 恰为壳高，
-                      // 不再溢出壳外（此前 64+grow10 视觉臃肿）
+                      // 与开关行统一 60；padding 7 → pill 46/60≈0.77，
+                      // 比例与取色器切换器一致；grow 6 峰值 52<60 不溢出
                       height: 60,
+                      padding: 7,
                       segmentBuilder: (context, i, selected, color) {
                         final unselectedIcons = [
                           Icons.brightness_auto_outlined,
@@ -279,7 +280,7 @@ class _AppearanceSettingsPageState
                               : unselectedIcons[i],
                           label: labels[i],
                           color: color,
-                          selectedColor: scheme.primary,
+                          selectedColor: scheme.onPrimaryContainer,
                           unselectedColor: scheme.onSurfaceVariant,
                           selected: selected,
                           accentColor: scheme.tertiary,
@@ -323,7 +324,10 @@ class _AppearanceSettingsPageState
                         growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            color: scheme.primary.withValues(alpha: 0.28),
+                            // 派生色选中底（primaryContainer α0.9）+
+                            // onPrimaryContainer 文字，MD3 可读性配对
+                            color: scheme.primaryContainer
+                                .withValues(alpha: 0.9),
                             blur: const LiquidGlassBlur(
                               sigmaX: 1.5,
                               sigmaY: 1.5,
@@ -342,7 +346,7 @@ class _AppearanceSettingsPageState
                         ),
                       ),
                       labelStyle: LiquidGlassSegmentedLabelStyle(
-                        selectedColor: scheme.primary,
+                        selectedColor: scheme.onPrimaryContainer,
                         unselectedColor: scheme.onSurfaceVariant,
                         fontSize: 12,
                         selectedFontWeight: FontWeight.w600,
@@ -720,7 +724,9 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                         growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            color: scheme.primary.withValues(alpha: 0.28),
+                            // 派生色选中底，与明暗切换器同语言
+                            color: scheme.primaryContainer
+                                .withValues(alpha: 0.9),
                             blur: const LiquidGlassBlur(
                               sigmaX: 1.5,
                               sigmaY: 1.5,
@@ -739,7 +745,7 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                         ),
                       ),
                       labelStyle: LiquidGlassSegmentedLabelStyle(
-                        selectedColor: scheme.primary,
+                        selectedColor: scheme.onPrimaryContainer,
                         unselectedColor: scheme.onSurfaceVariant,
                         fontSize: 12,
                         selectedFontWeight: FontWeight.w600,

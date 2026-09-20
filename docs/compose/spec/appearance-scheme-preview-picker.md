@@ -156,6 +156,17 @@ ExcludeSemantics 使取色对话框对读屏不可见。
   `colorCodeTextStyle` 用 `onSurface` 派生。
 - 色块选中对号保留包内自适应黑白（按色块亮度，正确设计不动）。
 
+### 目标台账与明暗选中态派生化（T15，用户验收反馈八）
+
+- 目标任务台账：`docs/compose/appearance-goals-log.md`（外观线
+  G1–G4 全程目标/交付/commit/约束沉淀）。
+- 明暗分段选中 pill 比例：`padding 4→7`（pill 高 46/60 ≈ 0.77，
+  与取色器切换器 28/36 比例一致）；grow 6 保持（峰值 52<60）。
+- 选中色派生化（可读性，两处切换器统一）：pill 底
+  `primary α0.28` → `primaryContainer α0.9`，选中文字
+  `primary` → `onPrimaryContainer`——MD3 可读性配对，浅/深色
+  主题下对比度均有保障。
+
 ### 取色器验收修正四（T14，用户验收反馈七）
 
 - **pill 饱满度与鼓动恢复**：上轮 pill 22（32−5×2）过扁、且
@@ -230,4 +241,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
 - [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
+- [ ] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（covers: S2 目标台账与明暗选中态派生化）
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)
