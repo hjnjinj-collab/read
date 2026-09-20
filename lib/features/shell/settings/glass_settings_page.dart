@@ -3,12 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+// 分段控件尚未进公开 barrel，与外观页一致从 src 引用
+// ignore: implementation_imports
+import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
 import 'settings_chrome.dart';
 
-/// 材质与玻璃：模式 / 底栏模糊色渗 / 说明
+/// 材质与玻璃：模式（液态切换 + 霜壳）/ 底栏（模糊 · 色渗滤镜）/ 其余分组
 class GlassSettingsPage extends ConsumerWidget {
   const GlassSettingsPage({super.key});
 
@@ -22,83 +25,124 @@ class GlassSettingsPage extends ConsumerWidget {
     final motion = shell.lgMotionOn
         ? const LiquidGlassLensMotionSpec()
         : const LiquidGlassLensMotionSpec(maxDeformation: 0);
+    final frostDir = AmbientDir.parse(shell.frostDir);
+    final frostA =
+        shell.frostGradA != null ? Color(shell.frostGradA!) : null;
+    final frostB =
+        shell.frostGradB != null ? Color(shell.frostGradB!) : null;
+    final frostDepth = shell.frostGradDepth;
 
     return SettingsScaffold(
       title: '材质与玻璃',
       slivers: [
+        // ── 模式：霜壳 + 液态玻璃切换 ──
         SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '模式',
-            children: [
-              SettingLabel(
-                title: '渲染材质',
-                subtitle: forced
-                    ? 'Windows 强制毛玻璃霜面（无 shader）'
-                    : shell.glassMode == 'lite'
-                        ? '毛玻璃霜面：无 shader、省电'
-                        : '液态折射：Impeller 实时',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: SettingsMd3Segments(
-                  segments: const ['液态玻璃', '毛玻璃'],
-                  values: const ['liquid', 'lite'],
-                  selected: shell.glassMode,
-                  onPick: n.setGlassMode,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionHeader(label: '模式'),
+                SettingsFrostShell(
+                  dir: frostDir,
+                  colorA: frostA,
+                  colorB: frostB,
+                  gradDepth: frostDepth,
+                  showShadow: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SettingLabel(
+                        title: '渲染材质',
+                        subtitle: forced
+                            ? 'Windows 强制毛玻璃霜面（无 shader）'
+                            : shell.glassMode == 'lite'
+                                ? '毛玻璃霜面：无 shader、省电'
+                                : '液态折射：Impeller 实时',
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                        child: _GlassModeSegmented(
+                          selected: shell.glassMode,
+                          lgMotionOn: shell.lgMotionOn,
+                          navBlurSigma: shell.navBlurSigma,
+                          onPick: n.setGlassMode,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+        // ── 底栏：霜壳 + 模糊 / 色渗滤镜（液态滑杆） ──
         SliverToBoxAdapter(
-          child: SettingsGroup(
-            header: '底栏',
-            children: [
-              SettingLabel(
-                title: '底栏模糊',
-                subtitle: shell.navBlurSigma < 1
-                    ? '关闭（仅着色）'
-                    : '强度 ${shell.navBlurSigma.round()}',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('nav-blur-slider'),
-                    value: shell.navBlurSigma.clamp(0, 48),
-                    onChanged: n.setNavBlurSigma,
-                    minimumValue: 0,
-                    maximumValue: 48,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionHeader(label: '底栏'),
+                SettingsFrostShell(
+                  dir: frostDir,
+                  colorA: frostA,
+                  colorB: frostB,
+                  gradDepth: frostDepth,
+                  showShadow: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SettingLabel(
+                        title: '模糊',
+                        subtitle: shell.navBlurSigma < 1
+                            ? '关闭（仅着色）'
+                            : '强度 ${shell.navBlurSigma.round()}',
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: ClipRect(
+                          child: LiquidGlassSlider(
+                            key: const ValueKey('nav-blur-slider'),
+                            value: shell.navBlurSigma.clamp(0, 48),
+                            onChanged: n.setNavBlurSigma,
+                            minimumValue: 0,
+                            maximumValue: 48,
+                            activeColor: scheme.primary,
+                            width: width - 32 - 24,
+                            height: 56,
+                            motion: motion,
+                            style: _sliderStyle(),
+                          ),
+                        ),
+                      ),
+                      SettingLabel(
+                        title: '色渗滤镜',
+                        subtitle:
+                            '主色强度 ${(shell.navTintStrength * 100).round()}%',
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: ClipRect(
+                          child: LiquidGlassSlider(
+                            key: const ValueKey('nav-tint-slider'),
+                            value: shell.navTintStrength.clamp(0, 1),
+                            onChanged: n.setNavTintStrength,
+                            minimumValue: 0,
+                            maximumValue: 1,
+                            activeColor: scheme.primary,
+                            width: width - 32 - 24,
+                            height: 56,
+                            motion: motion,
+                            style: _sliderStyle(),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              SettingLabel(
-                title: '底栏色渗',
-                subtitle: '主色强度 ${(shell.navTintStrength * 100).round()}%',
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: ClipRect(
-                  child: LiquidGlassSlider(
-                    key: const ValueKey('nav-tint-slider'),
-                    value: shell.navTintStrength.clamp(0, 1),
-                    onChanged: n.setNavTintStrength,
-                    minimumValue: 0,
-                    maximumValue: 1,
-                    activeColor: scheme.primary,
-                    width: width - 32,
-                    height: 56,
-                    motion: motion,
-                    style: _sliderStyle(),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         SliverToBoxAdapter(
@@ -378,6 +422,114 @@ class GlassSettingsPage extends ConsumerWidget {
           distortionWidth: 12,
         ),
       );
+}
+
+/// 霜壳内分区头：与 SettingsGroup header 同语言
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
+      ),
+    );
+  }
+}
+
+/// 渲染材质：液态玻璃切换（外观页 T16 同族：glassStyle/restStyle 双层同色）
+class _GlassModeSegmented extends StatelessWidget {
+  const _GlassModeSegmented({
+    required this.selected,
+    required this.lgMotionOn,
+    required this.navBlurSigma,
+    required this.onPick,
+  });
+
+  final String selected;
+  final bool lgMotionOn;
+  final double navBlurSigma;
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
+    return LiquidGlassSegmented(
+      segments: const ['液态玻璃', '毛玻璃'],
+      selectedIndex: selected == 'lite' ? 1 : 0,
+      onChanged: (i) => onPick(i == 1 ? 'lite' : 'liquid'),
+      width: double.infinity,
+      height: 60,
+      padding: 10,
+      style: LiquidGlassStyle(
+        shape: LiquidGlassShape.continuousRoundedRectangle(
+          cornerRadius: 16,
+          borderWidth: 0,
+          borderColor: Colors.transparent,
+          lightIntensity: 0,
+          borderType: const OpticalBorder(
+            borderSolidity: 0,
+            ambientIntensity: 0,
+          ),
+        ),
+        appearance: LiquidGlassAppearance(
+          color: Colors.transparent,
+          blur: LiquidGlassBlur(
+            sigmaX: navBlurSigma.clamp(0, 20),
+            sigmaY: navBlurSigma.clamp(0, 20),
+          ),
+          shadow: LiquidGlassShadow(blur: 0, opacity: 0, cornerRadius: 16),
+        ),
+        refraction: const LiquidGlassRefraction(
+          distortion: 0.06,
+          distortionWidth: 16,
+          chromaticAberration: 0.001,
+        ),
+      ),
+      pillStyle: LiquidGlassSegmentedPillStyle(
+        glass: lgMotionOn,
+        animated: true,
+        growHeight: lgMotionOn ? 6 : 0,
+        glassStyle: LiquidGlassStyle(
+          appearance: LiquidGlassAppearance(
+            color: pillBase,
+            blur: const LiquidGlassBlur(sigmaX: 1.5, sigmaY: 1.5),
+            shadow: LiquidGlassShadow(
+              blur: 8,
+              opacity: 0.20,
+              inset: 0,
+              cornerRadius: 20,
+            ),
+          ),
+          refraction: const LiquidGlassRefraction(
+            distortion: 0.08,
+            distortionWidth: 12,
+          ),
+        ),
+        // 静止选中态 restStyle 与 glassStyle 同色（T16）
+        restStyle: LiquidGlassStyle(
+          appearance: LiquidGlassAppearance(color: pillBase),
+        ),
+      ),
+      labelStyle: LiquidGlassSegmentedLabelStyle(
+        selectedColor: scheme.onPrimaryContainer,
+        unselectedColor: scheme.onSurfaceVariant,
+        fontSize: 12,
+        selectedFontWeight: FontWeight.w600,
+      ),
+    );
+  }
 }
 
 /// 霜层渐变颜色预设（轻量 swatch，跟随 scheme 取色）
