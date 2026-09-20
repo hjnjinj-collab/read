@@ -75,37 +75,231 @@ class _GlowOverscrollBehavior extends MaterialScrollBehavior {
   }
 }
 
-/// 设置子页外壳：返回 + 标题 + 玻璃分组列表。
+/// 设置顶栏几何：与书架滤镜语言对齐，高度按 Material toolbar。
+class SettingsChrome {
+  SettingsChrome._();
+
+  /// 标题行高度（不含 status bar）
+  static const double headerContentH = 56;
+
+  /// blur 向下延伸的衰减带（只盖内容、不占布局）
+  static const double topBlurExtend = 64;
+
+  /// 滚动显现区间（与书架 _scrollT 同源）
+  static const double scrollRevealPx = 56;
+}
+
+/// 书架同款顶栏：滚动显现的**滤镜色渐变模糊**。
+///
+/// 静止 `scrollT < 0.02` 只画标题行；滚动时
+/// `ShaderMask(dstIn) → BackdropFilter(topBlurSigma) → fog(topTint)`，
+/// 叠层雾渐变 α 随 `scrollT` 浮现。背景层 `IgnorePointer`。
+class SettingsTopChrome extends StatelessWidget {
+  const SettingsTopChrome({
+    super.key,
+    required this.title,
+    required this.scrollT,
+    this.showBack = true,
+  });
+
+  final String title;
+
+  /// 0 静止 → 1 滚动（约 56px 内完成显现）
+  final double scrollT;
+
+  final bool showBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final topPad = MediaQuery.paddingOf(context).top;
+    final disableBlur = MediaQuery.disableAnimationsOf(context);
+    final chromeH = topPad + SettingsChrome.headerContentH;
+
+    final row = SizedBox(
+      height: chromeH,
+      child: Padding(
+        padding: EdgeInsets.only(left: showBack ? 4 : 16, top: topPad),
+        child: Row(
+          children: [
+            if (showBack)
+              BackButton(
+                color: scheme.onSurface,
+              ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).appBarTheme.titleTextStyle?.copyWith(
+                          color: scheme.onSurface,
+                        ) ??
+                    TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.3,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (disableBlur) {
+      return Material(
+        color: scheme.surface.withValues(alpha: scrollT > 0.02 ? 0.92 : 0),
+        child: row,
+      );
+    }
+
+    // 静止：不叠模糊（与书架一致，避免暗色下常显滤镜）
+    if (scrollT < 0.02) {
+      return SizedBox(height: chromeH, child: row);
+    }
+
+    final h = chromeH + SettingsChrome.topBlurExtend;
+    final fog = AppGlass.topTint(scheme);
+    final fogA = scrollT;
+    return SizedBox(
+      height: h,
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            IgnorePointer(
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white,
+                      Colors.white.withValues(alpha: 0.92),
+                      Colors.white.withValues(alpha: 0.72),
+                      Colors.white.withValues(alpha: 0.40),
+                      Colors.white.withValues(alpha: 0.14),
+                      Colors.transparent,
+                    ],
+                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.dstIn,
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(
+                    sigmaX: AppGlass.topBlurSigma,
+                    sigmaY: AppGlass.topBlurSigma,
+                  ),
+                  child: ColoredBox(color: fog),
+                ),
+              ),
+            ),
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      fog.withValues(alpha: 0.58 * fogA),
+                      fog.withValues(alpha: 0.48 * fogA),
+                      fog.withValues(alpha: 0.32 * fogA),
+                      fog.withValues(alpha: 0.16 * fogA),
+                      fog.withValues(alpha: 0.05 * fogA),
+                      Colors.transparent,
+                    ],
+                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
+                  ),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.topCenter,
+              child: row,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 设置页外壳：顶栏滚动渐变模糊 + 玻璃分组列表。
 /// 底栏由 AppShell 提供；本页只负责 chrome 与滚动区。
-class SettingsScaffold extends StatelessWidget {
+/// 顶栏在滚动区外（书架 chrome Stack 同理），避开 ImageFiltered subpass。
+class SettingsScaffold extends StatefulWidget {
   const SettingsScaffold({
     super.key,
     required this.title,
     required this.slivers,
+    this.showBack,
   });
 
   final String title;
   final List<Widget> slivers;
 
+  /// null = 按路由 canPop 自动决定
+  final bool? showBack;
+
+  @override
+  State<SettingsScaffold> createState() => _SettingsScaffoldState();
+}
+
+class _SettingsScaffoldState extends State<SettingsScaffold> {
+  double _scrollT = 0;
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    final metrics = n.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+    final t =
+        (metrics.pixels / SettingsChrome.scrollRevealPx).clamp(0.0, 1.0);
+    if ((t - _scrollT).abs() < 0.01) return false;
+    setState(() => _scrollT = t);
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final topPad = MediaQuery.paddingOf(context).top;
+    final chromeH = topPad + SettingsChrome.headerContentH;
+    final showBack =
+        widget.showBack ?? (ModalRoute.of(context)?.canPop ?? false);
+
     // 透明：渐变页底由 ShellAmbient / 外层壳提供，避免实色盖住
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SettingsBackdrop(
-        child: SettingsGlassScroll(
-          child: CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                title: Text(title),
-                pinned: true,
-                backgroundColor: Colors.transparent,
-                surfaceTintColor: Colors.transparent,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: SettingsGlassScroll(
+                  child: CustomScrollView(
+                    slivers: [
+                      // 顶栏占位：内容可滚入模糊衰减带之下
+                      SliverToBoxAdapter(child: SizedBox(height: chromeH)),
+                      ...widget.slivers,
+                      const SliverToBoxAdapter(child: SizedBox(height: 120)),
+                    ],
+                  ),
+                ),
               ),
-              ...slivers,
-              const SliverToBoxAdapter(child: SizedBox(height: 120)),
-            ],
-          ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SettingsTopChrome(
+                title: widget.title,
+                scrollT: _scrollT,
+                showBack: showBack,
+              ),
+            ),
+          ],
         ),
       ),
     );
