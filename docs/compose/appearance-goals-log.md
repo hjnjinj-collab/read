@@ -59,8 +59,10 @@
 
 ## 当前状态（截至本台账）
 
-- **已收口**：G1 / G2 / G3；G4 的 T1–T14 全部落地且各轮审查 PASS
-- **进行中（本轮 T15）**：
-  1. 明暗模式选中 pill 比例优化（当前 padding 4 → pill 52/60 偏满，参照取色器切换器比例收敛）
-  2. 明暗模式选中色派生化：pill 底 `primaryContainer`、选中文字 `onPrimaryContainer`（可读性配对）
+- **已收口**：G1 / G2 / G3；G4 的 T1–T15 全部落地且各轮审查 PASS
+- **本轮 T15 已交付**：
+  1. 目标台账落库（本文档）
+  2. 明暗分段 pill 比例优化（padding 7 → pill 46/60，与取色器一致）
+  3. 两处切换器选中色派生化（primaryContainer α0.9 / onPrimaryContainer）
+     + shadow cornerRadius 按 pillH/2 派生（23 / 14）
 - **待用户**：`appearance-scheme-preview-picker` 的 T4 真机验收（外观线整体视觉确认）

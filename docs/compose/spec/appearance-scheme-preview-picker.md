@@ -3,7 +3,7 @@ feature: appearance-scheme-preview-picker
 status: delivered
 updated: 2026-09-19
 branch: master
-commits: cdf94df..ac817d6
+commits: cdf94df..3e28afc
 ---
 
 # 明暗/书架容器对齐导航栏尺寸 + 派生色预览 + FlexColorPicker
@@ -22,6 +22,10 @@ crossAlignment 支撑）；自绘 primaryContainer 色码行（条收缩贴内�
 同行。玻璃描边明暗分档（浅 0.5px α0.32 / 深 0.8px α0.28，
 AppGlass.rimWidth 单点）且提为前景层修复深色圆角缺角（内容层非定位
 子节点保 child-sizing）。派生色系 8 角色预览卡实时跟随主题来源。
+目标台账 `docs/compose/appearance-goals-log.md` 落库；明暗分段 pill
+46/60（padding 7）与取色器比例一致，两处切换器选中态
+primaryContainer α0.9 / onPrimaryContainer + shadow cornerRadius
+按 pillH/2 派生（23/14）。
 
 **Verification** — `flutter analyze`：25 issue 全部 PRE-EXISTING，
 改动文件零新增；`flutter test` 主题冒烟 2 PASS；各轮独立审查均三项
@@ -241,5 +245,5 @@ ExcludeSemantics 使取色对话框对读屏不可见。
 - [x] T12: 双切换器去重 + 切换器底衬 + 色码行 primaryContainer — acceptance: 对话框仅一个切换器；切换器有派生色底衬（非霜壳）；色码行 primaryContainer（落地+审查 PASS） (covers: S2 取色器验收修正二)
 - [x] T13: 面板居中 + 切换器瘦身 + 色码行居中 — acceptance: 色板/色轮面板内容水平居中（包内 Column crossAlignment 支撑；末行靠左为包 Wrap 行为待真机）；切换器总高 40 且 pill 纤细；色码行整组居中（落地+审查 PASS） (covers: S2 取色器验收修正三)
 - [x] T14: pill 饱满 + 恢复鼓动 + 色码条收缩居中 — acceptance: pill 28 饱满；切换有液态鼓动且不溢出（峰值 34<36）；色码条紧凑贴内容整体居中（落地+审查 PASS；grow 期接触影可能被壳边轻微裁切待真机） (covers: S2 取色器验收修正四)
-- [ ] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（covers: S2 目标台账与明暗选中态派生化）
+- [x] T15: 目标台账 + 明暗 pill 比例/选中色派生化 — acceptance: 台账 docs/compose/appearance-goals-log.md 落库；明暗 pill 46/60 比例与取色器一致；两处切换器选中态 primaryContainer/onPrimaryContainer（落地+审查 PASS；shadow cornerRadius 已按 pillH/2 派生） (covers: S2 目标台账与明暗选中态派生化)
 - [ ] T4: analyze + test + 审查 + 真机验收 — acceptance: analyze 无新增告警（已达成）；各轮审查 PASS（已达成）；真机确认（待用户执行） (covers: S1 全部)

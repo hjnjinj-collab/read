@@ -336,7 +336,8 @@ class _AppearanceSettingsPageState
                               blur: 8,
                               opacity: 0.20,
                               inset: 0,
-                              cornerRadius: 14,
+                              // 跟随胶囊半径 pillH/2 = 46/2
+                              cornerRadius: 23,
                             ),
                           ),
                           refraction: const LiquidGlassRefraction(
@@ -735,7 +736,8 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                               blur: 8,
                               opacity: 0.20,
                               inset: 0,
-                              cornerRadius: 12,
+                              // 跟随胶囊半径 pillH/2 = 28/2
+                              cornerRadius: 14,
                             ),
                           ),
                           refraction: const LiquidGlassRefraction(
