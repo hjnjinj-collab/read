@@ -62,18 +62,18 @@
       const b = s.book;
       host.innerHTML = `
         <div class="slide">
-          <div class="hero-body">
-            <div class="cover ${b.c}"></div>
-            <div class="hero-meta">
-              <div class="book-name">${b.name}</div>
-              <div class="book-sub">${b.author}</div>
-              <div class="book-chapter">${b.ch}</div>
-              <button type="button" class="cta">继续阅读</button>
+          <div class="poster-row" style="margin:0 -14px;padding:12px 14px;min-height:100px;border-radius:0;position:relative;overflow:hidden">
+            <div style="position:absolute;inset:0;background:
+              linear-gradient(90deg,rgba(0,0,0,0.55),rgba(0,0,0,0.2) 60%,transparent),
+              linear-gradient(145deg,#2a4a3a,#1a3028 45%,#3a5068)"></div>
+            <div class="cover ${b.c}" style="position:relative;box-shadow:0 3px 10px rgba(0,0,0,0.4)"></div>
+            <div class="poster-meta" style="position:relative">
+              <div class="badge">继续阅读</div>
+              <div class="name">${b.name}</div>
+              <div class="ch">${b.ch}</div>
+              <div class="pbar"><i style="width:${b.pct}%"></i></div>
             </div>
-          </div>
-          <div class="hero-glow">
-            <i class="track-line"></i>
-            <i class="fill-line" style="width:${b.pct}%"></i>
+            <button type="button" class="poster-cta" style="position:relative">继续</button>
           </div>
         </div>`;
     }

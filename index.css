@@ -179,12 +179,63 @@ html, body {
   padding: 8px 10px; border-left: 3px solid var(--primary-dim);
   background: rgba(255,255,255,0.03); border-radius: 0 8px 8px 0;
 }
-.thin-continue {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+/* Poster continue / hero continue — 海报语言 */
+.poster-card {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: var(--gap);
+  min-height: 108px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
 }
-.thin-meta { flex: 1; min-width: 0; }
-.thin-title { font-size: 14px; font-weight: 700; }
-.thin-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.poster-card .poster-bg {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.28) 55%, rgba(0,0,0,0.08) 100%),
+    linear-gradient(0deg, rgba(90,120,100,0.45), transparent 70%),
+    linear-gradient(145deg, #2a4a3a, #1a3028 40%, #3a5068);
+}
+.poster-card .poster-row {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  min-height: 108px;
+}
+.poster-card .cover { box-shadow: 0 3px 10px rgba(0,0,0,0.4); }
+.poster-meta { flex: 1; min-width: 0; color: #fff; }
+.poster-meta .badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.1px;
+  color: rgba(255,255,255,0.75);
+}
+.poster-meta .name {
+  font-size: 16px; font-weight: 800; margin-top: 2px;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.poster-meta .ch {
+  font-size: 12px; color: rgba(255,255,255,0.82); margin-top: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.poster-meta .pbar {
+  margin-top: 6px; height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.22); overflow: hidden;
+}
+.poster-meta .pbar i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #8fd4b0, #fff);
+  border-radius: 2px;
+}
+.poster-cta {
+  border: 0; cursor: pointer;
+  background: rgba(255,255,255,0.92);
+  color: #1a3028;
+  font-weight: 800; font-size: 13px;
+  padding: 10px 14px; border-radius: 999px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
 .grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding-top: 4px;
 }

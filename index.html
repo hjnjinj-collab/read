@@ -76,13 +76,18 @@
 
     <main class="page" id="page-shelf" data-page="shelf">
       <div class="shelf-hint">书架 = 书库 + 薄续读条（已定稿，Flutter 落地）</div>
-      <section class="card thin-continue" id="thinContinue">
-        <div class="cover c1 tiny"></div>
-        <div class="thin-meta">
-          <div class="thin-title">雪中悍刀行</div>
-          <div class="thin-sub">第 128 章 · 42%</div>
+      <section class="poster-card" id="thinContinue">
+        <div class="poster-bg"></div>
+        <div class="poster-row">
+          <div class="cover c1 tiny"></div>
+          <div class="poster-meta">
+            <div class="badge">继续阅读</div>
+            <div class="name">雪中悍刀行</div>
+            <div class="ch">第 128 章 · 风雪夜归人</div>
+            <div class="pbar"><i style="width:42%"></i></div>
+          </div>
+          <button type="button" class="poster-cta">继续</button>
         </div>
-        <button type="button" class="cta small">继续</button>
       </section>
       <div class="grid" id="shelfGrid"></div>
     </main>
