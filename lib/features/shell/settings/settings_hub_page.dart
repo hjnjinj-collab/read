@@ -17,6 +17,7 @@ class SettingsHubPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final shell = ref.watch(shellSettingsProvider);
+    final scheme = Theme.of(context).colorScheme;
     final versionAsync = ref.watch(appVersionStringProvider);
     final version = versionAsync.when(
       data: (v) => v,
@@ -33,6 +34,7 @@ class SettingsHubPage extends ConsumerWidget {
             SettingsGroup(
               float: true,
               header: '个性化',
+              accent: scheme.primary,
               children: [
                 SettingNavRow(
                   icon: AppIcons.grid,
@@ -67,6 +69,7 @@ class SettingsHubPage extends ConsumerWidget {
             SettingsGroup(
               float: true,
               header: '阅读与数据',
+              accent: scheme.tertiary,
               children: [
                 SettingNavRow(
                   icon: AppIcons.bookshelf,
@@ -101,6 +104,7 @@ class SettingsHubPage extends ConsumerWidget {
             SettingsGroup(
               float: true,
               header: '隐私与关于',
+              accent: scheme.secondary,
               children: [
                 SettingNavRow(
                   icon: Icons.lock_rounded,

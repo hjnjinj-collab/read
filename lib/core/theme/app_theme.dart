@@ -394,6 +394,9 @@ class AppGlass {
   /// 底栏液态玻璃：更高圆角 + 内侧高光
   static const double navBarRadius = 32;
 
+  /// 设置组卡圆角：根页 float 岛与二级霜壳 **共用**，避免圆角不协调
+  static const double settingsCardRadius = 16;
+
   static const double bottomAmbientHeight = 160;
 
   /// 双层模糊允许较高 sigma；性能靠「封面/主色只读缓存」保证

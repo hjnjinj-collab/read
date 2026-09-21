@@ -418,7 +418,7 @@ class SettingsFrostShell extends StatelessWidget {
   const SettingsFrostShell({
     super.key,
     required this.child,
-    this.radius = 16,
+    this.radius = AppGlass.settingsCardRadius,
     this.blurSigma = 12,
     this.dir = AmbientDir.tlbr,
     this.showShadow = true,
@@ -555,7 +555,7 @@ class SettingsFrostGate extends ConsumerWidget {
   const SettingsFrostGate({
     super.key,
     required this.child,
-    this.radius = 16,
+    this.radius = AppGlass.settingsCardRadius,
     this.blurSigma = 0,
     this.dir,
     this.colorA,
@@ -666,6 +666,7 @@ class SettingsGroup extends ConsumerWidget {
     this.splitItems = false,
     this.itemGap = 12,
     this.float = false,
+    this.accent,
   });
 
   final String? header;
@@ -680,11 +681,15 @@ class SettingsGroup extends ConsumerWidget {
   /// true = 悬浮霜层垫底 + 折中版子栏
   final bool float;
 
+  /// 章节色带（B）：分区角色色；null = primary
+  final Color? accent;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final shell = ref.watch(shellSettingsProvider);
     final frostDir = AmbientDir.parse(shell.frostDir);
+    final band = accent ?? scheme.primary;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
@@ -704,15 +709,18 @@ class SettingsGroup extends ConsumerWidget {
                           letterSpacing: 0.4,
                         ),
                   ),
-                  const SizedBox(height: 6),
-                  // 纸页浮雕：分区装饰短线（渐变），替代线框感
+                  const SizedBox(height: 8),
+                  // 章节色带：角色色渐变短线
                   Container(
-                    height: 3,
-                    width: 36,
+                    height: 4,
+                    width: 44,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(2),
                       gradient: LinearGradient(
-                        colors: [scheme.primary, scheme.tertiary],
+                        colors: [
+                          band,
+                          band.withValues(alpha: 0.25),
+                        ],
                       ),
                     ),
                   ),
@@ -722,10 +730,10 @@ class SettingsGroup extends ConsumerWidget {
           if (splitItems)
             for (var i = 0; i < children.length; i++) ...[
               if (i > 0) SizedBox(height: itemGap),
-              _wrapCard(context, scheme, [children[i]], frostDir, shell),
+              _wrapCard(context, scheme, [children[i]], frostDir, shell, band),
             ]
           else
-            _wrapCard(context, scheme, children, frostDir, shell),
+            _wrapCard(context, scheme, children, frostDir, shell, band),
         ],
       ),
     );
@@ -737,9 +745,10 @@ class SettingsGroup extends ConsumerWidget {
     List<Widget> rows,
     AmbientDir frostDir,
     ShellSettings shell,
+    Color accent,
   ) {
     if (float) {
-      return _floatGrouped(context, scheme, rows, frostDir, shell);
+      return _floatGrouped(context, scheme, rows, frostDir, shell, accent);
     }
     if (splitItems) {
       return SettingsFrostShell(
@@ -767,6 +776,7 @@ class SettingsGroup extends ConsumerWidget {
     List<Widget> rows,
     AmbientDir frostDir,
     ShellSettings shell,
+    Color accent,
   ) {
     final colorA =
         shell.frostGradA != null ? Color(shell.frostGradA!) : null;
@@ -779,10 +789,11 @@ class SettingsGroup extends ConsumerWidget {
       colorA: colorA,
       colorB: colorB,
       gradDepth: shell.frostGradDepth,
-      // 连续岛：无行缝、大圆角、无行描边
+      // 连续岛：与二级页 settingsCardRadius 对齐；组内装饰条见 body
       rowGap: 0,
-      rowRadius: 26,
+      rowRadius: AppGlass.settingsCardRadius,
       showRowBorder: false,
+      accent: accent,
     );
   }
 
@@ -819,12 +830,13 @@ class SettingsFrostGroup extends StatefulWidget {
     this.dir = AmbientDir.tlbr,
     this.enabled = true,
     this.rowGap = AppGlass.floatRowGap,
-    this.rowRadius = 12,
+    this.rowRadius = AppGlass.settingsCardRadius,
     this.blurSigma = 10,
     this.colorA,
     this.colorB,
     this.gradDepth = 1.0,
     this.showRowBorder = true,
+    this.accent,
   });
 
   final List<Widget> rows;
@@ -837,6 +849,7 @@ class SettingsFrostGroup extends StatefulWidget {
   final Color? colorB;
   final double gradDepth;
   final bool showRowBorder;
+  final Color? accent;
 
   @override
   State<SettingsFrostGroup> createState() => _SettingsFrostGroupState();
@@ -971,8 +984,32 @@ class _SettingsFrostGroupState extends State<SettingsFrostGroup> {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 章节色带（B）：组卡顶缘角色色
+        if (continuous && widget.accent != null)
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  widget.accent!,
+                  widget.accent!.withValues(alpha: 0.2),
+                ],
+              ),
+            ),
+          ),
         for (var i = 0; i < _n; i++) ...[
           if (i > 0 && widget.rowGap > 0) SizedBox(height: widget.rowGap),
+          // 组内装饰条（连续卡）：缩进对齐文字，不吃满宽
+          if (i > 0 && continuous)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Divider(
+                height: 1,
+                thickness: 1,
+                color: (widget.accent ?? scheme.primary)
+                    .withValues(alpha: 0.14),
+              ),
+            ),
           SettingsRowShell(
             key: _keys[i],
             borderRadius: continuous
