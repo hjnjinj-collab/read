@@ -523,19 +523,26 @@ class _LiquidValueSegmented extends StatelessWidget {
               pillStyle: LiquidGlassSegmentedPillStyle(
                 glass: lgMotionOn,
                 animated: true,
-                // 裁切下保留轻微鼓动；关闭果冻时为 0
-                growHeight: lgMotionOn ? 2 : 0,
+                // 恢复鼓动幅度：包内 morph 在轨道高度内完成
+                // （40→46 < 60），ClipRRect 只拦出轨外泄，不吞峰
+                growHeight: lgMotionOn ? 6 : 0,
                 glassStyle: LiquidGlassStyle(
                   shape: pillShape,
                   appearance: LiquidGlassAppearance(
                     color: pillBase,
-                    // pill 不再叠 blur/shadow，避免渗出轨道
-                    blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
-                    shadow: null,
+                    // 动画态保留轻量玻璃感；blur/shadow 由外层 Clip 兜住
+                    blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
+                    shadow: LiquidGlassShadow(
+                      blur: 8,
+                      opacity: 0.14,
+                      inset: 0,
+                      cornerRadius: pillR,
+                    ),
                   ),
                   refraction: const LiquidGlassRefraction(
-                    distortion: 0.04,
-                    distortionWidth: 8,
+                    distortion: 0.08,
+                    distortionWidth: 12,
+                    chromaticAberration: 0.001,
                   ),
                 ),
                 restStyle: LiquidGlassStyle(
