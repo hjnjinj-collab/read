@@ -10,38 +10,34 @@ commits: 3ec3693..HEAD
 
 ## Report
 
-**What was built** — 六组霜壳跟随 `frostOn`；液态分段：外轨 R20 +
-内 pill R12 嵌套；**前景 rim**（T9 层序：`Positioned.fill` +
-`IgnorePointer`，浅 1.0/α0.55 · 深 1.2/α0.40），包内 border 关闭，
-避免 Lens/Clip 边缘吃掉圆角描边。pill 仍为 lerp surface α0.30。
+**What was built** — 分段/滑杆内容层 `ClipRRect` 锁模糊（包内 Stack
+为 `Clip.none`，不裁会外泄）；pill/轨道 blur+shadow 清零；外轨 R16、
+内 pill R10；前景 rim 细腻档（浅 0.6/α0.38 · 深 0.8/α0.30）且仍在
+Clip 之外（T9）。frostOn 联动与 pill α0.30 契约保留。
 
-**Bug 依据** — `appearance-scheme-preview-picker` T9 / 工程约束：
-rim 必须画在模糊层之上，否则圆角视觉缺角。
-
-**Verification** — analyze 零 issue；审查对照 T9 + 圆角嵌套 PASS。
+**Verification** — analyze 零 issue；审查 Clip/rim/T9 层序 PASS。
 
 **Journey log** —
-- 包内 shape.border 不可靠作唯一外轮廓——与 FrostShell 同款前景 rim。
-- glass=true 时静止仍画 restStyle——glass/rest **shape 都要设**。
-- 内 pill 圆角 = outerR − padding（clamp ≥12），勿用任意全胶囊。
+- `LiquidGlassSegmented` 默认 `Clip.none` + 可选 blur/shadow → 必须外层 ClipRRect。
+- rim 必须在 Clip **兄弟层**，不能进裁切内。
+- `Appearance.copyWith` 清不掉 shadow，要新建 appearance。
 
 ## [S1] Problem
 
-分段外轮廓弱/仅四角可见；内 pill 圆角与外轨不协调。（历史：frostOn
-未联动二级页、rest 过实、嵌套 BF 等已修。）
+模糊泄露到霜壳；描边偏重、圆角不够细腻。
 
 ## [S2] Design
 
-- outerR 20 / pad 10 / pillR 12；glass+rest 同 shape
-- 前景 rim T9 层序；包 border 关
-- frostOn true=FrostShell(0) / false=RowShell+floatRowFill
+- ClipRRect(16) 包分段与滑杆；blur 0 / shadow null；grow 2/0
+- 前景 rim 细腻档在 Clip 外
+- pill lerp α0.30；frostOn 分支不变
 
 ## [S3] Out of Scope
 
-- 外观页切换器、底栏、包源码
+- 外观页 grow/blur、底栏、包源码
 
 ## Tasks
 
-- [x] T1: pill 圆角嵌套 + 前景描边 (covers: S2)
+- [x] T1: 分段/滑杆裁切 + 细腻 rim (covers: S2)
 - [x] T2: 验证 — analyze + 审查 PASS (covers: S2)
-- [x] 历史: frostOn 联动、压淡、嵌套 BF、全页霜壳等
+- [x] 历史: frostOn、前景 rim T9、压淡、全页霜壳等
