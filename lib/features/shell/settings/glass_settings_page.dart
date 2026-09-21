@@ -580,38 +580,14 @@ class _LiquidValueSegmented extends StatelessWidget {
                     },
             ),
           ),
-          // B：前景 bevel 描边（Clip 之外整圈可见）——上亮下暗，倒角立体
+          // B：前景 bevel（Clip 外）。注意：BoxDecoration 圆角不能配
+          // 非均匀 BorderSide 颜色 → 必须用 CustomPaint 画渐变描边
           Positioned.fill(
             child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_outerR),
-                  border: Border(
-                    top: BorderSide(
-                      width: light ? 0.9 : 1.1,
-                      color: Colors.white.withValues(
-                        alpha: light ? 0.55 : 0.40,
-                      ),
-                    ),
-                    bottom: BorderSide(
-                      width: light ? 0.9 : 1.1,
-                      color: Colors.black.withValues(
-                        alpha: light ? 0.10 : 0.22,
-                      ),
-                    ),
-                    left: BorderSide(
-                      width: light ? 0.7 : 0.9,
-                      color: Colors.white.withValues(
-                        alpha: light ? 0.28 : 0.20,
-                      ),
-                    ),
-                    right: BorderSide(
-                      width: light ? 0.7 : 0.9,
-                      color: Colors.white.withValues(
-                        alpha: light ? 0.28 : 0.20,
-                      ),
-                    ),
-                  ),
+              child: CustomPaint(
+                painter: _BevelRimPainter(
+                  radius: _outerR,
+                  light: light,
                 ),
               ),
             ),
@@ -620,6 +596,41 @@ class _LiquidValueSegmented extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 圆角 bevel 描边：上亮侧中下暗（BoxDecoration 无法非均匀色+圆角）
+class _BevelRimPainter extends CustomPainter {
+  _BevelRimPainter({required this.radius, required this.light});
+
+  final double radius;
+  final bool light;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = light ? 0.9 : 1.1;
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.white.withValues(alpha: light ? 0.55 : 0.40),
+          Colors.white.withValues(alpha: light ? 0.28 : 0.20),
+          Colors.black.withValues(alpha: light ? 0.10 : 0.22),
+        ],
+        stops: const [0, 0.45, 1],
+      ).createShader(rrect.outerRect);
+    canvas.drawRRect(rrect.deflate(stroke / 2), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BevelRimPainter oldDelegate) =>
+      oldDelegate.light != light || oldDelegate.radius != radius;
 }
 
 /// 霜层渐变颜色预设（轻量 swatch，跟随 scheme 取色）
