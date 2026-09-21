@@ -86,6 +86,7 @@ class GlassSettingsPage extends ConsumerWidget {
       required List<String> values,
       required String selected,
       required ValueChanged<String> onPick,
+      List<IconData>? icons,
       double bottomPad = 14,
     }) {
       return Padding(
@@ -96,10 +97,20 @@ class GlassSettingsPage extends ConsumerWidget {
           selected: selected,
           lgMotionOn: shell.lgMotionOn,
           navBlurSigma: shell.navBlurSigma,
+          icons: icons,
           onPick: onPick,
         ),
       );
     }
+
+    // 方向枚举：仅图标（文字「左上↘右下」会溢出静止 pill，且 ↘ 字形不稳）
+    const dirValues = ['tlbr', 'trbl', 'top', 'left'];
+    const dirIcons = [
+      Icons.south_east_rounded, // 左上→右下
+      Icons.south_west_rounded, // 右上→左下
+      Icons.south_rounded, // 从上到下
+      Icons.east_rounded, // 从左到右
+    ];
 
     return SettingsScaffold(
       title: '材质与玻璃',
@@ -201,9 +212,10 @@ class GlassSettingsPage extends ConsumerWidget {
               subtitle: AmbientDir.parse(shell.ambientDir).label,
             ),
             valueSeg(
-              segments: const ['左上↘右下', '右上↘左下', '上下', '左右'],
-              values: const ['tlbr', 'trbl', 'top', 'left'],
+              segments: const ['', '', '', ''],
+              values: dirValues,
               selected: shell.ambientDir,
+              icons: dirIcons,
               onPick: n.setAmbientDir,
               bottomPad: 8,
             ),
@@ -236,9 +248,10 @@ class GlassSettingsPage extends ConsumerWidget {
               subtitle: AmbientDir.parse(shell.frostDir).label,
             ),
             valueSeg(
-              segments: const ['左上↘右下', '右上↘左下', '上下', '左右'],
-              values: const ['tlbr', 'trbl', 'top', 'left'],
+              segments: const ['', '', '', ''],
+              values: dirValues,
               selected: shell.frostDir,
+              icons: dirIcons,
               onPick: n.setFrostDir,
             ),
             const Padding(
@@ -436,6 +449,7 @@ class _LiquidValueSegmented extends StatelessWidget {
     required this.lgMotionOn,
     required this.navBlurSigma,
     required this.onPick,
+    this.icons,
   });
 
   final List<String> segments;
@@ -446,6 +460,9 @@ class _LiquidValueSegmented extends StatelessWidget {
   /// 保留参数以兼容调用方；设置页轨道**不使用**（见类注释）
   final double navBlurSigma;
   final ValueChanged<String> onPick;
+
+  /// 非空时用图标代替文字（方向等短标签，防溢出 pill）
+  final List<IconData>? icons;
 
   /// 细腻外轨：略小于 20，描边更贴霜壳语言
   static const double _outerR = 16;
@@ -525,6 +542,18 @@ class _LiquidValueSegmented extends StatelessWidget {
                 fontSize: 12,
                 selectedFontWeight: FontWeight.w600,
               ),
+              segmentBuilder: icons == null
+                  ? null
+                  : (context, i, selectedSeg, color) {
+                      final data = icons![i.clamp(0, icons!.length - 1)];
+                      return Center(
+                        child: Icon(
+                          data,
+                          size: 22,
+                          color: color,
+                        ),
+                      );
+                    },
             ),
           ),
           // 前景 rim（Clip 之外）：细腻档，整圈圆角完整
