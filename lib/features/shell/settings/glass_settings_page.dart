@@ -511,9 +511,12 @@ class _LiquidValueSegmented extends StatelessWidget {
               style: LiquidGlassStyle(
                 shape: LiquidGlassShape.continuousRoundedRectangle(
                   cornerRadius: _outerR,
-                  borderWidth: 0,
-                  borderColor: Colors.transparent,
-                  lightIntensity: 0,
+                  // A：对齐底栏光学边（立体倒角），Lens 内高光
+                  borderWidth: 1.0,
+                  borderColor: Colors.white.withValues(
+                    alpha: light ? 0.42 : 0.24,
+                  ),
+                  lightIntensity: 1.0,
                 ),
                 appearance: LiquidGlassAppearance(
                   color: Colors.transparent,
@@ -521,9 +524,9 @@ class _LiquidValueSegmented extends StatelessWidget {
                   shadow: null,
                 ),
                 refraction: const LiquidGlassRefraction(
-                  distortion: 0.03,
-                  distortionWidth: 10,
-                  chromaticAberration: 0,
+                  distortion: 0.05,
+                  distortionWidth: 14,
+                  chromaticAberration: 0.001,
                 ),
               ),
               pillStyle: LiquidGlassSegmentedPillStyle(
@@ -577,16 +580,36 @@ class _LiquidValueSegmented extends StatelessWidget {
                     },
             ),
           ),
-          // 前景 rim（Clip 之外）：细腻档，整圈圆角完整
+          // B：前景 bevel 描边（Clip 之外整圈可见）——上亮下暗，倒角立体
           Positioned.fill(
             child: IgnorePointer(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(_outerR),
-                  border: Border.all(
-                    width: light ? 0.6 : 0.8,
-                    color: Colors.white.withValues(
-                      alpha: light ? 0.38 : 0.30,
+                  border: Border(
+                    top: BorderSide(
+                      width: light ? 0.9 : 1.1,
+                      color: Colors.white.withValues(
+                        alpha: light ? 0.55 : 0.40,
+                      ),
+                    ),
+                    bottom: BorderSide(
+                      width: light ? 0.9 : 1.1,
+                      color: Colors.black.withValues(
+                        alpha: light ? 0.10 : 0.22,
+                      ),
+                    ),
+                    left: BorderSide(
+                      width: light ? 0.7 : 0.9,
+                      color: Colors.white.withValues(
+                        alpha: light ? 0.28 : 0.20,
+                      ),
+                    ),
+                    right: BorderSide(
+                      width: light ? 0.7 : 0.9,
+                      color: Colors.white.withValues(
+                        alpha: light ? 0.28 : 0.20,
+                      ),
                     ),
                   ),
                 ),
