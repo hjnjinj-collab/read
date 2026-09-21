@@ -38,13 +38,16 @@ class GlassSettingsPage extends ConsumerWidget {
       required String header,
       required List<Widget> children,
     }) {
-      return _FrostSection(
-        header: header,
-        dir: frostDir,
-        colorA: frostA,
-        colorB: frostB,
-        depth: frostDepth,
-        children: children,
+      // SettingsScaffold.slivers 只接受 Sliver；箱式分组必须包一层
+      return SliverToBoxAdapter(
+        child: _FrostSection(
+          header: header,
+          dir: frostDir,
+          colorA: frostA,
+          colorB: frostB,
+          depth: frostDepth,
+          children: children,
+        ),
       );
     }
 
@@ -402,6 +405,9 @@ class _FrostSection extends StatelessWidget {
             colorB: colorB,
             gradDepth: depth,
             showShadow: false,
+            // 内层含 Liquid Lens/Slider：壳体只留渐变+rim，
+            // 不叠 BackdropFilter——嵌套 BF 会在 Impeller 下纹理错乱
+            blurSigma: 0,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: children,
@@ -413,7 +419,9 @@ class _FrostSection extends StatelessWidget {
   }
 }
 
-/// 液态枚举切换：外观页 T16 同族（glassStyle/restStyle 双层同色）
+/// 液态枚举切换：半透明派生色 pill（真机：α0.9 过实会盖住折射）。
+/// 轨道不叠 blur（设置页勿绑底栏 navBlurSigma）；壳体 blurSigma=0，
+/// 避免 FrostShell BackdropFilter × Lens 嵌套导致纹理错乱。
 class _LiquidValueSegmented extends StatelessWidget {
   const _LiquidValueSegmented({
     required this.segments,
@@ -428,13 +436,16 @@ class _LiquidValueSegmented extends StatelessWidget {
   final List<String> values;
   final String selected;
   final bool lgMotionOn;
+
+  /// 保留参数以兼容调用方；设置页轨道**不使用**（见类注释）
   final double navBlurSigma;
   final ValueChanged<String> onPick;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
+    // 静止/动画同色且半透明：玻璃折射透得出来，字用 primary 保证可读
+    final pillBase = scheme.primaryContainer.withValues(alpha: 0.55);
     final idx = values.indexOf(selected);
     return LiquidGlassSegmented(
       segments: segments,
@@ -458,44 +469,47 @@ class _LiquidValueSegmented extends StatelessWidget {
         ),
         appearance: LiquidGlassAppearance(
           color: Colors.transparent,
-          blur: LiquidGlassBlur(
-            sigmaX: navBlurSigma.clamp(0, 20),
-            sigmaY: navBlurSigma.clamp(0, 20),
-          ),
+          // 轨道零模糊：整条再开 Lens 会与 pill 叠采样
+          blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
           shadow: LiquidGlassShadow(blur: 0, opacity: 0, cornerRadius: 16),
         ),
         refraction: const LiquidGlassRefraction(
-          distortion: 0.06,
-          distortionWidth: 16,
-          chromaticAberration: 0.001,
+          distortion: 0.04,
+          distortionWidth: 12,
+          chromaticAberration: 0,
         ),
       ),
       pillStyle: LiquidGlassSegmentedPillStyle(
         glass: lgMotionOn,
         animated: true,
-        growHeight: lgMotionOn ? 6 : 0,
+        // 收敛鼓动幅度，降低 Clip/定位下的偏移观感
+        growHeight: lgMotionOn ? 4 : 0,
         glassStyle: LiquidGlassStyle(
           appearance: LiquidGlassAppearance(
             color: pillBase,
-            blur: const LiquidGlassBlur(sigmaX: 1.5, sigmaY: 1.5),
+            blur: const LiquidGlassBlur(sigmaX: 0.8, sigmaY: 0.8),
             shadow: LiquidGlassShadow(
-              blur: 8,
-              opacity: 0.20,
+              blur: 6,
+              opacity: 0.12,
               inset: 0,
               cornerRadius: 20,
             ),
           ),
           refraction: const LiquidGlassRefraction(
-            distortion: 0.08,
-            distortionWidth: 12,
+            distortion: 0.06,
+            distortionWidth: 10,
           ),
         ),
+        // 静止与动画同色半透明，避免回落实色/白 pill
         restStyle: LiquidGlassStyle(
-          appearance: LiquidGlassAppearance(color: pillBase),
+          appearance: LiquidGlassAppearance(
+            color: pillBase,
+            blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
+          ),
         ),
       ),
       labelStyle: LiquidGlassSegmentedLabelStyle(
-        selectedColor: scheme.onPrimaryContainer,
+        selectedColor: scheme.primary,
         unselectedColor: scheme.onSurfaceVariant,
         fontSize: 12,
         selectedFontWeight: FontWeight.w600,

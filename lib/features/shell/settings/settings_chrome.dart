@@ -438,6 +438,29 @@ class SettingsFrostShell extends StatelessWidget {
   final Color? colorB;
   final double gradDepth;
 
+  /// 渐变填色 + 透明 Material（有/无 BackdropFilter 共用）
+  Widget _frostFill({
+    required Alignment begin,
+    required Alignment end,
+    required List<Color> stops,
+    required Widget child,
+  }) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: begin,
+          end: end,
+          colors: stops,
+          stops: const [0, 0.48, 1],
+        ),
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -483,26 +506,28 @@ class SettingsFrostShell extends StatelessWidget {
             // 模糊 + 渐变层：非定位子节点，壳体由内容撑起
             // （Stack 全定位子节点会取 biggest，在 Column/Dialog
             // 的无界或松弛高度下崩溃/撑满，不可用）
-            BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: blurSigma,
-                sigmaY: blurSigma,
-              ),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: begin,
-                    end: end,
-                    colors: stops,
-                    stops: const [0, 0.48, 1],
-                  ),
+            // blurSigma<=0 时**不要**挂 BackdropFilter：Impeller 下
+            // 与内层 Liquid Lens 嵌套 BF 会纹理错乱/闪黑（sigma=0 仍是一层 BF）
+            if (blurSigma > 0)
+              BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: blurSigma,
+                  sigmaY: blurSigma,
                 ),
-                child: Material(
-                  type: MaterialType.transparency,
+                child: _frostFill(
+                  begin: begin,
+                  end: end,
+                  stops: stops,
                   child: child,
                 ),
+              )
+            else
+              _frostFill(
+                begin: begin,
+                end: end,
+                stops: stops,
+                child: child,
               ),
-            ),
             // 前景描边层：画在模糊/渐变之上。BackdropFilter 的采样在
             // 裁切边缘有一圈半透明带，描边若画在其下，圆角弧线处会被
             // 吃掉（视觉"缺一角"）；提到前景后整圈 rim 完整可见。

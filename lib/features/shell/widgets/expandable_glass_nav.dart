@@ -86,16 +86,23 @@ class ExpandableGlassNav extends StatelessWidget {
     // 选中 pill 派生色底：glassStyle/restStyle 双层同色（设置页 T16 同语言）
     final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
     final circle = height;
-    // 父级已 pad 16；展开时右侧吃满剩余宽，与左圆键只留 8px
-    final total = (MediaQuery.sizeOf(context).width - 32).clamp(280.0, 480.0);
+    // 父级 AppShell 左右 pad 16。用**真实可用宽**计算，禁止 clamp 抬高后
+    // 与 Row constraint 脱节（窄窗 Windows 曾溢出 9.6px：196+64>250.4）。
+    final available = MediaQuery.sizeOf(context).width - 32;
     const tightGap = 8.0;
-    final panelW = (total - circle - tightGap).clamp(_barW, total);
+    // 收起态：主胶囊 + 右圆键必须塞进 available
+    var barW = (available - circle - tightGap).clamp(120.0, _barW);
+    if (barW + circle > available) {
+      barW = (available - circle - 4).clamp(80.0, _barW);
+    }
+    // 展开态：左圆键 + gap + 面板
+    final panelW = (available - circle - tightGap).clamp(120.0, available);
 
     final mainBar = LiquidGlassSegmented(
       segments: const ['书架', '书源'],
       selectedIndex: selectedIndex.clamp(0, 1),
       onChanged: onChanged,
-      width: _barW,
+      width: barW,
       height: height - 4,
       style: barStyle,
       pillStyle: _pill(12, pillBase),
@@ -199,7 +206,7 @@ class ExpandableGlassNav extends StatelessWidget {
               duration: const Duration(milliseconds: 320),
               curve: Curves.easeOutCubic,
               alignment: expanded ? Alignment.center : Alignment.centerLeft,
-              width: expanded ? circle : _barW,
+              width: expanded ? circle : barW,
               height: height,
               child: expanded ? homeCircle : mainBar,
             ),
