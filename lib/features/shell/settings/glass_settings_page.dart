@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 // ignore: implementation_imports
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
+import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart' show AppGlass;
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
@@ -87,6 +89,7 @@ class GlassSettingsPage extends ConsumerWidget {
       required String selected,
       required ValueChanged<String> onPick,
       List<IconData>? icons,
+      List<double>? iconAngles,
       double bottomPad = 14,
     }) {
       return Padding(
@@ -98,19 +101,14 @@ class GlassSettingsPage extends ConsumerWidget {
           lgMotionOn: shell.lgMotionOn,
           navBlurSigma: shell.navBlurSigma,
           icons: icons,
+          iconAngles: iconAngles,
           onPick: onPick,
         ),
       );
     }
 
-    // 方向枚举：仅图标（文字「左上↘右下」会溢出静止 pill，且 ↘ 字形不稳）
+    // 方向枚举：Iconsax 轴向箭头；对角用 axis + 旋转（与壳层图标体系一致）
     const dirValues = ['tlbr', 'trbl', 'top', 'left'];
-    const dirIcons = [
-      Icons.south_east_rounded, // 左上→右下
-      Icons.south_west_rounded, // 右上→左下
-      Icons.south_rounded, // 从上到下
-      Icons.east_rounded, // 从左到右
-    ];
 
     return SettingsScaffold(
       title: '材质与玻璃',
@@ -215,7 +213,13 @@ class GlassSettingsPage extends ConsumerWidget {
               segments: const ['', '', '', ''],
               values: dirValues,
               selected: shell.ambientDir,
-              icons: dirIcons,
+              icons: const [
+                AppIcons.dirAxis,
+                AppIcons.dirAxis,
+                AppIcons.dirDown,
+                AppIcons.dirAxis,
+              ],
+              iconAngles: const [math.pi / 4, 3 * math.pi / 4, 0, 0],
               onPick: n.setAmbientDir,
               bottomPad: 8,
             ),
@@ -251,7 +255,13 @@ class GlassSettingsPage extends ConsumerWidget {
               segments: const ['', '', '', ''],
               values: dirValues,
               selected: shell.frostDir,
-              icons: dirIcons,
+              icons: const [
+                AppIcons.dirAxis,
+                AppIcons.dirAxis,
+                AppIcons.dirDown,
+                AppIcons.dirAxis,
+              ],
+              iconAngles: const [math.pi / 4, 3 * math.pi / 4, 0, 0],
               onPick: n.setFrostDir,
             ),
             const Padding(
@@ -450,6 +460,7 @@ class _LiquidValueSegmented extends StatelessWidget {
     required this.navBlurSigma,
     required this.onPick,
     this.icons,
+    this.iconAngles,
   });
 
   final List<String> segments;
@@ -463,6 +474,9 @@ class _LiquidValueSegmented extends StatelessWidget {
 
   /// 非空时用图标代替文字（方向等短标签，防溢出 pill）
   final List<IconData>? icons;
+
+  /// 与 [icons] 等长；对角方向用弧度旋转 Iconsax 轴向箭头
+  final List<double>? iconAngles;
 
   /// 细腻外轨：略小于 20，描边更贴霜壳语言
   static const double _outerR = 16;
@@ -546,12 +560,19 @@ class _LiquidValueSegmented extends StatelessWidget {
                   ? null
                   : (context, i, selectedSeg, color) {
                       final data = icons![i.clamp(0, icons!.length - 1)];
+                      final angle = (iconAngles != null &&
+                              i < iconAngles!.length)
+                          ? iconAngles![i]
+                          : 0.0;
+                      final icon = Icon(
+                        data,
+                        size: 22,
+                        color: color,
+                      );
                       return Center(
-                        child: Icon(
-                          data,
-                          size: 22,
-                          color: color,
-                        ),
+                        child: angle == 0
+                            ? icon
+                            : Transform.rotate(angle: angle, child: icon),
                       );
                     },
             ),

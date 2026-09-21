@@ -25,4 +25,8 @@ class AppIcons {
   static const bookshelfLayout = Iconsax.element_3;
   static const colorPicker = Iconsax.color_swatch;
   static const schemeTints = Iconsax.category;
+
+  /// 方向渐变/霜层：轴向用 Iconsax；对角用 [dirAxis] + 旋转角（rad）
+  static const dirAxis = Iconsax.arrow_right_2;
+  static const dirDown = Iconsax.arrow_down_2;
 }
