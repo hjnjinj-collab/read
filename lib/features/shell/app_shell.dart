@@ -10,8 +10,8 @@ import 'providers/shell_settings.dart';
 import 'widgets/expandable_glass_nav.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
-/// 三 Tab 应用壳（StatefulShell 状态保活）。
-/// 底栏：书架/书源 胶囊 + 右侧「更多」（默认直接进设置；在设置时展开面板）。
+/// 四 Tab 应用壳（StatefulShell 状态保活）：0 首页 · 1 书架 · 2 书源 · 3 设置。
+/// 底栏主胶囊 `[首页|书架]` + 更多（默认进设置；在设置展开 `[书源|设置]`）。
 /// Tab 切换：AppShell 自播 Fade+方向轻 slide（shell 不 remount，状态保活）。
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key, required this.navigationShell});
@@ -86,8 +86,9 @@ class _AppShellState extends ConsumerState<AppShell>
             onToggleExpand: () =>
                 setState(() => _navExpanded = !_navExpanded),
             onCollapse: () => setState(() => _navExpanded = false),
-            // 更多→设置：进设置并收起（展开态由 moreCircle 在设置 Tab 内处理）
-            onSettings: () => goBranch(2, collapseNav: true),
+            // 更多→设置：分支 index 3
+            onSettings: () => goBranch(3, collapseNav: true),
+            onSources: () => goBranch(2, collapseNav: true),
             onImport: () => requestBookImport(ref),
             barStyle: _shellFrost(
               scheme,
@@ -204,6 +205,7 @@ class _SolidBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     const items = [
+      (AppIcons.home, '首页'),
       (AppIcons.bookshelf, '书架'),
       (AppIcons.sources, '书源'),
       (AppIcons.settings, '设置'),

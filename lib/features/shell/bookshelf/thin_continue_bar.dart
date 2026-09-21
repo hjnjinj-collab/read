@@ -21,12 +21,16 @@ class ThinContinueBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final cover = CoverStore.fileOf(book.filePath);
     final colors = CoverPalette.cached(book.filePath) ??
         (cover != null
             ? CoverPalette.loadSidecar(book.filePath, cover)
             : null) ??
         CoverPalette.synthetic(book.title);
+    // 派生色按钮：与 rest pill / 设置分段同一套（非纯白）
+    final btnBg = AppGlass.restPillTint(scheme);
+    final btnFg = scheme.onPrimaryContainer;
     final p = progress;
     final hasP = p != null && p.totalChapters > 0;
     final pct = hasP
@@ -194,8 +198,8 @@ class ThinContinueBar extends StatelessWidget {
                       FilledButton(
                         onPressed: onTap,
                         style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white.withValues(alpha: 0.92),
-                          foregroundColor: colors.dark,
+                          backgroundColor: btnBg,
+                          foregroundColor: btnFg,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 14,
                             vertical: 10,

@@ -7,6 +7,7 @@ class AppIcons {
   static const bookshelf = Iconsax.book_1;
   static const sources = Iconsax.cloud;
   static const settings = Iconsax.setting_2;
+  static const home = Iconsax.home_2;
   static const add = Iconsax.add;
   static const importFile = Iconsax.document_upload;
   static const grid = Iconsax.element_3;

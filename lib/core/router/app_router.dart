@@ -10,6 +10,7 @@ import '../../features/shell/app_shell.dart';
 import '../../features/shell/book_sources_page.dart';
 import '../../features/shell/bookshelf/book_cover_card.dart' show kCoverRadius;
 import '../../features/shell/bookshelf/bookshelf_layout.dart';
+import '../../features/shell/home_page.dart';
 import '../../features/shell/bookshelf/bookshelf_page.dart';
 import '../../features/shell/settings/glass_settings_page.dart';
 import '../../features/shell/settings/motion_settings_page.dart';
@@ -19,20 +20,29 @@ import '../../features/shell/settings/settings_hub_page.dart';
 import '../../features/shell/settings/storage_settings_page.dart';
 import '../../core/theme/app_theme.dart';
 
-/// 路由表：StatefulShell 三 Tab（状态保活）+ 全屏阅读/关于。
+/// 路由表：StatefulShell **四 Tab**（首页/书架/书源/设置，状态保活）+ 全屏阅读/关于。
 ///
 /// 转场契约：
-/// - Tab / 书架分支：`NoTransitionPage`（状态保活，无页动画）
+/// - Tab：`NoTransitionPage`；AppShell 自播 Fade+方向 slide
 /// - `/reader`：书架槽位缩放（从哪来 shelfIndex / 去哪 index 0），**禁止**换成层级动画
 /// - 设置子页 / 关于：`AppRouteTransitions.hierarchical`（Fade + 轻 slide，兼容预测返回）
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
-    initialLocation: '/bookshelf',
+    initialLocation: '/home',
     routes: [
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
             AppShell(navigationShell: navigationShell),
         branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/home',
+                pageBuilder: (context, state) =>
+                    const NoTransitionPage(child: HomePage()),
+              ),
+            ],
+          ),
           StatefulShellBranch(
             routes: [
               GoRoute(
