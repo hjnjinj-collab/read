@@ -172,7 +172,8 @@ class AppTheme {
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+          // Android U+ 预测返回：跟手可取消；非 U 回落 FadeForwards
+          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.windows: ZoomPageTransitionsBuilder(),
         },
@@ -420,6 +421,13 @@ class AppMotion {
   static const double readerShrinkEndScale = 0.22;
   /// pop 时 reverse 动画的前 (1 - hold) 段保持不透明，仅末段淡出
   static const double readerShrinkFadeHold = 0.28;
+
+  // 层级路由（设置子页 / 关于）：Fade + 轻 slide；书架/阅读槽位缩放不共用
+  static const Duration routePushDuration = Duration(milliseconds: 300);
+  static const Duration routePopDuration = Duration(milliseconds: 280);
+  static const Curve routeCurve = Curves.easeInOutCubic;
+  static const Offset routeSlideBegin = Offset(0.08, 0);
+
   static const Duration switchDuration = Duration(milliseconds: 260);
   static const Duration staggerStep = Duration(milliseconds: 28);
   static const int staggerMaxItems = 12;

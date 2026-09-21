@@ -19,7 +19,12 @@ import '../../features/shell/settings/settings_hub_page.dart';
 import '../../features/shell/settings/storage_settings_page.dart';
 import '../../core/theme/app_theme.dart';
 
-/// 路由表：StatefulShell 三 Tab（状态保活）+ 全屏阅读/关于
+/// 路由表：StatefulShell 三 Tab（状态保活）+ 全屏阅读/关于。
+///
+/// 转场契约：
+/// - Tab / 书架分支：`NoTransitionPage`（状态保活，无页动画）
+/// - `/reader`：书架槽位缩放（从哪来 shelfIndex / 去哪 index 0），**禁止**换成层级动画
+/// - 设置子页 / 关于：`AppRouteTransitions.hierarchical`（Fade + 轻 slide，兼容预测返回）
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/bookshelf',
@@ -55,36 +60,46 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(
                     path: 'appearance',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      key: state.pageKey,
+                    pageBuilder: (context, state) =>
+                        AppRouteTransitions.hierarchical(
+                      context: context,
+                      state: state,
                       child: const AppearanceSettingsPage(),
                     ),
                   ),
                   GoRoute(
                     path: 'glass',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      key: state.pageKey,
+                    pageBuilder: (context, state) =>
+                        AppRouteTransitions.hierarchical(
+                      context: context,
+                      state: state,
                       child: const GlassSettingsPage(),
                     ),
                   ),
                   GoRoute(
                     path: 'motion',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      key: state.pageKey,
+                    pageBuilder: (context, state) =>
+                        AppRouteTransitions.hierarchical(
+                      context: context,
+                      state: state,
                       child: const MotionSettingsPage(),
                     ),
                   ),
                   GoRoute(
                     path: 'reading',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      key: state.pageKey,
+                    pageBuilder: (context, state) =>
+                        AppRouteTransitions.hierarchical(
+                      context: context,
+                      state: state,
                       child: const ReadingSettingsPage(),
                     ),
                   ),
                   GoRoute(
                     path: 'storage',
-                    pageBuilder: (context, state) => NoTransitionPage(
-                      key: state.pageKey,
+                    pageBuilder: (context, state) =>
+                        AppRouteTransitions.hierarchical(
+                      context: context,
+                      state: state,
                       child: const StorageSettingsPage(),
                     ),
                   ),
@@ -129,11 +144,53 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/about',
-        builder: (context, state) => const AboutPage(),
+        pageBuilder: (context, state) => AppRouteTransitions.hierarchical(
+          context: context,
+          state: state,
+          child: const AboutPage(),
+        ),
       ),
     ],
   );
 });
+
+/// 层级路由转场工厂：设置子页 / 关于。
+/// Fade + 轻微横向 slide；动画完全跟随路由 animation，预测返回可跟手取消。
+class AppRouteTransitions {
+  AppRouteTransitions._();
+
+  static CustomTransitionPage<void> hierarchical({
+    required BuildContext context,
+    required GoRouterState state,
+    required Widget child,
+  }) {
+    final reduce = MediaQuery.disableAnimationsOf(context);
+    return CustomTransitionPage<void>(
+      key: state.pageKey,
+      child: child,
+      transitionDuration:
+          reduce ? Duration.zero : AppMotion.routePushDuration,
+      reverseTransitionDuration:
+          reduce ? Duration.zero : AppMotion.routePopDuration,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: AppMotion.routeCurve,
+          reverseCurve: AppMotion.routeCurve,
+        );
+        final fade = reduce ? const AlwaysStoppedAnimation(1.0) : curved;
+        final slide = Tween<Offset>(
+          begin: reduce ? Offset.zero : AppMotion.routeSlideBegin,
+          end: Offset.zero,
+        ).animate(curved);
+        return FadeTransition(
+          opacity: fade,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
+    );
+  }
+}
 
 /// 阅读页进出：整页向书架槽位缩放 + 淡入淡出。
 /// push：从当前书槽位放大铺满（从哪来）；pop：缩回第一本（去哪）。
