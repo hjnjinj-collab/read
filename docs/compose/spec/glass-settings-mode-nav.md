@@ -10,37 +10,38 @@ commits: 3ec3693..HEAD
 
 ## Report
 
-**What was built** — 材质与玻璃页六组统一霜壳 + 液态分段；静止 pill
-半透明（lerp surface α0.30）；嵌套 BF 跳过；**二级页霜壳跟随
-`shell.frostOn`**（关=轻透 `floatRowFill` 壳，开=渐变 FrostShell）；
-**分段轨道外轮廓** rim 明暗分档（0.42/0.26 + rimWidth）。
+**What was built** — 六组霜壳跟随 `frostOn`；液态分段：外轨 R20 +
+内 pill R12 嵌套；**前景 rim**（T9 层序：`Positioned.fill` +
+`IgnorePointer`，浅 1.0/α0.55 · 深 1.2/α0.40），包内 border 关闭，
+避免 Lens/Clip 边缘吃掉圆角描边。pill 仍为 lerp surface α0.30。
 
-**Verification** — settings analyze 零 issue；本轮审查 Spec/Correctness/
-Consistency 均 PASS、无 critical。真机观感待确认。
+**Bug 依据** — `appearance-scheme-preview-picker` T9 / 工程约束：
+rim 必须画在模糊层之上，否则圆角视觉缺角。
+
+**Verification** — analyze 零 issue；审查对照 T9 + 圆角嵌套 PASS。
 
 **Journey log** —
-- Impeller：`blurSigma=0` 的 BackdropFilter 仍要**条件跳过**。
-- 二级页霜壳必须读 `frostOn`，与根页 float 组同语义。
-- 液态轨道勿 `borderWidth:0`——设置页需要可见外描边。
+- 包内 shape.border 不可靠作唯一外轮廓——与 FrostShell 同款前景 rim。
+- glass=true 时静止仍画 restStyle——glass/rest **shape 都要设**。
+- 内 pill 圆角 = outerR − padding（clamp ≥12），勿用任意全胶囊。
 
 ## [S1] Problem
 
-二级页霜壳未关联「垫底霜层」；液态分段无外轮廓；（历史）嵌套 BF /
-rest 过实。
+分段外轮廓弱/仅四角可见；内 pill 圆角与外轨不协调。（历史：frostOn
+未联动二级页、rest 过实、嵌套 BF 等已修。）
 
 ## [S2] Design
 
-- frostOn true → FrostShell(blurSigma:0)；false → RowShell + floatRowFill
-- 分段轨道：rimWidth + 白 rim α 0.42/0.26
-- pill：lerp(primaryContainer, surface, 0.28) α0.30，glass/rest 同色
+- outerR 20 / pad 10 / pillR 12；glass+rest 同 shape
+- 前景 rim T9 层序；包 border 关
+- frostOn true=FrostShell(0) / false=RowShell+floatRowFill
 
 ## [S3] Out of Scope
 
-- 外观页切换器、底栏 α0.9、包源码
+- 外观页切换器、底栏、包源码
 
 ## Tasks
 
-- [x] T1: frostOn 联动二级页霜壳 (covers: S2)
-- [x] T2: 分段外轮廓 (covers: S2)
-- [x] T3: 验证 — analyze 零新增；审查 PASS (covers: S2)
-- [x] 历史: 全页液态/压淡/嵌套 BF/窄窗 Sliver 等
+- [x] T1: pill 圆角嵌套 + 前景描边 (covers: S2)
+- [x] T2: 验证 — analyze + 审查 PASS (covers: S2)
+- [x] 历史: frostOn 联动、压淡、嵌套 BF、全页霜壳等

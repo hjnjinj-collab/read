@@ -432,9 +432,11 @@ class _FrostSection extends StatelessWidget {
   }
 }
 
-/// 液态枚举切换：半透明派生色 pill（真机：α0.9 过实会盖住折射）。
-/// 轨道不叠 blur（设置页勿绑底栏 navBlurSigma）；壳体 blurSigma=0，
-/// 避免 FrostShell BackdropFilter × Lens 嵌套导致纹理错乱。
+/// 液态枚举切换：半透明派生色 pill。
+///
+/// 圆角：外轨 [outerR] 与内 pill 嵌套（pillR = outerR − padding）。
+/// 描边：包内 border 关闭，**前景层**画 rim（对齐 appearance T9——
+/// Lens/Clip 边缘采样带会吃掉内容层描边，圆角视觉缺角）。
 class _LiquidValueSegmented extends StatelessWidget {
   const _LiquidValueSegmented({
     required this.segments,
@@ -454,13 +456,18 @@ class _LiquidValueSegmented extends StatelessWidget {
   final double navBlurSigma;
   final ValueChanged<String> onPick;
 
+  static const double _outerR = 20;
+  static const double _pad = 10;
+  static const double _height = 60;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    // 静止态包内只画 rest pill（DecoratedBox 直接用 appearance.color）。
-    // 真机反馈 α0.55 仍偏实：再向 surface 混淡 + α0.30，保证半透明观感。
-    // glass/rest 同色，避免动画收尾色跳。
+    final pillH = _height - _pad * 2;
+    // 内悬浮 pill 圆角随外轨适应：outerR − padding，下限 12 避免过方
+    final pillR = (_outerR - _pad).clamp(12.0, pillH / 2);
+    // 静止态包内只画 rest pill。真机：α 过实盖折射 → lerp surface + α0.30
     final pillBase = Color.lerp(
       scheme.primaryContainer,
       scheme.surface,
@@ -468,73 +475,104 @@ class _LiquidValueSegmented extends StatelessWidget {
     )!
         .withValues(alpha: 0.30);
     final idx = values.indexOf(selected);
-    return LiquidGlassSegmented(
-      segments: segments,
-      selectedIndex: idx < 0 ? 0 : idx,
-      onChanged: (i) {
-        if (i >= 0 && i < values.length) onPick(values[i]);
-      },
-      width: double.infinity,
-      height: 60,
-      padding: 10,
-      style: LiquidGlassStyle(
-        shape: LiquidGlassShape.continuousRoundedRectangle(
-          cornerRadius: 16,
-          // 外轮廓：与霜壳 rim 同语言（明暗分档），避免轨道“消失”
-          borderWidth: AppGlass.rimWidth(scheme),
-          borderColor: Colors.white.withValues(alpha: light ? 0.42 : 0.26),
-          lightIntensity: 0.85,
-          borderType: OpticalBorder(
-            borderSolidity: 0.35,
-            ambientIntensity: 0.5,
-          ),
-        ),
-        appearance: LiquidGlassAppearance(
-          color: Colors.transparent,
-          // 轨道零模糊：整条再开 Lens 会与 pill 叠采样
-          blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
-          shadow: LiquidGlassShadow(blur: 0, opacity: 0, cornerRadius: 16),
-        ),
-        refraction: const LiquidGlassRefraction(
-          distortion: 0.04,
-          distortionWidth: 12,
-          chromaticAberration: 0,
-        ),
-      ),
-      pillStyle: LiquidGlassSegmentedPillStyle(
-        glass: lgMotionOn,
-        animated: true,
-        // 收敛鼓动幅度，降低 Clip/定位下的偏移观感
-        growHeight: lgMotionOn ? 4 : 0,
-        glassStyle: LiquidGlassStyle(
-          appearance: LiquidGlassAppearance(
-            color: pillBase,
-            blur: const LiquidGlassBlur(sigmaX: 0.8, sigmaY: 0.8),
-            shadow: LiquidGlassShadow(
-              blur: 6,
-              opacity: 0.12,
-              inset: 0,
-              cornerRadius: 20,
+    final pillShape = LiquidGlassShape.continuousRoundedRectangle(
+      cornerRadius: pillR,
+      borderWidth: 0,
+      borderColor: Colors.transparent,
+      lightIntensity: 0,
+    );
+
+    return SizedBox(
+      height: _height,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 内容层：液态分段（包内描边关闭）
+          LiquidGlassSegmented(
+            segments: segments,
+            selectedIndex: idx < 0 ? 0 : idx,
+            onChanged: (i) {
+              if (i >= 0 && i < values.length) onPick(values[i]);
+            },
+            width: double.infinity,
+            height: _height,
+            padding: _pad,
+            style: LiquidGlassStyle(
+              shape: LiquidGlassShape.continuousRoundedRectangle(
+                cornerRadius: _outerR,
+                borderWidth: 0,
+                borderColor: Colors.transparent,
+                lightIntensity: 0,
+              ),
+              appearance: LiquidGlassAppearance(
+                color: Colors.transparent,
+                blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
+                shadow: LiquidGlassShadow(
+                  blur: 0,
+                  opacity: 0,
+                  cornerRadius: _outerR,
+                ),
+              ),
+              refraction: const LiquidGlassRefraction(
+                distortion: 0.04,
+                distortionWidth: 12,
+                chromaticAberration: 0,
+              ),
+            ),
+            pillStyle: LiquidGlassSegmentedPillStyle(
+              glass: lgMotionOn,
+              animated: true,
+              growHeight: lgMotionOn ? 4 : 0,
+              glassStyle: LiquidGlassStyle(
+                shape: pillShape,
+                appearance: LiquidGlassAppearance(
+                  color: pillBase,
+                  blur: const LiquidGlassBlur(sigmaX: 0.8, sigmaY: 0.8),
+                  shadow: LiquidGlassShadow(
+                    blur: 6,
+                    opacity: 0.12,
+                    inset: 0,
+                    cornerRadius: pillR,
+                  ),
+                ),
+                refraction: const LiquidGlassRefraction(
+                  distortion: 0.06,
+                  distortionWidth: 10,
+                ),
+              ),
+              restStyle: LiquidGlassStyle(
+                shape: pillShape,
+                appearance: LiquidGlassAppearance(
+                  color: pillBase,
+                  blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
+                ),
+              ),
+            ),
+            labelStyle: LiquidGlassSegmentedLabelStyle(
+              selectedColor: scheme.primary,
+              unselectedColor: scheme.onSurfaceVariant,
+              fontSize: 12,
+              selectedFontWeight: FontWeight.w600,
             ),
           ),
-          refraction: const LiquidGlassRefraction(
-            distortion: 0.06,
-            distortionWidth: 10,
+          // 前景描边层（appearance T9）：整圈 rim，圆角不被 Lens 边缘吃掉
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(_outerR),
+                  border: Border.all(
+                    // 比 AppGlass.rimWidth 更易见（真机反馈不明显）
+                    width: light ? 1.0 : 1.2,
+                    color: Colors.white.withValues(
+                      alpha: light ? 0.55 : 0.40,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        // 静止与动画同色半透明，避免回落实色/白 pill
-        restStyle: LiquidGlassStyle(
-          appearance: LiquidGlassAppearance(
-            color: pillBase,
-            blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
-          ),
-        ),
-      ),
-      labelStyle: LiquidGlassSegmentedLabelStyle(
-        selectedColor: scheme.primary,
-        unselectedColor: scheme.onSurfaceVariant,
-        fontSize: 12,
-        selectedFontWeight: FontWeight.w600,
+        ],
       ),
     );
   }
