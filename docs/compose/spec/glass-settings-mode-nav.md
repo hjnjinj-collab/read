@@ -3,7 +3,7 @@ feature: glass-settings-mode-nav
 status: delivered
 updated: 2026-09-19
 branch: master
-commits: 3ec3693..HEAD
+commits: 3ec3693..b9a2741
 ---
 
 # 材质与玻璃页：全页 霜壳 + 液态切换
