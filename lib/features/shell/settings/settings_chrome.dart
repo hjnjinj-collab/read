@@ -1464,3 +1464,88 @@ class _Md3Segment extends StatelessWidget {
     );
   }
 }
+
+/// 条件展开：header 常显，body 随 [enabled] 自动 expand/collapse。
+///
+/// 基于 widgets 库 [Expansible] + [ExpansibleController]（非 Material
+/// ExpansionTile——后者自带 ListTile/箭头，会破坏液态设置语言）。
+/// `controller.expand/collapse` 不可在 build 内调用，故在
+/// `initState` / `didUpdateWidget` 同步。
+class SettingDependents extends StatefulWidget {
+  const SettingDependents({
+    super.key,
+    required this.enabled,
+    required this.header,
+    required this.children,
+    this.maintainState = true,
+    this.animationStyle,
+  });
+
+  /// 门控：true → body 展开；false → 折叠（高度归零，不占布局）。
+  final bool enabled;
+
+  /// 始终显示的父行（开关/分段/标签）。
+  final Widget header;
+
+  /// 依赖 [enabled] 的细调项。
+  final List<Widget> children;
+
+  /// 折叠时是否保留 body 状态（滑杆位置等）。
+  final bool maintainState;
+
+  final AnimationStyle? animationStyle;
+
+  @override
+  State<SettingDependents> createState() => _SettingDependentsState();
+}
+
+class _SettingDependentsState extends State<SettingDependents> {
+  late final ExpansibleController _controller;
+
+  static final AnimationStyle _defaultStyle = AnimationStyle(
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+    duration: const Duration(milliseconds: 220),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = ExpansibleController();
+    if (widget.enabled) {
+      _controller.expand();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingDependents oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.enabled == oldWidget.enabled) return;
+    if (widget.enabled) {
+      _controller.expand();
+    } else {
+      _controller.collapse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Expansible(
+      controller: _controller,
+      animationStyle: widget.animationStyle ?? _defaultStyle,
+      maintainState: widget.maintainState,
+      headerBuilder: (_, _) => widget.header,
+      bodyBuilder: (_, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: widget.children,
+      ),
+    );
+  }
+}

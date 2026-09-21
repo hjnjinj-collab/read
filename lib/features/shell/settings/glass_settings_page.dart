@@ -129,6 +129,22 @@ class GlassSettingsPage extends ConsumerWidget {
               values: const ['liquid', 'lite'],
               selected: shell.glassMode,
               onPick: n.setGlassMode,
+              bottomPad: 4,
+            ),
+            // liquid 专属：果冻形变；lite / Windows 强制 lite 折叠（与 applyGlassEngine 一致）
+            SettingDependents(
+              enabled: !forced && shell.glassMode == 'liquid',
+              header: const SizedBox(height: 0),
+              children: [
+                SettingSwitchRow(
+                  title: '果冻效应',
+                  subtitle: shell.lgMotionOn
+                      ? '滑杆/开关/分段形变鼓动'
+                      : '已关闭：无形变，模糊不溢出',
+                  value: shell.lgMotionOn,
+                  onChanged: n.setLgMotionOn,
+                ),
+              ],
             ),
           ],
         ),
@@ -164,201 +180,220 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '页面色渗',
           children: [
-            SettingSwitchRow(
-              title: '均匀渗入',
-              subtitle: '整页纸色混入主色（与渐变叠加）',
-              value: shell.pageTintOn,
-              onChanged: n.setPageTintOn,
-            ),
-            SettingLabel(
-              title: '浅色底',
-              subtitle:
-                  '主色 ${(shell.pageTintLight * 100).round()}% · 默认 35%',
-            ),
-            slider(
-              key: const ValueKey('page-tint-light'),
-              value: shell.pageTintLight,
-              min: 0,
-              max: 0.60,
-              onChanged: n.setPageTintLight,
-            ),
-            SettingLabel(
-              title: '深色底',
-              subtitle:
-                  '主色 ${(shell.pageTintDark * 100).round()}% · 默认 0（纯夜底）',
-            ),
-            slider(
-              key: const ValueKey('page-tint-dark'),
-              value: shell.pageTintDark,
-              min: 0,
-              max: 0.40,
-              onChanged: n.setPageTintDark,
+            SettingDependents(
+              enabled: shell.pageTintOn,
+              header: SettingSwitchRow(
+                title: '均匀渗入',
+                subtitle: shell.pageTintOn
+                    ? '整页纸色混入主色（与渐变叠加）'
+                    : '已关闭',
+                value: shell.pageTintOn,
+                onChanged: n.setPageTintOn,
+              ),
+              children: [
+                SettingLabel(
+                  title: '浅色底',
+                  subtitle:
+                      '主色 ${(shell.pageTintLight * 100).round()}% · 默认 35%',
+                ),
+                slider(
+                  key: const ValueKey('page-tint-light'),
+                  value: shell.pageTintLight,
+                  min: 0,
+                  max: 0.60,
+                  onChanged: n.setPageTintLight,
+                ),
+                SettingLabel(
+                  title: '深色底',
+                  subtitle:
+                      '主色 ${(shell.pageTintDark * 100).round()}% · 默认 0（纯夜底）',
+                ),
+                slider(
+                  key: const ValueKey('page-tint-dark'),
+                  value: shell.pageTintDark,
+                  min: 0,
+                  max: 0.40,
+                  onChanged: n.setPageTintDark,
+                ),
+              ],
             ),
           ],
         ),
         frostSection(
           header: '页底渐变',
           children: [
-            SettingSwitchRow(
-              title: '氛围渐变',
-              subtitle: 'primary + tertiary 对角/轴向光晕（叠在色渗上）',
-              value: shell.ambientOn,
-              onChanged: n.setAmbientOn,
+            SettingDependents(
+              enabled: shell.ambientOn,
+              header: SettingSwitchRow(
+                title: '氛围渐变',
+                subtitle: shell.ambientOn
+                    ? 'primary + tertiary 对角/轴向光晕（叠在色渗上）'
+                    : '已关闭',
+                value: shell.ambientOn,
+                onChanged: n.setAmbientOn,
+              ),
+              children: [
+                SettingLabel(
+                  title: '方向',
+                  subtitle: AmbientDir.parse(shell.ambientDir).label,
+                ),
+                valueSeg(
+                  segments: const ['', '', '', ''],
+                  values: dirValues,
+                  selected: shell.ambientDir,
+                  icons: const [],
+                  useDirGlyph: true,
+                  onPick: n.setAmbientDir,
+                  bottomPad: 8,
+                ),
+              ],
             ),
-            SettingLabel(
-              title: '方向',
-              subtitle: AmbientDir.parse(shell.ambientDir).label,
-            ),
-            valueSeg(
-              segments: const ['', '', '', ''],
-              values: dirValues,
-              selected: shell.ambientDir,
-              icons: const [],
-          useDirGlyph: true,
-          onPick: n.setAmbientDir,
-          bottomPad: 8,
-        ),
           ],
         ),
         frostSection(
           header: '设置页霜层',
           children: [
-            SettingSwitchRow(
-              title: '垫底霜层',
-              subtitle: '关闭后子栏无下层渐变，仅轻透填色 + 阴影',
-              value: shell.frostOn,
-              onChanged: n.setFrostOn,
-            ),
-            SettingLabel(
-              title: '方案',
-              subtitle: shell.frostStyle == 'slice'
-                  ? '切片：每栏一段渐变'
-                  : '统一：整组一条连续渐变',
-            ),
-            valueSeg(
-              segments: const ['统一连续', '分栏切片'],
-              values: const ['unified', 'slice'],
-              selected: shell.frostStyle,
-              onPick: n.setFrostStyle,
-              bottomPad: 8,
-            ),
-            SettingLabel(
-              title: '方向',
-              subtitle: AmbientDir.parse(shell.frostDir).label,
-            ),
-            valueSeg(
-              segments: const ['', '', '', ''],
-              values: dirValues,
-              selected: shell.frostDir,
-              icons: const [],
-          useDirGlyph: true,
-          onPick: n.setFrostDir,
-        ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                '行缝遮住霜层，渐变只从子栏下透出；子栏带悬浮阴影。',
-                style: TextStyle(height: 1.4),
+            SettingDependents(
+              enabled: shell.frostOn,
+              header: SettingSwitchRow(
+                title: '垫底霜层',
+                subtitle: shell.frostOn
+                    ? '关闭后子栏无下层渐变，仅轻透填色 + 阴影'
+                    : '已关闭：子栏仅轻透填色 + 阴影',
+                value: shell.frostOn,
+                onChanged: n.setFrostOn,
               ),
-            ),
-            SettingLabel(
-              title: '子栏高度',
-              subtitle: '上下 padding ${shell.frostRowPadV.round()} · 默认 20',
-            ),
-            slider(
-              key: const ValueKey('frost-row-pad'),
-              value: shell.frostRowPadV,
-              min: 8,
-              max: 36,
-              onChanged: n.setFrostRowPadV,
-            ),
-            SettingLabel(
-              title: '渐变深浅',
-              subtitle: shell.frostGradDepth <= 0.95
-                  ? '偏淡 ${(shell.frostGradDepth * 100).round()}%'
-                  : shell.frostGradDepth >= 1.05
-                      ? '偏浓 ${(shell.frostGradDepth * 100).round()}%'
-                      : '标准 100%',
-            ),
-            slider(
-              key: const ValueKey('frost-grad-depth'),
-              value: shell.frostGradDepth,
-              min: 0.3,
-              max: 1.8,
-              onChanged: n.setFrostGradDepth,
-            ),
-            SettingLabel(
-              title: '渐变起点色',
-              subtitle: shell.frostGradA == null
-                  ? '跟随主题 primary'
-                  : '自定义',
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _FrostColorChip(
-                    label: '主题',
-                    color: scheme.primary,
-                    selected: shell.frostGradA == null,
-                    onTap: () => n.setFrostGradA(null),
+              children: [
+                SettingLabel(
+                  title: '方案',
+                  subtitle: shell.frostStyle == 'slice'
+                      ? '切片：每栏一段渐变'
+                      : '统一：整组一条连续渐变',
+                ),
+                valueSeg(
+                  segments: const ['统一连续', '分栏切片'],
+                  values: const ['unified', 'slice'],
+                  selected: shell.frostStyle,
+                  onPick: n.setFrostStyle,
+                  bottomPad: 8,
+                ),
+                SettingLabel(
+                  title: '方向',
+                  subtitle: AmbientDir.parse(shell.frostDir).label,
+                ),
+                valueSeg(
+                  segments: const ['', '', '', ''],
+                  values: dirValues,
+                  selected: shell.frostDir,
+                  icons: const [],
+                  useDirGlyph: true,
+                  onPick: n.setFrostDir,
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    '行缝遮住霜层，渐变只从子栏下透出；子栏带悬浮阴影。',
+                    style: TextStyle(height: 1.4),
                   ),
-                  for (final c in _frostColorPresets(scheme))
-                    _FrostColorChip(
-                      label: c.label,
-                      color: c.color,
-                      selected: shell.frostGradA == c.color.toARGB32(),
-                      onTap: () => n.setFrostGradA(c.color),
-                    ),
-                ],
-              ),
-            ),
-            SettingLabel(
-              title: '渐变终点色',
-              subtitle: shell.frostGradB == null
-                  ? '跟随主题 tertiary'
-                  : '自定义',
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _FrostColorChip(
-                    label: '主题',
-                    color: scheme.tertiary,
-                    selected: shell.frostGradB == null,
-                    onTap: () => n.setFrostGradB(null),
+                ),
+                SettingLabel(
+                  title: '子栏高度',
+                  subtitle:
+                      '上下 padding ${shell.frostRowPadV.round()} · 默认 20',
+                ),
+                slider(
+                  key: const ValueKey('frost-row-pad'),
+                  value: shell.frostRowPadV,
+                  min: 8,
+                  max: 36,
+                  onChanged: n.setFrostRowPadV,
+                ),
+                SettingLabel(
+                  title: '渐变深浅',
+                  subtitle: shell.frostGradDepth <= 0.95
+                      ? '偏淡 ${(shell.frostGradDepth * 100).round()}%'
+                      : shell.frostGradDepth >= 1.05
+                          ? '偏浓 ${(shell.frostGradDepth * 100).round()}%'
+                          : '标准 100%',
+                ),
+                slider(
+                  key: const ValueKey('frost-grad-depth'),
+                  value: shell.frostGradDepth,
+                  min: 0.3,
+                  max: 1.8,
+                  onChanged: n.setFrostGradDepth,
+                ),
+                SettingLabel(
+                  title: '渐变起点色',
+                  subtitle: shell.frostGradA == null
+                      ? '跟随主题 primary'
+                      : '自定义',
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _FrostColorChip(
+                        label: '主题',
+                        color: scheme.primary,
+                        selected: shell.frostGradA == null,
+                        onTap: () => n.setFrostGradA(null),
+                      ),
+                      for (final c in _frostColorPresets(scheme))
+                        _FrostColorChip(
+                          label: c.label,
+                          color: c.color,
+                          selected:
+                              shell.frostGradA == c.color.toARGB32(),
+                          onTap: () => n.setFrostGradA(c.color),
+                        ),
+                    ],
                   ),
-                  for (final c in _frostColorPresets(scheme))
-                    _FrostColorChip(
-                      label: c.label,
-                      color: c.color,
-                      selected: shell.frostGradB == c.color.toARGB32(),
-                      onTap: () => n.setFrostGradB(c.color),
-                    ),
-                ],
-              ),
+                ),
+                SettingLabel(
+                  title: '渐变终点色',
+                  subtitle: shell.frostGradB == null
+                      ? '跟随主题 tertiary'
+                      : '自定义',
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _FrostColorChip(
+                        label: '主题',
+                        color: scheme.tertiary,
+                        selected: shell.frostGradB == null,
+                        onTap: () => n.setFrostGradB(null),
+                      ),
+                      for (final c in _frostColorPresets(scheme))
+                        _FrostColorChip(
+                          label: c.label,
+                          color: c.color,
+                          selected:
+                              shell.frostGradB == c.color.toARGB32(),
+                          onTap: () => n.setFrostGradB(c.color),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
         frostSection(
           header: '说明',
           children: [
-            SettingSwitchRow(
-              title: '果冻效应',
-              subtitle: '关闭后滑杆/开关/分段无形变鼓动，模糊不溢出',
-              value: shell.lgMotionOn,
-              onChanged: n.setLgMotionOn,
-            ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
               child: Text(
                 '色渗 = 整页均匀主色；页底渐变 / 设置霜层方向可分别配置。'
-                '液态折射依赖 Impeller；Skia 平台自动退化为霜面。',
+                '液态折射依赖 Impeller；Skia 平台自动退化为霜面。'
+                '果冻效应仅在「模式 · 液态玻璃」且非 Windows 强制档下调节。',
                 style: TextStyle(height: 1.5),
               ),
             ),
