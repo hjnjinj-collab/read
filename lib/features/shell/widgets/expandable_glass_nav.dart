@@ -10,8 +10,8 @@ import '../../../core/theme/app_theme.dart' show AppGlass;
 /// 可扩展液态底栏。
 ///
 /// 默认：左 `[书架|书源]` 胶囊 + 右「更多」圆键。
-/// 点更多：左收成书架圆键，右展开为同构玻璃胶囊 `[设置|添加书籍]`。
-/// 设置/添加不收起；仅左圆键收起。
+/// **更多**：不在设置 Tab 时直接进设置；已在设置时展开 `[设置|添加书籍]`。
+/// 左圆键：回书架并收起。
 class ExpandableGlassNav extends StatelessWidget {
   const ExpandableGlassNav({
     super.key,
@@ -177,7 +177,15 @@ class ExpandableGlassNav extends StatelessWidget {
       foregroundColor: unselectedColor,
       style: circleStyle,
       touch: const LiquidGlassTouch(flex: LiquidGlassFlex()),
-      onTap: onToggleExpand,
+      onTap: () {
+        // 用户预期：更多 = 默认进设置，不必再点一次。
+        // 已在设置 Tab 时改为展开面板，保留「添加书籍」入口。
+        if (selectedIndex == 2) {
+          onToggleExpand();
+        } else {
+          onSettings();
+        }
+      },
     );
 
     return SizedBox(

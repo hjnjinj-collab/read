@@ -11,7 +11,8 @@ import 'widgets/expandable_glass_nav.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
 /// 三 Tab 应用壳（StatefulShell 状态保活）。
-/// 底栏：书架/书源 胶囊 + 右侧「更多」（设置 / 添加书籍）。
+/// 底栏：书架/书源 胶囊 + 右侧「更多」（默认直接进设置；在设置时展开面板）。
+/// Tab 切换：AppShell 自播 Fade+方向轻 slide（shell 不 remount，状态保活）。
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key, required this.navigationShell});
 
@@ -21,8 +22,30 @@ class AppShell extends ConsumerStatefulWidget {
   ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends ConsumerState<AppShell> {
+class _AppShellState extends ConsumerState<AppShell>
+    with SingleTickerProviderStateMixin {
   bool _navExpanded = false;
+  late final AnimationController _tabAnim = AnimationController(
+    vsync: this,
+    duration: AppMotion.tabDuration,
+  );
+  Offset _tabSlideBegin = AppMotion.tabSlideBegin;
+
+  @override
+  void dispose() {
+    _tabAnim.dispose();
+    super.dispose();
+  }
+
+  void _playTabTransition(int from, int to) {
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    if (from == to) return;
+    // index 增大：新页自右滑入；减小：自左
+    _tabSlideBegin = to > from
+        ? AppMotion.tabSlideBegin
+        : Offset(-AppMotion.tabSlideBegin.dx, 0);
+    _tabAnim.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,10 +58,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     final navTint = shell.navTintStrength;
 
     void goBranch(int i, {bool collapseNav = true}) {
+      final from = navigationShell.currentIndex;
       navigationShell.goBranch(
         i,
-        initialLocation: i == navigationShell.currentIndex,
+        initialLocation: i == from,
       );
+      _playTabTransition(from, i);
       if (collapseNav && _navExpanded) {
         setState(() => _navExpanded = false);
       }
@@ -61,8 +86,8 @@ class _AppShellState extends ConsumerState<AppShell> {
             onToggleExpand: () =>
                 setState(() => _navExpanded = !_navExpanded),
             onCollapse: () => setState(() => _navExpanded = false),
-            // 设置/添加：只执行，不收起展开态
-            onSettings: () => goBranch(2, collapseNav: false),
+            // 更多→设置：进设置并收起（展开态由 moreCircle 在设置 Tab 内处理）
+            onSettings: () => goBranch(2, collapseNav: true),
             onImport: () => requestBookImport(ref),
             barStyle: _shellFrost(
               scheme,
@@ -80,6 +105,16 @@ class _AppShellState extends ConsumerState<AppShell> {
             unselectedColor: scheme.onSurfaceVariant,
           );
 
+    final curved = CurvedAnimation(
+      parent: _tabAnim,
+      curve: AppMotion.tabCurve,
+    );
+    final tabFade = Tween<double>(begin: 0.55, end: 1.0).animate(curved);
+    final tabSlide = Tween<Offset>(
+      begin: _tabSlideBegin,
+      end: Offset.zero,
+    ).animate(curved);
+
     return Scaffold(
       extendBody: true,
       body: Stack(
@@ -94,7 +129,19 @@ class _AppShellState extends ConsumerState<AppShell> {
               ),
             ),
           ),
-          navigationShell,
+          // 不 remount navigationShell：IndexedStack 分支状态保活
+          AnimatedBuilder(
+            animation: _tabAnim,
+            builder: (context, child) {
+              // 静止（含减弱动态 / 动画结束前未触发）：直接挂 shell
+              if (_tabAnim.isDismissed) return child!;
+              return FadeTransition(
+                opacity: tabFade,
+                child: SlideTransition(position: tabSlide, child: child),
+              );
+            },
+            child: navigationShell,
+          ),
         ],
       ),
       bottomNavigationBar: Padding(

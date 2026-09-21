@@ -428,6 +428,11 @@ class AppMotion {
   static const Curve routeCurve = Curves.easeInOutCubic;
   static const Offset routeSlideBegin = Offset(0.08, 0);
 
+  // Shell 三 Tab 切换：StatefulShell 不走 page 转场，由 AppShell 自播
+  static const Duration tabDuration = Duration(milliseconds: 280);
+  static const Curve tabCurve = Curves.easeInOutCubic;
+  static const Offset tabSlideBegin = Offset(0.06, 0);
+
   static const Duration switchDuration = Duration(milliseconds: 260);
   static const Duration staggerStep = Duration(milliseconds: 28);
   static const int staggerMaxItems = 12;
