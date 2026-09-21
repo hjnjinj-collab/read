@@ -1,94 +1,63 @@
 ---
 feature: bookshelf-continue-card-ui
-status: designed
+status: in-progress
 updated: 2026-09-19
 branch: master
 commits: # filled at delivery
 ---
 
-# 书架「续读主卡」UI 推进计划（布局优先）
+# 首页 Dashboard 与书架分工（续读/图表）
 
 ## Report
 
 ## [S1] Problem
 
-书架打开后任务层弱：仅有封面轮换 `RecentHeroBanner`（视觉海报），缺少 MD3 目标应用 `HomeDashboard` 那样的**可操作续读主卡 + 功能卡模块**。需先定布局与模块，再进 Flutter 实现。
+首版布局稿把 Dashboard 塞进书架页，等于「新建页却挂在书架上」；Hero 仅书卡、统计过素（无图表）。用户确认：**若做首页，应是独立首页**；书架保持书库。
 
 ## [S2] Design
 
-### 现状 vs 目标
+### 信息架构（对齐 MD3：Home ≠ Bookshelf）
 
-| | legado_flutter 现状 | legado-with-MD3 目标 |
-|--|---------------------|----------------------|
-| 位置 | 书架滚动区顶部 Hero 横幅 120px | **Home** Dashboard（书架/源 Tab 之外的首页概念） |
-| 主卡 | 海报底图 + 「继续阅读」文案 + 细进度条 | `RecentBookCard` GlassCard：封面 56×(5/7) + 书名/作者/章名 + % chip + **底部光晕进度条** |
-| 模块体系 | 无 | `HomeDashboardSection` 可开关：RecentBook / 统计×2 / RecentBooks 横滑 / DailyGoal / WebDav |
-| 书架页 | 网格 + 分组 | 分组书架（style 0/1/2），非 Dashboard |
+| Tab | 角色 | 顶部内容 |
+|-----|------|----------|
+| **首页**（新） | 任务与数据 Dashboard | 续读主卡 + 阅读折线图 + 统计/目标/最近 |
+| **书架** | 书库 | 网格/列表 + 可选**轻量**续读条（非全量 Dashboard） |
+| 书源 / 设置 | 不变 | — |
 
-**迁移策略（本项目）**：不新建 Home Tab；在 **书架页**落地 Dashboard 式「功能卡堆」，替代/升级现有 Hero。模块可后续配置显隐。
+导航：建议 **首页为第一 Tab**；现有三 Tab 扩为四 Tab（实现轮再定 go_router）。
 
-### 主卡与功能卡模块（布局）
+### 首页模块（生动化）
 
-| 模块 ID | 名称 | 形态 | 内容模块 | 优先级 |
-|---------|------|------|----------|--------|
-| **M1** | 续读主卡 Continue | 全宽卡 ~128–140px | 标题行「继续阅读」+ 封面 + 书名/作者/章名 + % + 底缘进度光晕 + 主按钮「继续」 | **P0** |
-| M2 | 统计双卡 | 两列等宽 | 读过 N 本 · 累计 H 小时（可后置数据） | P1 |
-| M3 | 最近阅读横滑 | LazyRow 小卡 | 封面 + 书名 + 章进度 | P1 |
-| M4 | 今日阅读目标 | 全宽卡 | 分钟目标环/条 + 点按进记录 | P2 |
-| M5 | 快捷操作 | 可选 | 导入本地 / 书源（对齐现有 FAB/空态） | P2 |
+| ID | 模块 | 形态 | 数据（可 mock） |
+|----|------|------|-----------------|
+| H1 | 续读主卡 | 全宽：封面+书名/章+进度光晕+「继续」 | lastRead book + chapterProgress |
+| H2 | **近 7 日阅读折线** | SVG/Canvas 折线 + 面积填充 + 今日高亮 | daily minutes |
+| H3 | 统计条 | 读过本数 · 累计小时 · 连续天数 | aggregates |
+| H4 | 最近阅读横滑 | 小封面卡 | recent books |
+| H5 | 今日目标 | 环形或条 + 分钟文案 | today vs goal |
 
-### M1 主卡布局（权威稿）
+### 书架页（保持书库）
 
-```
-┌─────────────────────────────────────────┐
-│ ◎ 继续阅读                    [42% chip]│  ← 标题行 primary icon + 强调标题
-│                                         │
-│ ┌────┐  书名（2 行截断）                 │
-│ │封面│  作者                             │
-│ │56  │  章名 · marquee · 1 行            │
-│ └────┘                          [继续 ▸] │  ← 质感主按钮（非纯白）
-│ ═══════════════════════════════════════ │  ← 底缘进度 + 微光晕（MD3 RecentReadingProgress）
-└─────────────────────────────────────────┘
-```
+- 主体：封面网格/列表 + 分组
+- 可选 H1-lite：顶栏下一条 **薄续读条**（书名+进度），不复制图表/统计
 
-- 底：tonal / 浅霜 **一张卡**（settingsCardRadius 16），**不要**海报全出血（与书架封面网格抢戏）
-- 封面：`BookshelfCover` 语义 = Flutter CoverStore；圆角与 `kCoverRadius` 可略大（10–12）
-- 进度：章节比 `(chapterIndex+1)/total`；无进度书 **不显示 M1**，回落纯网格
-- 点按：整卡/主按钮 → 打开该书（沿用 slot 缩放转场）
-- 玻璃：chrome 可选 frost；**禁止**盖正文语义的重 Lens
+### 图表视觉
 
-### 功能主卡（M2–M4 布局要点）
+- 折线：primary 描边 + 低透明面积渐变；7 点；今日点更大
+- 空数据：淡虚线基线 +「暂无阅读记录」
+- 不引入重型图表库——布局稿用 SVG；Flutter 可用 CustomPaint
 
-- **M2 StatisticCard**：icon + 小标题 + 大数字 + 单位；两列 gap 12
-- **M3 RecentBooksRow**：横滑 64px 封面卡 + 书名截断；点按进对应书
-- **M4 ReadingGoalCard**：今日分钟 / 目标分钟；线性或圆环 + 次文案
+### 布局 App
 
-### 布局原型（本轮交付）
-
-交互稿：`ui-bookshelf-continue-cards.html`（手机宽度，可切换空态/有进度/全模块）。
-
-### 主流应用启示（摘要）
-
-| 产品 | 主卡模式 |
-|------|----------|
-| Kindle / Apple Books | Continue reading 大卡 + 进度，任务第一 |
-| 微信读书 | 续读条 + 时长社交信息 |
-| MD3 Legado | Glass RecentBookCard + 可开关 Dashboard 模块 |
-
-### 实现阶段（布局定稿后）
-
-1. P0：书架 M1 数据绑定（lastRead + progress）+ 替换 Hero  
-2. P1：M2/M3 可选模块与显隐  
-3. P2：M4 目标 / 配置 sheet  
+`index.html`：可切换 **首页 / 书架** 两 Tab，首页含折线图模块。
 
 ## [S3] Out of Scope
 
-- WebDav 备份卡、完整阅读记录页  
-- 书源 homepageModules（那是源首页，不是书架）  
-- 本轮 Flutter 代码实现（先锁布局）
+- 本轮 go_router/四 Tab Flutter 实现
+- WebDav 卡、真实阅读时长埋点
+- 书源 homepage modules
 
 ## Tasks
 
-- [ ] T1: 布局稿 HTML 可预览 — acceptance: 手机宽度展示 M1 + 功能卡分区 (covers: S2)
-- [ ] T2: 用户确认 M1 结构后再开 compose 实现轮 (covers: S2)
-- [ ] T3: M1 Flutter 落地（后续轮）— acceptance: 有进度书显示续读主卡并可一键进书 (covers: S2)
+- [ ] T1: index.html 首页+书架双 Tab 布局 — acceptance: 首页含续读+折线图；书架为书库网格 (covers: S2)
+- [ ] T2: 用户确认首页结构后开 Flutter 实现轮 (covers: S2)
