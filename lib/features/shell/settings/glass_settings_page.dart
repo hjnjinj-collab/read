@@ -529,8 +529,8 @@ class _LiquidValueSegmented extends StatelessWidget {
                 glassStyle: LiquidGlassStyle(
                   shape: pillShape,
                   appearance: LiquidGlassAppearance(
-                    color: pillBase,
-                    // 动画态保留轻量玻璃感；blur/shadow 由外层 Clip 兜住
+                    // 动画/鼓动态：不叠派生滤镜色，直接透出底下内容
+                    color: Colors.transparent,
                     blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
                     shadow: LiquidGlassShadow(
                       blur: 8,
@@ -548,6 +548,7 @@ class _LiquidValueSegmented extends StatelessWidget {
                 restStyle: LiquidGlassStyle(
                   shape: pillShape,
                   appearance: LiquidGlassAppearance(
+                    // 仅静止态为派生色（用户契约）
                     color: pillBase,
                     blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
                   ),
