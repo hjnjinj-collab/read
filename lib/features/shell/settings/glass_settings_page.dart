@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +7,6 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 // ignore: implementation_imports
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
-import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart' show AppGlass;
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
@@ -90,6 +88,7 @@ class GlassSettingsPage extends ConsumerWidget {
       required ValueChanged<String> onPick,
       List<IconData>? icons,
       List<double>? iconAngles,
+      bool useDirGlyph = false,
       double bottomPad = 14,
     }) {
       return Padding(
@@ -102,6 +101,7 @@ class GlassSettingsPage extends ConsumerWidget {
           navBlurSigma: shell.navBlurSigma,
           icons: icons,
           iconAngles: iconAngles,
+          useDirGlyph: useDirGlyph,
           onPick: onPick,
         ),
       );
@@ -213,16 +213,11 @@ class GlassSettingsPage extends ConsumerWidget {
               segments: const ['', '', '', ''],
               values: dirValues,
               selected: shell.ambientDir,
-              icons: const [
-                AppIcons.dirAxis,
-                AppIcons.dirAxis,
-                AppIcons.dirDown,
-                AppIcons.dirAxis,
-              ],
-              iconAngles: const [math.pi / 4, 3 * math.pi / 4, 0, 0],
-              onPick: n.setAmbientDir,
-              bottomPad: 8,
-            ),
+              icons: const [],
+          useDirGlyph: true,
+          onPick: n.setAmbientDir,
+          bottomPad: 8,
+        ),
           ],
         ),
         frostSection(
@@ -255,15 +250,10 @@ class GlassSettingsPage extends ConsumerWidget {
               segments: const ['', '', '', ''],
               values: dirValues,
               selected: shell.frostDir,
-              icons: const [
-                AppIcons.dirAxis,
-                AppIcons.dirAxis,
-                AppIcons.dirDown,
-                AppIcons.dirAxis,
-              ],
-              iconAngles: const [math.pi / 4, 3 * math.pi / 4, 0, 0],
-              onPick: n.setFrostDir,
-            ),
+              icons: const [],
+          useDirGlyph: true,
+          onPick: n.setFrostDir,
+        ),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
@@ -461,6 +451,7 @@ class _LiquidValueSegmented extends StatelessWidget {
     required this.onPick,
     this.icons,
     this.iconAngles,
+    this.useDirGlyph = false,
   });
 
   final List<String> segments;
@@ -477,6 +468,9 @@ class _LiquidValueSegmented extends StatelessWidget {
 
   /// 与 [icons] 等长；对角方向用弧度旋转 Iconsax 轴向箭头
   final List<double>? iconAngles;
+
+  /// true = 用 [_DirGlyph] 线性箭头（方向语义，统一描边）
+  final bool useDirGlyph;
 
   /// 细腻外轨：略小于 20，描边更贴霜壳语言
   static const double _outerR = 16;
@@ -559,9 +553,22 @@ class _LiquidValueSegmented extends StatelessWidget {
                 fontSize: 12,
                 selectedFontWeight: FontWeight.w600,
               ),
-              segmentBuilder: icons == null
+              segmentBuilder: icons == null && !useDirGlyph
                   ? null
                   : (context, i, selectedSeg, color) {
+                      // 方向：统一自绘线性箭头（Iconsax 各箭头填充不一致，
+                      // 语义也不直观）；color 由包按选中态传入
+                      if (useDirGlyph) {
+                        final value =
+                            values[i.clamp(0, values.length - 1)];
+                        return Center(
+                          child: _DirGlyph(
+                            direction: value,
+                            color: color,
+                            size: 22,
+                          ),
+                        );
+                      }
                       final data = icons![i.clamp(0, icons!.length - 1)];
                       final angle = (iconAngles != null &&
                               i < iconAngles!.length)
@@ -598,6 +605,96 @@ class _LiquidValueSegmented extends StatelessWidget {
   }
 }
 
+/// 统一线性方向箭头：渐变流向语义（↘ ↙ ↓ →），全套描边、无填充差异。
+class _DirGlyph extends StatelessWidget {
+  const _DirGlyph({
+    required this.direction,
+    required this.color,
+    this.size = 22,
+  });
+
+  /// tlbr | trbl | top | left（与 AmbientDir 子集一致）
+  final String direction;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _DirGlyphPainter(direction: direction, color: color),
+      ),
+    );
+  }
+}
+
+class _DirGlyphPainter extends CustomPainter {
+  _DirGlyphPainter({required this.direction, required this.color});
+
+  final String direction;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final s = size.shortestSide * 0.5;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.shortestSide * 0.12
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = color;
+
+    // 主轴：从起点指向终点（渐变方向）
+    late final Offset start;
+    late final Offset end;
+    switch (direction) {
+      case 'tlbr': // 左上 → 右下
+        start = Offset(c.dx - s * 0.65, c.dy - s * 0.65);
+        end = Offset(c.dx + s * 0.65, c.dy + s * 0.65);
+      case 'trbl': // 右上 → 左下
+        start = Offset(c.dx + s * 0.65, c.dy - s * 0.65);
+        end = Offset(c.dx - s * 0.65, c.dy + s * 0.65);
+      case 'top': // 上 → 下
+        start = Offset(c.dx, c.dy - s * 0.75);
+        end = Offset(c.dx, c.dy + s * 0.75);
+      default: // left：左 → 右
+        start = Offset(c.dx - s * 0.75, c.dy);
+        end = Offset(c.dx + s * 0.75, c.dy);
+    }
+    canvas.drawLine(start, end, paint);
+
+    // 箭头：与主轴同向的 V 型
+    final dir = (end - start);
+    final len = dir.distance;
+    if (len < 1) return;
+    final u = dir / len;
+    final n = Offset(-u.dy, u.dx);
+    final head = size.shortestSide * 0.28;
+    final p1 = end - u * head + n * (head * 0.55);
+    final p2 = end - u * head - n * (head * 0.55);
+    final headPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = paint.strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = color;
+    canvas.drawPath(
+      Path()
+        ..moveTo(p1.dx, p1.dy)
+        ..lineTo(end.dx, end.dy)
+        ..lineTo(p2.dx, p2.dy),
+      headPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DirGlyphPainter oldDelegate) =>
+      oldDelegate.direction != direction || oldDelegate.color != color;
+}
+
 /// 圆角 bevel 描边：上亮侧中下暗（BoxDecoration 无法非均匀色+圆角）
 class _BevelRimPainter extends CustomPainter {
   _BevelRimPainter({required this.radius, required this.light});
@@ -619,9 +716,10 @@ class _BevelRimPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Colors.white.withValues(alpha: light ? 0.55 : 0.40),
-          Colors.white.withValues(alpha: light ? 0.28 : 0.20),
-          Colors.black.withValues(alpha: light ? 0.10 : 0.22),
+          Colors.white.withValues(alpha: light ? 0.58 : 0.42),
+          Colors.white.withValues(alpha: light ? 0.30 : 0.22),
+          // 底边减淡：保留对比但不压黑（真机反馈过暗）
+          Colors.black.withValues(alpha: light ? 0.05 : 0.09),
         ],
         stops: const [0, 0.45, 1],
       ).createShader(rrect.outerRect);
