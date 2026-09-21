@@ -576,23 +576,35 @@ class SettingsFrostGate extends ConsumerWidget {
     final shell = ref.watch(shellSettingsProvider);
     final scheme = Theme.of(context).colorScheme;
     if (!shell.frostOn) {
-      return SettingsRowShell(
-        borderRadius: BorderRadius.circular(radius),
-        fill: AppGlass.floatRowFill(scheme),
-        child: child,
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 320),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInOutCubic,
+        child: SettingsRowShell(
+          key: const ValueKey('settings-row-shell'),
+          borderRadius: BorderRadius.circular(radius),
+          fill: AppGlass.floatRowFill(scheme),
+          child: child,
+        ),
       );
     }
-    return SettingsFrostShell(
-      radius: radius,
-      blurSigma: blurSigma,
-      dir: dir ?? AmbientDir.parse(shell.frostDir),
-      colorA: colorA ??
-          (shell.frostGradA != null ? Color(shell.frostGradA!) : null),
-      colorB: colorB ??
-          (shell.frostGradB != null ? Color(shell.frostGradB!) : null),
-      gradDepth: gradDepth ?? shell.frostGradDepth,
-      showShadow: false,
-      child: child,
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInOutCubic,
+      child: SettingsFrostShell(
+        key: const ValueKey('settings-frost-shell'),
+        radius: radius,
+        blurSigma: blurSigma,
+        dir: dir ?? AmbientDir.parse(shell.frostDir),
+        colorA: colorA ??
+            (shell.frostGradA != null ? Color(shell.frostGradA!) : null),
+        colorB: colorB ??
+            (shell.frostGradB != null ? Color(shell.frostGradB!) : null),
+        gradDepth: gradDepth ?? shell.frostGradDepth,
+        showShadow: false,
+        child: child,
+      ),
     );
   }
 }
@@ -1340,8 +1352,13 @@ class SettingSwitchRow extends ConsumerWidget {
           LiquidGlassSwitch(
             value: value,
             onChanged: onChanged,
-            activeColor: scheme.primary,
-            inactiveColor: scheme.outlineVariant.withValues(alpha: 0.9),
+            activeColor: value
+                ? AppGlass.switchTrackOn(scheme)
+                : AppGlass.switchTrackOff(scheme),
+            inactiveColor: AppGlass.switchTrackOff(scheme),
+            thumbColor: value
+                ? AppGlass.switchThumbOn(scheme)
+                : AppGlass.switchThumbOff(scheme),
             layout: layout,
             // 布局占位必须等于轨道（63×28）：reserveSwellRoom 会把占位
             // 撑到 120px（两侧各 28.5px 隐形空白），视觉右边距变成
@@ -1546,6 +1563,17 @@ class _SettingDependentsState extends State<SettingDependents> {
         mainAxisSize: MainAxisSize.min,
         children: widget.children,
       ),
+      // 高度 clip 同步淡入淡出：减轻液态控件在霜层大组里「一闪而过」
+      expansibleBuilder: (_, header, body, animation) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            header,
+            FadeTransition(opacity: animation, child: body),
+          ],
+        );
+      },
     );
   }
 }

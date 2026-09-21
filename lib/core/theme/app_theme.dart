@@ -306,6 +306,35 @@ class AppGlass {
         .withValues(alpha: 0.42);
   }
 
+  /// 设置页开关：ON 轨道（主色）
+  static Color switchTrackOn(ColorScheme scheme) => scheme.primary;
+
+  /// 设置页开关：OFF 轨道（非包默认灰，带主题 outline）
+  static Color switchTrackOff(ColorScheme scheme) {
+    return Color.lerp(scheme.surfaceContainerHighest, scheme.outline, 0.28)!
+        .withValues(alpha: 0.72);
+  }
+
+  /// 设置页开关：ON 滑块（派生，非纯白）
+  static Color switchThumbOn(ColorScheme scheme) {
+    return Color.lerp(scheme.primaryContainer, Colors.white, 0.35)!;
+  }
+
+  /// 设置页开关：OFF 滑块（surface 向 outline 微混）
+  static Color switchThumbOff(ColorScheme scheme) {
+    return Color.lerp(scheme.surface, scheme.outlineVariant, 0.22)!;
+  }
+
+  /// 设置页滑杆 thumb：与 rest pill 同族派生
+  static Color sliderThumb(ColorScheme scheme) {
+    return Color.lerp(scheme.primaryContainer, scheme.surface, 0.35)!
+        .withValues(alpha: 0.92);
+  }
+
+  /// 设置页滑杆未激活轨
+  static Color sliderTrackInactive(ColorScheme scheme) =>
+      scheme.outlineVariant.withValues(alpha: 0.45);
+
   /// 子栏行缝（两套方案共用）
   static const double floatRowGap = 5;
 

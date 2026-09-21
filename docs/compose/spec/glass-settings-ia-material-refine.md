@@ -10,79 +10,53 @@ commits: b4b506d..HEAD
 
 ## Report
 
-**What was built** — 真机六项反馈落地：分区标题改为「渲染材质 / 材质效果」等并加 Iconsax 图标；材质效果模糊/色渗改为 **liquid / lite 双套持久化**（Windows 强制读写 lite 档，与 `applyGlassEngine` 同源）；`SettingDependents` 动画 320ms + easeInOut；霜层关态描边改 outline+primary、宽 1.0；`ShellAmbient` tertiary 抬升到 light 0.28 / dark 0.22。兼容 getter `navBlurSigma`/`navTintStrength` 保留，底栏与 appearance/hub 无调用方断裂。
+**What was built** — 两轮真机反馈合入同一 refine。首轮：分区更名+Iconsax、材质效果双套参数（Windows 读写 lite 档）、320ms 展开、关态描边、ambient tertiary。二轮：霜层收展去闪（`Expansible` body 同步 `FadeTransition` + `SettingsFrostGate` 对 `frostOn` 做 320ms `AnimatedSwitcher`）；分栏 `SettingsDivider`；「方向」→「渐变方向」；开关/滑杆按 `AppGlass` 派生 thumb/track（ON 按钮 `primaryContainer` 系，OFF 轨道非默认灰，滑杆 thumb 同 rest pill 族）。
 
-**Verification** — `flutter analyze`：25 PRE-EXISTING；触碰 7 文件 No issues；`app_theme_flex_scheme_test` 2 PASS。评审 Spec/Correctness/Consistency 无 CRITICAL。
+**Verification** — `flutter analyze` 25 PRE-EXISTING；触碰文件 No issues；`app_theme_flex_scheme_test` 2 PASS。自动评审子代理超时取消；已本地复核：`SettingDependents` 生命周期完整（initState/didUpdateWidget/dispose）、Fade+AnimatedSwitcher+thumbColor 均在位。待真机验收。
 
 **Journey log** —
-- `nav*` 已是 getter，真相字段是 liquid/lite 四元组
-- Windows 上 `useLiteParams` 恒 true，liquid 档仅非 Windows 生效
-- 关态 rim：`floatRowRim`+`floatRowRimWidth`；开态霜壳仍 `rimWidth`
-- 旧 `navBlurSigma` encode 仍写当前生效值，便于回滚
+- `nav*` 为 getter，持久化在 liquid/lite 四字段
+- Windows `useLiteParams` 恒 true
+- frostOn 闪帧 = 高度动画与 Gate 壳体同帧硬切 → 双动画对齐
+- 包 `thumbColor` 默认 `Colors.white`，设置页须显式派生
+- 关态 rim：`floatRowRim`+`floatRowRimWidth`；开态 `rimWidth`
 
 ## [S1] Problem
 
-真机验收（条件展开后）暴露六类问题：
-
-1. 展开/收起动画不够细腻——设置页霜层最突出。
-2. 「模式」标题语义含糊，无图标。
-3. 「底栏」名不副实——模糊/色渗是渲染材质参数；液态与毛玻璃不能共用。
-4. 霜层关态轮廓在浅色下几乎不可见。
-5. 氛围渐变 tertiary 几乎读不出。
-6. 分区图标体系不齐。
+材质页 IA/参数/视觉两轮真机问题：分区语义与图标、液态/毛玻璃共用参数、展开生硬、关霜轮廓消失、tertiary 弱、霜层收展一闪、分栏无装饰、方向文案不清、开关/滑杆 thumb 纯白。
 
 ## [S2] Design
 
-### 1. 展开动画
+### 首轮（已交付）
 
-`SettingDependents` 默认：duration **320ms**，curve `easeOutCubic`，reverseCurve `easeInOutCubic`。`maintainState: true`；禁 BoxShadow。
+- 标题：渲染材质 / 材质效果 + Iconsax；动画 320ms
+- 双套参数 `liquid*`/`lite*`；`useLiteParams = lite || Windows`
+- 关态 rim outline+primary；ambient liftB light 0.28 / dark 0.22
 
-### 2/6. 分区标题 + Iconsax
+### 二轮
 
-header = `Icon(16, primary) + 8 + Text(labelLarge primary)`。
+**收展去闪** — `expansibleBuilder`：`FadeTransition` 包 body；`SettingsFrostGate` 对 frost/row 壳 `AnimatedSwitcher` 320ms 同曲线。
 
-| 标题 | AppIcons |
-|------|----------|
-| 渲染材质 | `glass_1` |
-| 材质效果 | `magicpen` |
-| 页面色渗 | `drop` |
-| 页底渐变 | `routing` |
-| 设置页霜层 | `cloud` |
-| 说明 | `info_circle` |
+**分栏装饰** — 非末栏 `_FrostSection` 尾部 `SettingsDivider`。
 
-### 3. 材质效果双套参数
+**文案** — 氛围/霜层方向标题为「渐变方向」。
 
-字段：`liquidBlurSigma` / `liquidTintStrength` / `liteBlurSigma` / `liteTintStrength`（默认各 12 / 0.38）。
+**派生控件色**（`AppGlass`）：
 
-- `useLiteParams = liteGlass || Platform.isWindows`
-- getter `navBlurSigma`/`navTintStrength` → 生效档
-- setter 只写生效档
-- 迁移：新键缺失用旧 `nav*` 播种两套；encode 保留旧键=生效值
-- UI subtitle 标明「液态玻璃参数」或「毛玻璃参数（Windows 强制）」
-- 滑杆 `ValueKey` 含 useLiteParams，切档重挂
-
-### 4. 霜层关态轮廓
-
-- light `floatRowRim` = lerp(outlineVariant, primary, 0.12) α0.55
-- dark = white α0.40
-- `floatRowRimWidth` = 1.0
-- `floatRowFill` light α0.22
-- 开态 FrostShell 仍用 `rimWidth` 0.5/0.8
-
-### 5. 氛围 tertiary
-
-liftA light 0.14 / dark 0.10；liftB light **0.28** / dark **0.22**；stops `[0, 0.40, 1]`。
+| 控件 | 状态 | 轨道 | thumb |
+|------|------|------|-------|
+| 开关 | ON | `primary` | lerp(primaryContainer, white, 0.35) |
+| 开关 | OFF | lerp(surfaceHighest, outline, 0.28) α0.72 | lerp(surface, outlineVariant, 0.22) |
+| 滑杆 | — | active primary；inactive outlineVariant α0.45 | lerp(primaryContainer, surface, 0.35) α0.92 |
 
 ## [S3] Out of Scope
 
-- 材质参数驱动设置页控件 Lens（仅底栏 chrome）
-- 外观页分段器、hub Windows 摘要、其他设置页图标/disclosure
+- 材质参数驱动设置页 Lens；外观页/底栏本体；其他设置页 disclosure
 
 ## Tasks
 
-- [x] T1: SettingDependents 动画 320ms — acceptance: 大组展开收起更平滑 (covers: S2.1)
-- [x] T2: 分区更名 + 图标 — acceptance: 渲染材质/材质效果；六分区有图标 (covers: S2.2, S2.6)
-- [x] T3: 双字段材质参数 — acceptance: liquid/lite 分档；Windows 写 lite；迁移不丢 (covers: S2.3)
-- [x] T4: 关态描边 — acceptance: 浅色关霜轮廓可辨 (covers: S2.4)
-- [x] T5: ambient tertiary — acceptance: 末端可见 tertiary (covers: S2.5)
-- [x] T6: 验证 — acceptance: analyze 基线无新增；主题测试 PASS (covers: S2; depends: T3)
+- [x] T1–T6: 首轮 IA/双参数/描边/tertiary/图标/验证
+- [x] T7: 收展去闪（Fade + Gate AnimatedSwitcher）(covers: S2 二轮)
+- [x] T8: 分栏装饰条 + 渐变方向 (covers: S2 二轮)
+- [x] T9: 开关/滑杆派生色 (covers: S2 二轮)
+- [x] T10: 二轮验证 — analyze 基线无新增；主题测试 PASS；契约本地复核 (covers: S2; depends: T7, T9)

@@ -39,6 +39,7 @@ class GlassSettingsPage extends ConsumerWidget {
     Widget frostSection({
       required String header,
       IconData? headerIcon,
+      bool showTrailingDivider = false,
       required List<Widget> children,
     }) {
       // 与设置根页 float 组同语义：frostOn 关闭时不做主/第三色渐变渗色
@@ -46,6 +47,7 @@ class GlassSettingsPage extends ConsumerWidget {
         child: _FrostSection(
           header: header,
           headerIcon: headerIcon,
+          showTrailingDivider: showTrailingDivider,
           frostOn: shell.frostOn,
           dir: frostDir,
           colorA: frostA,
@@ -75,6 +77,8 @@ class GlassSettingsPage extends ConsumerWidget {
             minimumValue: min,
             maximumValue: max,
             activeColor: scheme.primary,
+            inactiveColor: AppGlass.sliderTrackInactive(scheme),
+            thumbColor: AppGlass.sliderThumb(scheme),
             width: sliderW,
             height: 56,
             motion: motion,
@@ -123,6 +127,7 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '渲染材质',
           headerIcon: AppIcons.renderMaterial,
+          showTrailingDivider: true,
           children: [
             SettingLabel(
               title: '渲染材质',
@@ -159,6 +164,7 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '材质效果',
           headerIcon: AppIcons.materialFx,
+          showTrailingDivider: true,
           children: [
             SettingLabel(
               title: '模糊',
@@ -190,6 +196,7 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '页面色渗',
           headerIcon: AppIcons.pageTint,
+          showTrailingDivider: true,
           children: [
             SettingDependents(
               enabled: shell.pageTintOn,
@@ -233,6 +240,7 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '页底渐变',
           headerIcon: AppIcons.ambientGrad,
+          showTrailingDivider: true,
           children: [
             SettingDependents(
               enabled: shell.ambientOn,
@@ -246,7 +254,7 @@ class GlassSettingsPage extends ConsumerWidget {
               ),
               children: [
                 SettingLabel(
-                  title: '方向',
+                  title: '渐变方向',
                   subtitle: AmbientDir.parse(shell.ambientDir).label,
                 ),
                 valueSeg(
@@ -265,6 +273,7 @@ class GlassSettingsPage extends ConsumerWidget {
         frostSection(
           header: '设置页霜层',
           headerIcon: AppIcons.frostShell,
+          showTrailingDivider: true,
           children: [
             SettingDependents(
               enabled: shell.frostOn,
@@ -291,7 +300,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   bottomPad: 8,
                 ),
                 SettingLabel(
-                  title: '方向',
+                  title: '渐变方向',
                   subtitle: AmbientDir.parse(shell.frostDir).label,
                 ),
                 valueSeg(
@@ -434,6 +443,7 @@ class _FrostSection extends StatelessWidget {
   const _FrostSection({
     required this.header,
     this.headerIcon,
+    this.showTrailingDivider = false,
     required this.frostOn,
     required this.dir,
     required this.colorA,
@@ -444,6 +454,7 @@ class _FrostSection extends StatelessWidget {
 
   final String header;
   final IconData? headerIcon;
+  final bool showTrailingDivider;
   final bool frostOn;
   final AmbientDir dir;
   final Color? colorA;
@@ -490,6 +501,7 @@ class _FrostSection extends StatelessWidget {
             blurSigma: 0,
             child: body,
           ),
+          if (showTrailingDivider) const SettingsDivider(indent: 4),
         ],
       ),
     );
