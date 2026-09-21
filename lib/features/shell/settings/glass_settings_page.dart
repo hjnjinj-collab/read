@@ -121,6 +121,9 @@ class GlassSettingsPage extends ConsumerWidget {
         ? (forced ? '毛玻璃参数（Windows 强制）' : '毛玻璃参数')
         : '液态玻璃参数';
 
+    // 组内相邻参数之间的装饰条（与分栏同语言，缩进贴壳内文字）
+    const inGroupDiv = SettingsDivider(indent: 16);
+
     return SettingsScaffold(
       title: '材质与玻璃',
       slivers: [
@@ -149,6 +152,7 @@ class GlassSettingsPage extends ConsumerWidget {
               enabled: !forced && shell.glassMode == 'liquid',
               header: const SizedBox(height: 0),
               children: [
+                inGroupDiv,
                 SettingSwitchRow(
                   title: '果冻效应',
                   subtitle: shell.lgMotionOn
@@ -179,6 +183,7 @@ class GlassSettingsPage extends ConsumerWidget {
               max: 48,
               onChanged: n.setNavBlurSigma,
             ),
+            inGroupDiv,
             SettingLabel(
               title: '色渗滤镜',
               subtitle:
@@ -221,6 +226,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   max: 0.60,
                   onChanged: n.setPageTintLight,
                 ),
+                inGroupDiv,
                 SettingLabel(
                   title: '深色底',
                   subtitle:
@@ -299,6 +305,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   onPick: n.setFrostStyle,
                   bottomPad: 8,
                 ),
+                inGroupDiv,
                 SettingLabel(
                   title: '渐变方向',
                   subtitle: AmbientDir.parse(shell.frostDir).label,
@@ -311,6 +318,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   useDirGlyph: true,
                   onPick: n.setFrostDir,
                 ),
+                inGroupDiv,
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Text(
@@ -330,6 +338,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   max: 36,
                   onChanged: n.setFrostRowPadV,
                 ),
+                inGroupDiv,
                 SettingLabel(
                   title: '渐变深浅',
                   subtitle: shell.frostGradDepth <= 0.95
@@ -345,6 +354,7 @@ class GlassSettingsPage extends ConsumerWidget {
                   max: 1.8,
                   onChanged: n.setFrostGradDepth,
                 ),
+                inGroupDiv,
                 SettingLabel(
                   title: '渐变起点色',
                   subtitle: shell.frostGradA == null
@@ -374,6 +384,7 @@ class GlassSettingsPage extends ConsumerWidget {
                     ],
                   ),
                 ),
+                inGroupDiv,
                 SettingLabel(
                   title: '渐变终点色',
                   subtitle: shell.frostGradB == null

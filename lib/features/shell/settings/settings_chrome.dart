@@ -1172,6 +1172,7 @@ class SettingNavRow extends StatelessWidget {
 /// 设置容器内部分隔线：细线，左右缩进对齐内容。
 ///
 /// MD3：分隔线取强调色派生（primary 低透明度），标准 1dp 厚度。
+/// [indent] 4 = 分栏之间；16 = 同一分组内相邻参数之间（贴壳内文字）。
 class SettingsDivider extends StatelessWidget {
   const SettingsDivider({super.key, this.indent = 4});
 

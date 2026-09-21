@@ -10,16 +10,16 @@ commits: b4b506d..HEAD
 
 ## Report
 
-**What was built** — 两轮真机反馈合入同一 refine。首轮：分区更名+Iconsax、材质效果双套参数（Windows 读写 lite 档）、320ms 展开、关态描边、ambient tertiary。二轮：霜层收展去闪（`Expansible` body 同步 `FadeTransition` + `SettingsFrostGate` 对 `frostOn` 做 320ms `AnimatedSwitcher`）；分栏 `SettingsDivider`；「方向」→「渐变方向」；开关/滑杆按 `AppGlass` 派生 thumb/track（ON 按钮 `primaryContainer` 系，OFF 轨道非默认灰，滑杆 thumb 同 rest pill 族）。
+**What was built** — 两轮真机反馈 + 组内装饰条澄清。首轮：分区更名+Iconsax、材质效果双套参数（Windows 读写 lite 档）、320ms 展开、关态描边、ambient tertiary。二轮：霜层收展去闪（Fade + Gate AnimatedSwitcher）；「方向」→「渐变方向」；开关/滑杆派生 thumb/track。澄清：装饰条除分栏之间外，**同一分组内相邻参数之间**也用同款 `SettingsDivider`（indent 16），例如材质效果「模糊 ↔ 色渗滤镜」。
 
-**Verification** — `flutter analyze` 25 PRE-EXISTING；触碰文件 No issues；`app_theme_flex_scheme_test` 2 PASS。自动评审子代理超时取消；已本地复核：`SettingDependents` 生命周期完整（initState/didUpdateWidget/dispose）、Fade+AnimatedSwitcher+thumbColor 均在位。待真机验收。
+**Verification** — `flutter analyze` 25 PRE-EXISTING；触碰文件 No issues；主题测试 2 PASS。自动评审曾超时取消；生命周期/配色/装饰条接线本地复核。待真机验收。
 
 **Journey log** —
 - `nav*` 为 getter，持久化在 liquid/lite 四字段
 - Windows `useLiteParams` 恒 true
-- frostOn 闪帧 = 高度动画与 Gate 壳体同帧硬切 → 双动画对齐
-- 包 `thumbColor` 默认 `Colors.white`，设置页须显式派生
-- 关态 rim：`floatRowRim`+`floatRowRimWidth`；开态 `rimWidth`
+- frostOn 闪帧 = 高度动画与 Gate 同帧硬切 → 双动画对齐
+- 包 `thumbColor` 默认白，须显式派生
+- 装饰条两层：分栏 indent4 / 组内参数 indent16
 
 ## [S1] Problem
 
@@ -37,7 +37,9 @@ commits: b4b506d..HEAD
 
 **收展去闪** — `expansibleBuilder`：`FadeTransition` 包 body；`SettingsFrostGate` 对 frost/row 壳 `AnimatedSwitcher` 320ms 同曲线。
 
-**分栏装饰** — 非末栏 `_FrostSection` 尾部 `SettingsDivider`。
+**分栏装饰** — 非末栏 `_FrostSection` 尾部 `SettingsDivider`（indent 4）。
+
+**组内装饰（真机澄清）** — 同一分组内**相邻参数之间**同款装饰条 `SettingsDivider(indent: 16)`：材质效果「模糊↔色渗滤镜」、页面色渗「浅色底↔深色底」、霜层「方案↔渐变方向↔子栏高度↔渐变深浅↔起点色↔终点色」、渲染材质展开「果冻」前。不在「标题+其控件」中间打断。
 
 **文案** — 氛围/霜层方向标题为「渐变方向」。
 
@@ -58,5 +60,6 @@ commits: b4b506d..HEAD
 - [x] T1–T6: 首轮 IA/双参数/描边/tertiary/图标/验证
 - [x] T7: 收展去闪（Fade + Gate AnimatedSwitcher）(covers: S2 二轮)
 - [x] T8: 分栏装饰条 + 渐变方向 (covers: S2 二轮)
+- [x] T8b: 组内相邻参数装饰条 — acceptance: 模糊与色渗、色渗展开项、霜层相邻细调之间可见 indent16 装饰条；标题与其控件间不断开 (covers: S2 二轮)
 - [x] T9: 开关/滑杆派生色 (covers: S2 二轮)
 - [x] T10: 二轮验证 — analyze 基线无新增；主题测试 PASS；契约本地复核 (covers: S2; depends: T7, T9)
