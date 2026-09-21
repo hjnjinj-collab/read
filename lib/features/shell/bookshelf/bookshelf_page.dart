@@ -22,7 +22,7 @@ import '../providers/shell_actions.dart';
 import '../providers/shell_settings.dart';
 import 'book_cover_card.dart';
 import 'bookshelf_layout.dart';
-import 'recent_hero_banner.dart';
+import 'thin_continue_bar.dart';
 
 /// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -480,6 +480,29 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final contentTop = topGlass + BookshelfLayout.contentTopGap;
     final showHero = !_loading && _entries.isNotEmpty;
 
+    /// 薄续读条：优先最近且有章节进度的书；全无进度则不显示
+    (Book, ReadingProgressData?)? continueItem;
+    if (showHero) {
+      for (final e in _entries) {
+        final p = e.$2;
+        if (p != null && p.totalChapters > 0) {
+          continueItem = e;
+          break;
+        }
+      }
+      continueItem ??= _entries.first;
+    }
+
+    Widget continueBar() {
+      final item = continueItem;
+      if (item == null) return const SizedBox.shrink();
+      return ThinContinueBar(
+        book: item.$1,
+        progress: item.$2,
+        onTap: () => _openBook(item.$1),
+      );
+    }
+
     late final Widget content;
     if (_loading) {
       content = const Center(child: CircularProgressIndicator());
@@ -498,10 +521,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             padding: EdgeInsets.fromLTRB(padH, contentTop, padH, 0),
             sliver: SliverToBoxAdapter(
               child: showHero
-                  ? RecentHeroBanner(
-                      books: _entries,
-                      onTap: _openBook,
-                    )
+                  ? continueBar()
                   : const SizedBox.shrink(),
             ),
           ),
@@ -568,7 +588,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
             ),
             sliver: SliverToBoxAdapter(
               child: showHero
-                  ? RecentHeroBanner(books: _entries, onTap: _openBook)
+                  ? continueBar()
                   : const SizedBox.shrink(),
             ),
           ),
