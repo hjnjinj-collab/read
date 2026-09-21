@@ -610,6 +610,7 @@ class SettingsFrostGate extends ConsumerWidget {
 }
 
 /// 子栏外壳：只绘制淡描边，不覆盖下层渐变。
+/// [showBorder]=false：纸页浮雕连续组内行——无 rim，只靠组外形。
 class SettingsRowShell extends StatelessWidget {
   const SettingsRowShell({
     super.key,
@@ -617,12 +618,14 @@ class SettingsRowShell extends StatelessWidget {
     required this.child,
     this.fill,
     this.gradient,
+    this.showBorder = true,
   });
 
   final BorderRadius borderRadius;
   final Widget child;
   final Color? fill;
   final Gradient? gradient;
+  final bool showBorder;
 
   @override
   Widget build(BuildContext context) {
@@ -631,10 +634,12 @@ class SettingsRowShell extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: borderRadius,
         // 描边与 FrostShell 同语言；关态宽度走 AppGlass.floatRowRimWidth
-        border: Border.all(
-          color: AppGlass.floatRowRim(scheme),
-          width: AppGlass.floatRowRimWidth(scheme),
-        ),
+        border: showBorder
+            ? Border.all(
+                color: AppGlass.floatRowRim(scheme),
+                width: AppGlass.floatRowRimWidth(scheme),
+              )
+            : null,
         gradient: gradient,
         color: gradient == null ? fill : null,
       ),
@@ -687,14 +692,31 @@ class SettingsGroup extends ConsumerWidget {
         children: [
           if (header != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-              child: Text(
-                header!,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    header!,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  // 纸页浮雕：分区装饰短线（渐变），替代线框感
+                  Container(
+                    height: 3,
+                    width: 36,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(2),
+                      gradient: LinearGradient(
+                        colors: [scheme.primary, scheme.tertiary],
+                      ),
                     ),
+                  ),
+                ],
               ),
             ),
           if (splitItems)
@@ -738,7 +760,7 @@ class SettingsGroup extends ConsumerWidget {
     return _tonalCard(scheme, rows);
   }
 
-  /// 根页：unified = 整组连续渐变 + 联合轮廓（默认）；slice = 旧切片。
+  /// 根页：**纸页浮雕**始终 unified 连续一张卡（忽略 frostStyle slice）。
   Widget _floatGrouped(
     BuildContext context,
     ColorScheme scheme,
@@ -750,17 +772,6 @@ class SettingsGroup extends ConsumerWidget {
         shell.frostGradA != null ? Color(shell.frostGradA!) : null;
     final colorB =
         shell.frostGradB != null ? Color(shell.frostGradB!) : null;
-    if (shell.frostStyle == 'slice') {
-      return _floatGroupedSlice(
-        scheme,
-        rows,
-        frostDir,
-        shell.frostOn,
-        colorA: colorA,
-        colorB: colorB,
-        depth: shell.frostGradDepth,
-      );
-    }
     return SettingsFrostGroup(
       rows: rows,
       dir: frostDir,
@@ -768,83 +779,10 @@ class SettingsGroup extends ConsumerWidget {
       colorA: colorA,
       colorB: colorB,
       gradDepth: shell.frostGradDepth,
-    );
-  }
-
-  /// 备选：每栏渐变切片 + 软描边/光晕
-  Widget _floatGroupedSlice(
-    ColorScheme scheme,
-    List<Widget> rows,
-    AmbientDir frostDir,
-    bool frostOn, {
-    Color? colorA,
-    Color? colorB,
-    double depth = 1.0,
-  }) {
-    final (begin, end) = frostDir.alignment;
-    const rowGap = AppGlass.floatRowGap;
-    const rowR = 12.0;
-    final n = rows.length;
-    final light = scheme.brightness == Brightness.light;
-
-    BorderRadius rowRadius(int i) {
-      if (n == 1) return BorderRadius.circular(rowR);
-      if (i == 0) {
-        return const BorderRadius.vertical(top: Radius.circular(rowR));
-      }
-      if (i == n - 1) {
-        return const BorderRadius.vertical(bottom: Radius.circular(rowR));
-      }
-      return BorderRadius.zero;
-    }
-
-    return Container(
-      decoration: frostOn
-          ? BoxDecoration(
-              borderRadius: BorderRadius.circular(rowR),
-              boxShadow: [
-                BoxShadow(
-                  color: scheme.shadow.withValues(alpha: light ? 0.06 : 0.28),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                  spreadRadius: -4,
-                ),
-                BoxShadow(
-                  color: scheme.shadow.withValues(alpha: light ? 0.03 : 0.16),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                  spreadRadius: -1,
-                ),
-              ],
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < n; i++) ...[
-            if (i > 0) const SizedBox(height: rowGap),
-            SettingsRowShell(
-              borderRadius: rowRadius(i),
-              gradient: frostOn
-                  ? LinearGradient(
-                      begin: begin,
-                      end: end,
-                      colors: AppGlass.frostRowSlice(
-                        scheme,
-                        i,
-                        n,
-                        colorA: colorA,
-                        colorB: colorB,
-                        depth: depth,
-                      ),
-                    )
-                  : null,
-              fill: frostOn ? null : AppGlass.floatRowFill(scheme),
-              child: rows[i],
-            ),
-          ],
-        ],
-      ),
+      // 连续岛：无行缝、大圆角、无行描边
+      rowGap: 0,
+      rowRadius: 26,
+      showRowBorder: false,
     );
   }
 
@@ -872,9 +810,8 @@ class SettingsGroup extends ConsumerWidget {
   }
 }
 
-/// **统一霜层**（默认）：整组一条连续渐变 + 单次 blur，
-/// 用各行圆角矩形的**联合轮廓**裁切——缝里不画霜，透出页底。
-/// 子栏前景只带各自阴影/描边，不各自开 BackdropFilter。
+/// **统一霜层 / 纸页浮雕**：整组连续渐变；[rowGap]=0 时单圆角一张卡。
+/// 子栏前景可关描边（[showRowBorder]），不各自开 BackdropFilter。
 class SettingsFrostGroup extends StatefulWidget {
   const SettingsFrostGroup({
     super.key,
@@ -887,6 +824,7 @@ class SettingsFrostGroup extends StatefulWidget {
     this.colorA,
     this.colorB,
     this.gradDepth = 1.0,
+    this.showRowBorder = true,
   });
 
   final List<Widget> rows;
@@ -898,6 +836,7 @@ class SettingsFrostGroup extends StatefulWidget {
   final Color? colorA;
   final Color? colorB;
   final double gradDepth;
+  final bool showRowBorder;
 
   @override
   State<SettingsFrostGroup> createState() => _SettingsFrostGroupState();
@@ -982,11 +921,78 @@ class _SettingsFrostGroupState extends State<SettingsFrostGroup> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
     final light = scheme.brightness == Brightness.light;
+    // 纸页浮雕：无行缝时整组一个 ClipRRect（真·一张卡）
+    final continuous = widget.rowGap <= 0.001;
+    final groupR = BorderRadius.circular(widget.rowRadius);
+
+    final frostLayer = widget.enabled
+        ? (continuous
+            ? BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: widget.blurSigma,
+                  sigmaY: widget.blurSigma,
+                ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: begin,
+                      end: end,
+                      colors: stops,
+                      stops: const [0, 0.48, 1],
+                    ),
+                  ),
+                  child: const SizedBox.expand(),
+                ),
+              )
+            : _rowRects.length == _n
+                ? ClipPath(
+                    clipper: _RowUnionClipper(_rowRects, widget.rowRadius),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: widget.blurSigma,
+                        sigmaY: widget.blurSigma,
+                      ),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: begin,
+                            end: end,
+                            colors: stops,
+                            stops: const [0, 0.48, 1],
+                          ),
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  )
+                : null)
+        : null;
+
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < _n; i++) ...[
+          if (i > 0 && widget.rowGap > 0) SizedBox(height: widget.rowGap),
+          SettingsRowShell(
+            key: _keys[i],
+            borderRadius: continuous
+                ? BorderRadius.zero
+                : _radius(i),
+            showBorder: widget.showRowBorder && !continuous,
+            // 连续卡关态填色在组 Clip 层，行不再叠一层
+            fill: (widget.enabled || continuous)
+                ? null
+                : AppGlass.floatRowFill(scheme),
+            child: widget.rows[i],
+          ),
+        ],
+      ],
+    );
 
     return Container(
       decoration: widget.enabled
           ? BoxDecoration(
-              borderRadius: BorderRadius.circular(widget.rowRadius),
+              borderRadius: groupR,
               boxShadow: [
                 BoxShadow(
                   color: scheme.shadow.withValues(alpha: light ? 0.06 : 0.28),
@@ -1003,51 +1009,28 @@ class _SettingsFrostGroupState extends State<SettingsFrostGroup> {
               ],
             )
           : null,
-      child: Stack(
-        children: [
-          if (widget.enabled && _rowRects.length == _n)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: ClipPath(
-                  clipper: _RowUnionClipper(_rowRects, widget.rowRadius),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(
-                      sigmaX: widget.blurSigma,
-                      sigmaY: widget.blurSigma,
+      child: continuous
+          ? ClipRRect(
+              borderRadius: groupR,
+              child: Stack(
+                children: [
+                  if (frostLayer != null)
+                    Positioned.fill(child: IgnorePointer(child: frostLayer))
+                  else
+                    Positioned.fill(
+                      child: ColoredBox(color: AppGlass.floatRowFill(scheme)),
                     ),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: begin,
-                          end: end,
-                          colors: stops,
-                          stops: const [0, 0.48, 1],
-                        ),
-                      ),
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                ),
+                  body,
+                ],
               ),
-            ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var i = 0; i < _n; i++) ...[
-                if (i > 0) SizedBox(height: widget.rowGap),
-                SettingsRowShell(
-                  key: _keys[i],
-                  borderRadius: _radius(i),
-                  fill: widget.enabled
-                      ? null
-                      : AppGlass.floatRowFill(scheme),
-                  child: widget.rows[i],
-                ),
+            )
+          : Stack(
+              children: [
+                if (frostLayer != null)
+                  Positioned.fill(child: IgnorePointer(child: frostLayer)),
+                body,
               ],
-            ],
-          ),
-        ],
-      ),
+            ),
     );
   }
 }
@@ -1123,20 +1106,16 @@ class SettingNavRow extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: padV),
         child: Row(
           children: [
+            // 纸页浮雕：圆 tonal 徽，无描边方盒
             DecoratedBox(
               decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: Colors.white.withValues(
-                    alpha: scheme.brightness == Brightness.light ? 0.34 : 0.12,
-                  ),
-                ),
+                color: scheme.primary.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
               ),
               child: SizedBox(
                 width: 36,
                 height: 36,
-                child: Icon(icon, size: 22, color: scheme.primary),
+                child: Icon(icon, size: 20, color: scheme.primary),
               ),
             ),
             const SizedBox(width: 14),
