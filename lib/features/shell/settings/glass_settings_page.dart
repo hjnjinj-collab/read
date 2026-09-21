@@ -7,6 +7,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 // ignore: implementation_imports
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
+import '../../../core/theme/app_theme.dart' show AppGlass;
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
 import 'settings_chrome.dart';
@@ -38,10 +39,11 @@ class GlassSettingsPage extends ConsumerWidget {
       required String header,
       required List<Widget> children,
     }) {
-      // SettingsScaffold.slivers 只接受 Sliver；箱式分组必须包一层
+      // 与设置根页 float 组同语义：frostOn 关闭时不做主/第三色渐变渗色
       return SliverToBoxAdapter(
         child: _FrostSection(
           header: header,
+          frostOn: shell.frostOn,
           dir: frostDir,
           colorA: frostA,
           colorB: frostB,
@@ -362,10 +364,11 @@ class GlassSettingsPage extends ConsumerWidget {
       );
 }
 
-/// 统一分组：分区头 + SettingsFrostShell
+/// 统一分组：分区头 + 霜壳/中性壳（跟随设置页「垫底霜层」开关）
 class _FrostSection extends StatelessWidget {
   const _FrostSection({
     required this.header,
+    required this.frostOn,
     required this.dir,
     required this.colorA,
     required this.colorB,
@@ -374,6 +377,7 @@ class _FrostSection extends StatelessWidget {
   });
 
   final String header;
+  final bool frostOn;
   final AmbientDir dir;
   final Color? colorA;
   final Color? colorB;
@@ -383,6 +387,28 @@ class _FrostSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
+    // frostOn=false：与根页 float 关霜一致——轻透填色 + rim，无主色渐变
+    final shellWidget = frostOn
+        ? SettingsFrostShell(
+            dir: dir,
+            colorA: colorA,
+            colorB: colorB,
+            gradDepth: depth,
+            showShadow: false,
+            // 内层含 Liquid Lens/Slider：壳体只留渐变+rim，
+            // 不叠 BackdropFilter——嵌套 BF 会在 Impeller 下纹理错乱
+            blurSigma: 0,
+            child: body,
+          )
+        : SettingsRowShell(
+            borderRadius: BorderRadius.circular(16),
+            fill: AppGlass.floatRowFill(scheme),
+            child: body,
+          );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
@@ -399,20 +425,7 @@ class _FrostSection extends StatelessWidget {
                   ),
             ),
           ),
-          SettingsFrostShell(
-            dir: dir,
-            colorA: colorA,
-            colorB: colorB,
-            gradDepth: depth,
-            showShadow: false,
-            // 内层含 Liquid Lens/Slider：壳体只留渐变+rim，
-            // 不叠 BackdropFilter——嵌套 BF 会在 Impeller 下纹理错乱
-            blurSigma: 0,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: children,
-            ),
-          ),
+          shellWidget,
         ],
       ),
     );
@@ -444,6 +457,7 @@ class _LiquidValueSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
     // 静止态包内只画 rest pill（DecoratedBox 直接用 appearance.color）。
     // 真机反馈 α0.55 仍偏实：再向 surface 混淡 + α0.30，保证半透明观感。
     // glass/rest 同色，避免动画收尾色跳。
@@ -466,12 +480,13 @@ class _LiquidValueSegmented extends StatelessWidget {
       style: LiquidGlassStyle(
         shape: LiquidGlassShape.continuousRoundedRectangle(
           cornerRadius: 16,
-          borderWidth: 0,
-          borderColor: Colors.transparent,
-          lightIntensity: 0,
-          borderType: const OpticalBorder(
-            borderSolidity: 0,
-            ambientIntensity: 0,
+          // 外轮廓：与霜壳 rim 同语言（明暗分档），避免轨道“消失”
+          borderWidth: AppGlass.rimWidth(scheme),
+          borderColor: Colors.white.withValues(alpha: light ? 0.42 : 0.26),
+          lightIntensity: 0.85,
+          borderType: OpticalBorder(
+            borderSolidity: 0.35,
+            ambientIntensity: 0.5,
           ),
         ),
         appearance: LiquidGlassAppearance(

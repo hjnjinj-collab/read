@@ -10,36 +10,37 @@ commits: 3ec3693..HEAD
 
 ## Report
 
-**What was built** — 六组霜壳 + 液态分段；嵌套 BF 跳过；静止 pill
-压淡为 `lerp(primaryContainer, surface, 0.28) α0.30`（glass/rest 同色，
-防色跳）；轨道 blur 0；grow 4；底栏窄窗 barW / Sliver 包装修复。
+**What was built** — 材质与玻璃页六组统一霜壳 + 液态分段；静止 pill
+半透明（lerp surface α0.30）；嵌套 BF 跳过；**二级页霜壳跟随
+`shell.frostOn`**（关=轻透 `floatRowFill` 壳，开=渐变 FrostShell）；
+**分段轨道外轮廓** rim 明暗分档（0.42/0.26 + rimWidth）。
 
-**Verification** — settings analyze 零 issue；主题测试 2 PASS；
-本轮 pill 压淡审查 PASS、无 critical。真机观感待用户确认。
+**Verification** — settings analyze 零 issue；本轮审查 Spec/Correctness/
+Consistency 均 PASS、无 critical。真机观感待确认。
 
 **Journey log** —
-- Impeller：`blurSigma=0` 的 BackdropFilter 仍是一层 BF，必须条件跳过。
-- 包内 rest pill 是 `DecoratedBox(color)`，α 直接生效；0.55 叠霜壳仍偏实。
-- 设置页分段勿绑底栏 `navBlurSigma`。
-- 箱式分组进 `slivers` 必须 `SliverToBoxAdapter`。
+- Impeller：`blurSigma=0` 的 BackdropFilter 仍要**条件跳过**。
+- 二级页霜壳必须读 `frostOn`，与根页 float 组同语义。
+- 液态轨道勿 `borderWidth:0`——设置页需要可见外描边。
 
 ## [S1] Problem
 
-材质与玻璃页液态分段：纹理错乱/色盖/过实；静止派生色仍不够半透明。
+二级页霜壳未关联「垫底霜层」；液态分段无外轮廓；（历史）嵌套 BF /
+rest 过实。
 
 ## [S2] Design
 
-- 霜壳 `blurSigma<=0` 不挂 BF
-- pill = `lerp(primaryContainer, surface, 0.28)!.withValues(alpha: 0.30)`，
-  glass/rest 同色；选中字 `primary`
-- 轨道 blur 0；growHeight 4
+- frostOn true → FrostShell(blurSigma:0)；false → RowShell + floatRowFill
+- 分段轨道：rimWidth + 白 rim α 0.42/0.26
+- pill：lerp(primaryContainer, surface, 0.28) α0.30，glass/rest 同色
 
 ## [S3] Out of Scope
 
-- 外观页 / 底栏 α0.9 pill；包源码；新增设置项
+- 外观页切换器、底栏 α0.9、包源码
 
 ## Tasks
 
-- [x] T1: rest/glass pill 压淡 — acceptance: 静止更半透明；glass/rest 同色 (covers: S2)
-- [x] T2: 验证 — analyze 零新增；审查 PASS (covers: S2; depends: T1)
-- [x] 历史: 全页霜壳 + 嵌套 BF 跳过 + 窄窗/Sliver 修复（b9a2741 等）
+- [x] T1: frostOn 联动二级页霜壳 (covers: S2)
+- [x] T2: 分段外轮廓 (covers: S2)
+- [x] T3: 验证 — analyze 零新增；审查 PASS (covers: S2)
+- [x] 历史: 全页液态/压淡/嵌套 BF/窄窗 Sliver 等
