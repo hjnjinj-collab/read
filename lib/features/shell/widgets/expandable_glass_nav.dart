@@ -5,6 +5,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
 import '../../../core/theme/app_icons.dart';
+import '../../../core/theme/app_theme.dart' show AppGlass;
 
 /// 可扩展液态底栏。
 ///
@@ -50,23 +51,17 @@ class ExpandableGlassNav extends StatelessWidget {
         growHeight: grow,
         glassStyle: LiquidGlassStyle(
           appearance: LiquidGlassAppearance(
-            // 派生色选中底（primaryContainer α0.9），与设置页切换器同语言
-            color: pillBase,
+            // 动画态：透明透底、无阴影（与设置分段契约一致）
+            color: Colors.transparent,
             blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
-            shadow: LiquidGlassShadow(
-              blur: 12,
-              opacity: 0.28,
-              inset: 0,
-              cornerRadius: (height - 4) / 2,
-            ),
+            shadow: null,
           ),
           refraction: const LiquidGlassRefraction(
             distortion: 0.07,
             distortionWidth: 14,
           ),
         ),
-        // 静止选中态走 restStyle 的 tinted pill——
-        // 不设则回落组件默认白色（T16 同款根因）
+        // 静止：AppGlass.restPillTint 较高透明度派生色
         restStyle: LiquidGlassStyle(
           appearance: LiquidGlassAppearance(color: pillBase),
         ),
@@ -83,8 +78,8 @@ class ExpandableGlassNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // 选中 pill 派生色底：glassStyle/restStyle 双层同色（设置页 T16 同语言）
-    final pillBase = scheme.primaryContainer.withValues(alpha: 0.9);
+    // 静止/选中 pill：与设置分段同一 restPillTint（较高透明度派生色）
+    final pillBase = AppGlass.restPillTint(scheme);
     final circle = height;
     // 父级 AppShell 左右 pad 16。用**真实可用宽**计算，禁止 clamp 抬高后
     // 与 Row constraint 脱节（窄窗 Windows 曾溢出 9.6px：196+64>250.4）。

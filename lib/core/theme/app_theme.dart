@@ -291,6 +291,13 @@ class AppGlass {
   static double rimWidth(ColorScheme scheme) =>
       scheme.brightness == Brightness.light ? 0.5 : 0.8;
 
+  /// 静止选中 pill 派生色（设置分段 / 底栏统一）：
+  /// **较高透明度**——向 surface 混淡 + α0.42，避免 α0.9 过实。
+  static Color restPillTint(ColorScheme scheme) {
+    return Color.lerp(scheme.primaryContainer, scheme.surface, 0.28)!
+        .withValues(alpha: 0.42);
+  }
+
   /// 子栏行缝（两套方案共用）
   static const double floatRowGap = 5;
 

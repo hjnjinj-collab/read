@@ -548,6 +548,55 @@ class SettingsFrostShell extends StatelessWidget {
   }
 }
 
+/// 二级页分组壳：跟随设置「垫底霜层」`frostOn`。
+/// - 关：`SettingsRowShell` + floatRowFill（无主色渐变，与根页关霜一致）
+/// - 开：`SettingsFrostShell`；默认 `blurSigma: 0`（内层常含 Lens，防嵌套 BF）
+class SettingsFrostGate extends ConsumerWidget {
+  const SettingsFrostGate({
+    super.key,
+    required this.child,
+    this.radius = 16,
+    this.blurSigma = 0,
+    this.dir,
+    this.colorA,
+    this.colorB,
+    this.gradDepth,
+  });
+
+  final Widget child;
+  final double radius;
+  final double blurSigma;
+  final AmbientDir? dir;
+  final Color? colorA;
+  final Color? colorB;
+  final double? gradDepth;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shell = ref.watch(shellSettingsProvider);
+    final scheme = Theme.of(context).colorScheme;
+    if (!shell.frostOn) {
+      return SettingsRowShell(
+        borderRadius: BorderRadius.circular(radius),
+        fill: AppGlass.floatRowFill(scheme),
+        child: child,
+      );
+    }
+    return SettingsFrostShell(
+      radius: radius,
+      blurSigma: blurSigma,
+      dir: dir ?? AmbientDir.parse(shell.frostDir),
+      colorA: colorA ??
+          (shell.frostGradA != null ? Color(shell.frostGradA!) : null),
+      colorB: colorB ??
+          (shell.frostGradB != null ? Color(shell.frostGradB!) : null),
+      gradDepth: gradDepth ?? shell.frostGradDepth,
+      showShadow: false,
+      child: child,
+    );
+  }
+}
+
 /// 子栏外壳：只绘制淡描边，不覆盖下层渐变。
 class SettingsRowShell extends StatelessWidget {
   const SettingsRowShell({

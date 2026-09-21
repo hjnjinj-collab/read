@@ -393,24 +393,6 @@ class _FrostSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
     );
-    // frostOn=false：与根页 float 关霜一致——轻透填色 + rim，无主色渐变
-    final shellWidget = frostOn
-        ? SettingsFrostShell(
-            dir: dir,
-            colorA: colorA,
-            colorB: colorB,
-            gradDepth: depth,
-            showShadow: false,
-            // 内层含 Liquid Lens/Slider：壳体只留渐变+rim，
-            // 不叠 BackdropFilter——嵌套 BF 会在 Impeller 下纹理错乱
-            blurSigma: 0,
-            child: body,
-          )
-        : SettingsRowShell(
-            borderRadius: BorderRadius.circular(16),
-            fill: AppGlass.floatRowFill(scheme),
-            child: body,
-          );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
@@ -427,7 +409,14 @@ class _FrostSection extends StatelessWidget {
                   ),
             ),
           ),
-          shellWidget,
+          SettingsFrostGate(
+            dir: dir,
+            colorA: colorA,
+            colorB: colorB,
+            gradDepth: depth,
+            blurSigma: 0,
+            child: body,
+          ),
         ],
       ),
     );
@@ -470,12 +459,7 @@ class _LiquidValueSegmented extends StatelessWidget {
     final pillH = _height - _pad * 2;
     // 内 pill 随外轨：outerR − padding，下限 10 保持胶囊感
     final pillR = (_outerR - _pad).clamp(10.0, pillH / 2);
-    final pillBase = Color.lerp(
-      scheme.primaryContainer,
-      scheme.surface,
-      0.28,
-    )!
-        .withValues(alpha: 0.30);
+    final pillBase = AppGlass.restPillTint(scheme);
     final idx = values.indexOf(selected);
     final pillShape = LiquidGlassShape.continuousRoundedRectangle(
       cornerRadius: pillR,
@@ -529,15 +513,10 @@ class _LiquidValueSegmented extends StatelessWidget {
                 glassStyle: LiquidGlassStyle(
                   shape: pillShape,
                   appearance: LiquidGlassAppearance(
-                    // 动画/鼓动态：不叠派生滤镜色，直接透出底下内容
+                    // 动画/鼓动态：透明透底，且**无阴影**（真机：阴影仍挡内容）
                     color: Colors.transparent,
                     blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
-                    shadow: LiquidGlassShadow(
-                      blur: 8,
-                      opacity: 0.14,
-                      inset: 0,
-                      cornerRadius: pillR,
-                    ),
+                    shadow: null,
                   ),
                   refraction: const LiquidGlassRefraction(
                     distortion: 0.08,

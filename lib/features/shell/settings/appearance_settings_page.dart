@@ -64,14 +64,12 @@ class _AppearanceSettingsPageState
                   label: '主题',
                   scheme: scheme,
                 ),
-                SettingsFrostShell(
+                SettingsFrostGate(
                   dir: frostDir,
                   colorA: frostA,
                   colorB: frostB,
                   gradDepth: frostDepth,
-                  showShadow: false,
-                  // 不加外层 Padding：每个子组件自带 padding，
-                  // 确保开关右边距与「书架布局」一致（均为 SettingSwitchRow 自身的 16px）
+                  blurSigma: 0,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -207,12 +205,12 @@ class _AppearanceSettingsPageState
                   label: '明暗模式',
                   scheme: scheme,
                 ),
-                SettingsFrostShell(
+                SettingsFrostGate(
                   dir: frostDir,
                   colorA: frostA,
                   colorB: frostB,
                   gradDepth: frostDepth,
-                  showShadow: false,
+                  blurSigma: 0,
                   child: Listener(
                     onPointerDown: (e) => _lastTapPosition = e.position,
                     child: LiquidGlassSegmented(
@@ -324,38 +322,27 @@ class _AppearanceSettingsPageState
                         growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            // 派生色选中底（primaryContainer α0.9）+
-                            // onPrimaryContainer 文字，MD3 可读性配对
-                            color: scheme.primaryContainer
-                                .withValues(alpha: 0.9),
+                            // 动画透明透底、无阴影；静止 restPillTint
+                            color: Colors.transparent,
                             blur: const LiquidGlassBlur(
                               sigmaX: 1.5,
                               sigmaY: 1.5,
                             ),
-                            shadow: LiquidGlassShadow(
-                              blur: 8,
-                              opacity: 0.20,
-                              inset: 0,
-                              // 跟随胶囊半径 pillH/2 = 40/2
-                              cornerRadius: 20,
-                            ),
+                            shadow: null,
                           ),
                           refraction: const LiquidGlassRefraction(
                             distortion: 0.08,
                             distortionWidth: 12,
                           ),
                         ),
-                        // 静止选中态走 restStyle 的 tinted pill——
-                        // 不设则回落组件默认白色（动画后派生色消失）
                         restStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            color: scheme.primaryContainer
-                                .withValues(alpha: 0.9),
+                            color: AppGlass.restPillTint(scheme),
                           ),
                         ),
                       ),
                       labelStyle: LiquidGlassSegmentedLabelStyle(
-                        selectedColor: scheme.onPrimaryContainer,
+                        selectedColor: scheme.primary,
                         unselectedColor: scheme.onSurfaceVariant,
                         fontSize: 12,
                         selectedFontWeight: FontWeight.w600,
@@ -379,12 +366,12 @@ class _AppearanceSettingsPageState
                   label: '书架布局',
                   scheme: scheme,
                 ),
-                SettingsFrostShell(
+                SettingsFrostGate(
                   dir: frostDir,
                   colorA: frostA,
                   colorB: frostB,
                   gradDepth: frostDepth,
-                  showShadow: false,
+                  blurSigma: 0,
                   child: SettingSwitchRow(
                     title: '网格布局',
                     subtitle: '关闭则使用列表模式',
@@ -643,10 +630,10 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
         backgroundColor: Colors.transparent,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
-          child: SettingsFrostShell(
+          child: SettingsFrostGate(
             // 对话框独立卡片感：圆角 24（页面容器保持 16）
             radius: 24,
-            // 霜向/渐变跟随用户外观自定义，与页面容器同源
+            blurSigma: 0,
             dir: AmbientDir.parse(shell.frostDir),
             colorA: shell.frostGradA != null
                 ? Color(shell.frostGradA!)
@@ -733,36 +720,26 @@ class _ColorPickerDialogState extends ConsumerState<_ColorPickerDialog> {
                         growHeight: shell.lgMotionOn ? 6 : 0,
                         glassStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            // 派生色选中底，与明暗切换器同语言
-                            color: scheme.primaryContainer
-                                .withValues(alpha: 0.9),
+                            color: Colors.transparent,
                             blur: const LiquidGlassBlur(
                               sigmaX: 1.5,
                               sigmaY: 1.5,
                             ),
-                            shadow: LiquidGlassShadow(
-                              blur: 8,
-                              opacity: 0.20,
-                              inset: 0,
-                              // 跟随胶囊半径 pillH/2 = 28/2
-                              cornerRadius: 14,
-                            ),
+                            shadow: null,
                           ),
                           refraction: const LiquidGlassRefraction(
                             distortion: 0.08,
                             distortionWidth: 12,
                           ),
                         ),
-                        // 静止选中态派生色（同明暗切换器，包默认白色取代问题）
                         restStyle: LiquidGlassStyle(
                           appearance: LiquidGlassAppearance(
-                            color: scheme.primaryContainer
-                                .withValues(alpha: 0.9),
+                            color: AppGlass.restPillTint(scheme),
                           ),
                         ),
                       ),
                       labelStyle: LiquidGlassSegmentedLabelStyle(
-                        selectedColor: scheme.onPrimaryContainer,
+                        selectedColor: scheme.primary,
                         unselectedColor: scheme.onSurfaceVariant,
                         fontSize: 12,
                         selectedFontWeight: FontWeight.w600,
