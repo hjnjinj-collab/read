@@ -587,14 +587,28 @@ class _LiquidValueSegmented extends StatelessWidget {
                     },
             ),
           ),
-          // B：前景 bevel（Clip 外）。注意：BoxDecoration 圆角不能配
-          // 非均匀 BorderSide 颜色 → 必须用 CustomPaint 画渐变描边
+          // B：前景 bevel（Clip 外）+ 外侧落影，明暗分档保证深色可辨
           Positioned.fill(
             child: IgnorePointer(
-              child: CustomPaint(
-                painter: _BevelRimPainter(
-                  radius: _outerR,
-                  light: light,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(_outerR),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: light ? 0.10 : 0.38,
+                      ),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                      spreadRadius: -1,
+                    ),
+                  ],
+                ),
+                child: CustomPaint(
+                  painter: _BevelRimPainter(
+                    radius: _outerR,
+                    light: light,
+                  ),
                 ),
               ),
             ),
@@ -704,7 +718,8 @@ class _BevelRimPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final stroke = light ? 0.9 : 1.1;
+    // 深色底上黑边 α 过低会看不见——分档抬高下缘对比与线宽
+    final stroke = light ? 1.0 : 1.35;
     final rrect = RRect.fromRectAndRadius(
       Offset.zero & size,
       Radius.circular(radius),
@@ -716,12 +731,12 @@ class _BevelRimPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Colors.white.withValues(alpha: light ? 0.58 : 0.42),
-          Colors.white.withValues(alpha: light ? 0.30 : 0.22),
-          // 底边减淡：保留对比但不压黑（真机反馈过暗）
-          Colors.black.withValues(alpha: light ? 0.05 : 0.09),
+          Colors.white.withValues(alpha: light ? 0.62 : 0.48),
+          Colors.white.withValues(alpha: light ? 0.34 : 0.26),
+          // 下缘：立体感靠可辨的暗边，而非「看不见」
+          Colors.black.withValues(alpha: light ? 0.14 : 0.34),
         ],
-        stops: const [0, 0.45, 1],
+        stops: const [0, 0.42, 1],
       ).createShader(rrect.outerRect);
     canvas.drawRRect(rrect.deflate(stroke / 2), paint);
   }
