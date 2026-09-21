@@ -456,24 +456,16 @@ class _LiquidValueSegmented extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final pillH = _height - _pad * 2;
-    // 内 pill 随外轨：outerR − padding，下限 10 保持胶囊感
-    final pillR = (_outerR - _pad).clamp(10.0, pillH / 2);
     final pillBase = AppGlass.restPillTint(scheme);
     final idx = values.indexOf(selected);
-    final pillShape = LiquidGlassShape.continuousRoundedRectangle(
-      cornerRadius: pillR,
-      borderWidth: 0,
-      borderColor: Colors.transparent,
-      lightIntensity: 0,
-    );
 
     return SizedBox(
       height: _height,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 内容层裁进外轨：模糊/鼓动不得泄到霜壳上
+          // 内容层：与外观页明暗切换器同构（包内默认胶囊 morph 鼓动）
+          // ClipRRect 仅拦外泄；pill **不要**写死 shape，否则包 morph 不显
           ClipRRect(
             borderRadius: BorderRadius.circular(_outerR),
             child: LiquidGlassSegmented(
@@ -495,7 +487,6 @@ class _LiquidValueSegmented extends StatelessWidget {
                 appearance: LiquidGlassAppearance(
                   color: Colors.transparent,
                   blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
-                  // 无 shadow：接触影外扩也是「模糊泄露」观感来源
                   shadow: null,
                 ),
                 refraction: const LiquidGlassRefraction(
@@ -507,15 +498,12 @@ class _LiquidValueSegmented extends StatelessWidget {
               pillStyle: LiquidGlassSegmentedPillStyle(
                 glass: lgMotionOn,
                 animated: true,
-                // 恢复鼓动幅度：包内 morph 在轨道高度内完成
-                // （40→46 < 60），ClipRRect 只拦出轨外泄，不吞峰
                 growHeight: lgMotionOn ? 6 : 0,
+                // 与外观页一致：不传 shape，走包默认胶囊，保证 morph 鼓动
                 glassStyle: LiquidGlassStyle(
-                  shape: pillShape,
                   appearance: LiquidGlassAppearance(
-                    // 动画/鼓动态：透明透底，且**无阴影**（真机：阴影仍挡内容）
                     color: Colors.transparent,
-                    blur: const LiquidGlassBlur(sigmaX: 1.2, sigmaY: 1.2),
+                    blur: const LiquidGlassBlur(sigmaX: 1.5, sigmaY: 1.5),
                     shadow: null,
                   ),
                   refraction: const LiquidGlassRefraction(
@@ -525,9 +513,7 @@ class _LiquidValueSegmented extends StatelessWidget {
                   ),
                 ),
                 restStyle: LiquidGlassStyle(
-                  shape: pillShape,
                   appearance: LiquidGlassAppearance(
-                    // 仅静止态为派生色（用户契约）
                     color: pillBase,
                     blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
                   ),
