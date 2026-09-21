@@ -18,8 +18,10 @@ class ShellSettings {
     this.themeMode = 'system',
     this.seedArgb,
     this.seedSource = 'preset',
-    this.navBlurSigma = 12,
-    this.navTintStrength = 0.38,
+    this.liquidBlurSigma = 12,
+    this.liquidTintStrength = 0.38,
+    this.liteBlurSigma = 12,
+    this.liteTintStrength = 0.38,
     this.glassMode = 'liquid',
     this.pageTintOn = true,
     this.pageTintLight = 0.35,
@@ -49,11 +51,17 @@ class ShellSettings {
   /// 仅在 dynamicColor 关闭时有意义——动态取色开启时覆盖一切。
   final String seedSource;
 
-  /// 底栏玻璃模糊 sigma（0=关模糊只留着色；默认 12）
-  final double navBlurSigma;
+  /// 液态玻璃档：底栏/材质模糊 sigma（0=关模糊只留着色；默认 12）
+  final double liquidBlurSigma;
 
-  /// 底栏色渗强度 0–1（primaryContainer 混入比例）
-  final double navTintStrength;
+  /// 液态玻璃档：色渗强度 0–1
+  final double liquidTintStrength;
+
+  /// 毛玻璃档：模糊 sigma
+  final double liteBlurSigma;
+
+  /// 毛玻璃档：色渗强度 0–1
+  final double liteTintStrength;
 
   /// liquid = 液态折射（Impeller 实时；Skia 无 View 时自动退化为霜面）
   /// lite   = 毛玻璃霜面（无 shader / 无 capture，性能优先）
@@ -112,6 +120,17 @@ class ShellSettings {
 
   bool get liteGlass => glassMode == 'lite';
 
+  /// 与 [applyGlassEngine] forceLite 同源：Windows 强制走毛玻璃参数档
+  bool get useLiteParams => liteGlass || Platform.isWindows;
+
+  /// 当前生效模糊（兼容旧调用：底栏 / hub / appearance）
+  double get navBlurSigma =>
+      useLiteParams ? liteBlurSigma : liquidBlurSigma;
+
+  /// 当前生效色渗
+  double get navTintStrength =>
+      useLiteParams ? liteTintStrength : liquidTintStrength;
+
   ThemeMode get resolvedThemeMode => switch (themeMode) {
         'light' => ThemeMode.light,
         'dark' => ThemeMode.dark,
@@ -154,6 +173,8 @@ class ShellSettings {
       final map = jsonDecode(raw);
       if (map is! Map<String, dynamic>) return const ShellSettings();
       final seedArgb = map['seedArgb'] as int?;
+      final legacyBlur = (map['navBlurSigma'] as num?)?.toDouble() ?? 12;
+      final legacyTint = (map['navTintStrength'] as num?)?.toDouble() ?? 0.38;
       return ShellSettings(
         bookshelfGrid: map['bookshelfGrid'] as bool? ?? true,
         dynamicColor: map['dynamicColor'] as bool? ?? false,
@@ -161,8 +182,15 @@ class ShellSettings {
         seedArgb: seedArgb,
         // 旧数据无 seedSource：按色值能否命中调色板推断 palette/picker
         seedSource: _migrateSeedSource(map['seedSource'] as String?, seedArgb),
-        navBlurSigma: (map['navBlurSigma'] as num?)?.toDouble() ?? 12,
-        navTintStrength: (map['navTintStrength'] as num?)?.toDouble() ?? 0.38,
+        // 新字段缺失时用旧 nav* 同时播种两套（迁移）
+        liquidBlurSigma:
+            (map['liquidBlurSigma'] as num?)?.toDouble() ?? legacyBlur,
+        liquidTintStrength:
+            (map['liquidTintStrength'] as num?)?.toDouble() ?? legacyTint,
+        liteBlurSigma:
+            (map['liteBlurSigma'] as num?)?.toDouble() ?? legacyBlur,
+        liteTintStrength:
+            (map['liteTintStrength'] as num?)?.toDouble() ?? legacyTint,
         glassMode: switch (map['glassMode'] as String?) {
           'lite' => 'lite',
           'liquid' => 'liquid',
@@ -207,6 +235,11 @@ class ShellSettings {
         'themeMode': themeMode,
         'seedArgb': seedArgb,
         'seedSource': seedSource,
+        'liquidBlurSigma': liquidBlurSigma,
+        'liquidTintStrength': liquidTintStrength,
+        'liteBlurSigma': liteBlurSigma,
+        'liteTintStrength': liteTintStrength,
+        // 旧键：写当前生效值，便于旧版本回滚
         'navBlurSigma': navBlurSigma,
         'navTintStrength': navTintStrength,
         'glassMode': glassMode,
@@ -231,8 +264,10 @@ class ShellSettings {
     String? themeMode,
     int? seedArgb,
     String? seedSource,
-    double? navBlurSigma,
-    double? navTintStrength,
+    double? liquidBlurSigma,
+    double? liquidTintStrength,
+    double? liteBlurSigma,
+    double? liteTintStrength,
     String? glassMode,
     bool? pageTintOn,
     double? pageTintLight,
@@ -256,8 +291,10 @@ class ShellSettings {
       themeMode: themeMode ?? this.themeMode,
       seedArgb: seedArgb ?? this.seedArgb,
       seedSource: seedSource ?? this.seedSource,
-      navBlurSigma: navBlurSigma ?? this.navBlurSigma,
-      navTintStrength: navTintStrength ?? this.navTintStrength,
+      liquidBlurSigma: liquidBlurSigma ?? this.liquidBlurSigma,
+      liquidTintStrength: liquidTintStrength ?? this.liquidTintStrength,
+      liteBlurSigma: liteBlurSigma ?? this.liteBlurSigma,
+      liteTintStrength: liteTintStrength ?? this.liteTintStrength,
       glassMode: glassMode ?? this.glassMode,
       pageTintOn: pageTintOn ?? this.pageTintOn,
       pageTintLight: pageTintLight ?? this.pageTintLight,
@@ -326,13 +363,21 @@ class ShellSettingsNotifier extends Notifier<ShellSettings> {
   void setNavBlurSigma(double value) {
     final v = value.clamp(0.0, 48.0);
     if ((state.navBlurSigma - v).abs() < 0.5) return;
-    _persist(state.copyWith(navBlurSigma: v));
+    _persist(
+      state.useLiteParams
+          ? state.copyWith(liteBlurSigma: v)
+          : state.copyWith(liquidBlurSigma: v),
+    );
   }
 
   void setNavTintStrength(double value) {
     final v = value.clamp(0.0, 1.0);
     if ((state.navTintStrength - v).abs() < 0.02) return;
-    _persist(state.copyWith(navTintStrength: v));
+    _persist(
+      state.useLiteParams
+          ? state.copyWith(liteTintStrength: v)
+          : state.copyWith(liquidTintStrength: v),
+    );
   }
 
   void setGlassMode(String mode) {

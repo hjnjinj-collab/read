@@ -7,6 +7,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 // ignore: implementation_imports
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
 
+import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart' show AppGlass;
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
@@ -37,12 +38,14 @@ class GlassSettingsPage extends ConsumerWidget {
 
     Widget frostSection({
       required String header,
+      IconData? headerIcon,
       required List<Widget> children,
     }) {
       // 与设置根页 float 组同语义：frostOn 关闭时不做主/第三色渐变渗色
       return SliverToBoxAdapter(
         child: _FrostSection(
           header: header,
+          headerIcon: headerIcon,
           frostOn: shell.frostOn,
           dir: frostDir,
           colorA: frostA,
@@ -110,11 +113,16 @@ class GlassSettingsPage extends ConsumerWidget {
     // 方向枚举：Iconsax 轴向箭头；对角用 axis + 旋转（与壳层图标体系一致）
     const dirValues = ['tlbr', 'trbl', 'top', 'left'];
 
+    final materialFxLabel = shell.useLiteParams
+        ? (forced ? '毛玻璃参数（Windows 强制）' : '毛玻璃参数')
+        : '液态玻璃参数';
+
     return SettingsScaffold(
       title: '材质与玻璃',
       slivers: [
         frostSection(
-          header: '模式',
+          header: '渲染材质',
+          headerIcon: AppIcons.renderMaterial,
           children: [
             SettingLabel(
               title: '渲染材质',
@@ -149,16 +157,17 @@ class GlassSettingsPage extends ConsumerWidget {
           ],
         ),
         frostSection(
-          header: '底栏',
+          header: '材质效果',
+          headerIcon: AppIcons.materialFx,
           children: [
             SettingLabel(
               title: '模糊',
               subtitle: shell.navBlurSigma < 1
-                  ? '关闭（仅着色）'
-                  : '强度 ${shell.navBlurSigma.round()}',
+                  ? '$materialFxLabel · 关闭（仅着色）'
+                  : '$materialFxLabel · 强度 ${shell.navBlurSigma.round()}',
             ),
             slider(
-              key: const ValueKey('nav-blur-slider'),
+              key: ValueKey('nav-blur-slider-${shell.useLiteParams}'),
               value: shell.navBlurSigma,
               min: 0,
               max: 48,
@@ -166,10 +175,11 @@ class GlassSettingsPage extends ConsumerWidget {
             ),
             SettingLabel(
               title: '色渗滤镜',
-              subtitle: '主色强度 ${(shell.navTintStrength * 100).round()}%',
+              subtitle:
+                  '$materialFxLabel · 主色强度 ${(shell.navTintStrength * 100).round()}%',
             ),
             slider(
-              key: const ValueKey('nav-tint-slider'),
+              key: ValueKey('nav-tint-slider-${shell.useLiteParams}'),
               value: shell.navTintStrength,
               min: 0,
               max: 1,
@@ -179,6 +189,7 @@ class GlassSettingsPage extends ConsumerWidget {
         ),
         frostSection(
           header: '页面色渗',
+          headerIcon: AppIcons.pageTint,
           children: [
             SettingDependents(
               enabled: shell.pageTintOn,
@@ -221,6 +232,7 @@ class GlassSettingsPage extends ConsumerWidget {
         ),
         frostSection(
           header: '页底渐变',
+          headerIcon: AppIcons.ambientGrad,
           children: [
             SettingDependents(
               enabled: shell.ambientOn,
@@ -252,6 +264,7 @@ class GlassSettingsPage extends ConsumerWidget {
         ),
         frostSection(
           header: '设置页霜层',
+          headerIcon: AppIcons.frostShell,
           children: [
             SettingDependents(
               enabled: shell.frostOn,
@@ -387,13 +400,15 @@ class GlassSettingsPage extends ConsumerWidget {
         ),
         frostSection(
           header: '说明',
+          headerIcon: AppIcons.help,
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
               child: Text(
                 '色渗 = 整页均匀主色；页底渐变 / 设置霜层方向可分别配置。'
                 '液态折射依赖 Impeller；Skia 平台自动退化为霜面。'
-                '果冻效应仅在「模式 · 液态玻璃」且非 Windows 强制档下调节。',
+                '果冻效应仅在「渲染材质 · 液态玻璃」且非 Windows 强制档下调节。'
+                '材质效果按液态/毛玻璃分档保存。',
                 style: TextStyle(height: 1.5),
               ),
             ),
@@ -418,6 +433,7 @@ class GlassSettingsPage extends ConsumerWidget {
 class _FrostSection extends StatelessWidget {
   const _FrostSection({
     required this.header,
+    this.headerIcon,
     required this.frostOn,
     required this.dir,
     required this.colorA,
@@ -427,6 +443,7 @@ class _FrostSection extends StatelessWidget {
   });
 
   final String header;
+  final IconData? headerIcon;
   final bool frostOn;
   final AmbientDir dir;
   final Color? colorA;
@@ -448,13 +465,21 @@ class _FrostSection extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-            child: Text(
-              header,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                  ),
+            child: Row(
+              children: [
+                if (headerIcon != null) ...[
+                  Icon(headerIcon, size: 16, color: scheme.primary),
+                  const SizedBox(width: 8),
+                ],
+                Text(
+                  header,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
+                ),
+              ],
             ),
           ),
           SettingsFrostGate(

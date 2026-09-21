@@ -63,8 +63,9 @@ class ShellAmbient extends StatelessWidget {
 
   final AmbientDir dir;
 
-  static double _liftA(Brightness b) => b == Brightness.light ? 0.16 : 0.10;
-  static double _liftB(Brightness b) => b == Brightness.light ? 0.14 : 0.09;
+  // tertiary 抬升强于 primary：否则双息只读得出主色
+  static double _liftA(Brightness b) => b == Brightness.light ? 0.14 : 0.10;
+  static double _liftB(Brightness b) => b == Brightness.light ? 0.28 : 0.22;
 
   static (Alignment, Alignment) _align(AmbientDir dir) => switch (dir) {
         AmbientDir.tlbr => (Alignment.topLeft, Alignment.bottomRight),
@@ -90,16 +91,14 @@ class ShellAmbient extends StatelessWidget {
     final a = Color.lerp(base, scheme.primary, _liftA(b))!;
     final z = Color.lerp(base, scheme.tertiary, _liftB(b))!;
     final (begin, end) = _align(dir);
-    // 左/右向：两端强、中弱，避免读成竖条色渗
-    final colors = dir == AmbientDir.left || dir == AmbientDir.right
-        ? [a, base, z]
-        : [a, base, z];
+    final colors = [a, base, z];
     return BoxDecoration(
       gradient: LinearGradient(
         begin: begin,
         end: end,
         colors: colors,
-        stops: const [0, 0.45, 1],
+        // 末端略放大 tertiary 作用区
+        stops: const [0, 0.40, 1],
       ),
     );
   }

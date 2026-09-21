@@ -29,4 +29,12 @@ class AppIcons {
   /// 方向渐变/霜层：轴向用 Iconsax；对角用 [dirAxis] + 旋转角（rad）
   static const dirAxis = Iconsax.arrow_right_2;
   static const dirDown = Iconsax.arrow_down_2;
+
+  // 材质与玻璃页分区（与设置栏目同一 Iconsax 体系）
+  static const renderMaterial = Iconsax.glass_1;
+  static const materialFx = Iconsax.magicpen;
+  static const pageTint = Iconsax.drop;
+  static const ambientGrad = Iconsax.routing;
+  static const frostShell = Iconsax.cloud;
+  static const help = Iconsax.info_circle;
 }

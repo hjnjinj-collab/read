@@ -618,10 +618,10 @@ class SettingsRowShell extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: borderRadius,
-        // 描边与 FrostShell 同语言（宽度走 AppGlass.rimWidth 分档）
+        // 描边与 FrostShell 同语言；关态宽度走 AppGlass.floatRowRimWidth
         border: Border.all(
           color: AppGlass.floatRowRim(scheme),
-          width: AppGlass.rimWidth(scheme),
+          width: AppGlass.floatRowRimWidth(scheme),
         ),
         gradient: gradient,
         color: gradient == null ? fill : null,
@@ -1504,8 +1504,8 @@ class _SettingDependentsState extends State<SettingDependents> {
 
   static final AnimationStyle _defaultStyle = AnimationStyle(
     curve: Curves.easeOutCubic,
-    reverseCurve: Curves.easeInCubic,
-    duration: const Duration(milliseconds: 220),
+    reverseCurve: Curves.easeInOutCubic,
+    duration: const Duration(milliseconds: 320),
   );
 
   @override

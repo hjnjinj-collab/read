@@ -272,22 +272,30 @@ class AppGlass {
     ];
   }
 
-  /// 行块填色：更透，让下层霜面渐变透上来
+  /// 行块填色：更透，让下层霜面渐变透上来；关霜时略提高实体感
   static Color floatRowFill(ColorScheme scheme) {
     final light = scheme.brightness == Brightness.light;
     return (light ? scheme.surface : scheme.surfaceContainerHighest)
-        .withValues(alpha: light ? 0.16 : 0.20);
+        .withValues(alpha: light ? 0.22 : 0.22);
   }
 
-  /// 行块描边：淡轮廓（深色提高透明度，保证圆角边界可辨）
+  /// 行块描边（霜层**关态**）：浅色不能用纯白——在浅底上轮廓消失。
+  /// 混一点 primary 的 outline 系，保证圆角边界可辨。
   static Color floatRowRim(ColorScheme scheme) {
     final light = scheme.brightness == Brightness.light;
-    return light
-        ? Colors.white.withValues(alpha: 0.35)
-        : Colors.white.withValues(alpha: 0.26);
+    if (light) {
+      return Color.lerp(scheme.outlineVariant, scheme.primary, 0.12)!
+          .withValues(alpha: 0.55);
+    }
+    return Colors.white.withValues(alpha: 0.40);
   }
 
+  /// 关态壳描边宽（开态 FrostShell 仍用 [rimWidth]）
+  static double floatRowRimWidth(ColorScheme scheme) =>
+      scheme.brightness == Brightness.light ? 1.0 : 1.0;
+
   /// 玻璃描边宽度：浅色 0.5 细腻，深色 0.8 保证轮廓/圆角可辨
+  /// （霜层**开态**前景 rim；关态用 [floatRowRimWidth]）
   static double rimWidth(ColorScheme scheme) =>
       scheme.brightness == Brightness.light ? 0.5 : 0.8;
 
