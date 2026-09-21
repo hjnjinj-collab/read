@@ -1,4 +1,4 @@
-/* 首页 Dashboard 布局稿逻辑 */
+/* 首页 Dashboard 布局稿 — 模块顺序定稿版 */
 (function () {
   const books = [
     { name: "雪中悍刀行", author: "烽火戏诸侯", ch: "第 128 章 · 风雪夜归人", pct: 42, c: "c1" },
@@ -8,15 +8,85 @@
     { name: "道诡异仙", author: "狐尾的笔", ch: "第 88 章", pct: 51, c: "c1" },
     { name: "深海余烬", author: "远瞳", ch: "第 12 章", pct: 5, c: "c3" },
   ];
-
-  /** 演示：常规 vs 空数据 */
-  let demoRich = true;
-
   const days = ["一", "二", "三", "四", "五", "六", "日"];
   const richMin = [12, 28, 8, 35, 22, 41, 18];
   const emptyMin = [0, 0, 0, 0, 0, 0, 0];
+  let demoRich = true;
+  let heroIndex = 0;
+  let heroTimer = null;
 
   const $ = (id) => document.getElementById(id);
+
+  /** Hero 轮换：[0] 永远今日目标，其后为续读卡 */
+  function heroSlides() {
+    const goal = {
+      type: "goal",
+      badge: "今日目标",
+      today: demoRich ? 18 : 0,
+      target: 30,
+    };
+    const cont = books.slice(0, 2).map((b) => ({
+      type: "continue",
+      badge: "继续阅读",
+      book: b,
+    }));
+    return [goal, ...cont];
+  }
+
+  function renderHero() {
+    const slides = heroSlides();
+    if (heroIndex >= slides.length) heroIndex = 0;
+    const s = slides[heroIndex];
+    $("heroBadge").textContent = s.badge;
+    $("heroDots").innerHTML = slides
+      .map((_, i) => `<i class="${i === heroIndex ? "on" : ""}"></i>`)
+      .join("");
+    const host = $("heroSlide");
+    if (s.type === "goal") {
+      const ratio = s.target ? s.today / s.target : 0;
+      const circ = 2 * Math.PI * 32;
+      host.innerHTML = `
+        <div class="slide slide-goal">
+          <svg class="ring" viewBox="0 0 80 80">
+            <circle class="ring-bg" cx="40" cy="40" r="32"/>
+            <circle class="ring-fg" cx="40" cy="40" r="32"
+              style="stroke-dasharray:${circ};stroke-dashoffset:${circ * (1 - ratio)}"/>
+          </svg>
+          <div class="goal-side">
+            <div class="goal-big">${s.today}<small style="font-size:14px;color:var(--muted)">/${s.target} 分钟</small></div>
+            <div class="sec-sub">今日阅读目标 · ${Math.round(ratio * 100)}%</div>
+            <button type="button" class="chip-btn">调整目标</button>
+          </div>
+        </div>`;
+    } else {
+      const b = s.book;
+      host.innerHTML = `
+        <div class="slide">
+          <div class="hero-body">
+            <div class="cover ${b.c}"></div>
+            <div class="hero-meta">
+              <div class="book-name">${b.name}</div>
+              <div class="book-sub">${b.author}</div>
+              <div class="book-chapter">${b.ch}</div>
+              <button type="button" class="cta">继续阅读</button>
+            </div>
+          </div>
+          <div class="hero-glow">
+            <i class="track-line"></i>
+            <i class="fill-line" style="width:${b.pct}%"></i>
+          </div>
+        </div>`;
+    }
+  }
+
+  function armHero() {
+    clearInterval(heroTimer);
+    heroTimer = setInterval(() => {
+      const n = heroSlides().length;
+      heroIndex = (heroIndex + 1) % n;
+      renderHero();
+    }, 4000);
+  }
 
   function drawChart(values) {
     const svg = $("chart");
@@ -25,12 +95,13 @@
     const max = Math.max(10, ...values);
     const n = values.length;
     const stepX = (w - padX * 2) / (n - 1);
-    const pts = values.map((v, i) => {
-      const x = padX + i * stepX;
-      const y = h - padY - (v / max) * (h - padY * 2);
-      return [x, y];
-    });
-    const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+    const pts = values.map((v, i) => [
+      padX + i * stepX,
+      h - padY - (v / max) * (h - padY * 2),
+    ]);
+    const line = pts
+      .map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1))
+      .join(" ");
     const area =
       line +
       ` L${pts[pts.length - 1][0].toFixed(1)},${h - 4} L${pts[0][0].toFixed(1)},${h - 4} Z`;
@@ -61,90 +132,51 @@
     labels.innerHTML = days
       .map((d, i) => `<span class="${i === today ? "on" : ""}">${d}</span>`)
       .join("");
-    const sum = values.reduce((a, b) => a + b, 0);
-    $("weekSum").textContent = String(sum);
+    $("weekSum").textContent = String(values.reduce((a, b) => a + b, 0));
   }
 
   function renderRecent() {
-    const row = $("recentRow");
-    row.innerHTML = books
+    $("recentRow").innerHTML = books
       .slice(0, 5)
       .map(
-        (b) => `
-      <div class="hcard">
-        <div class="cover ${b.c}"></div>
-        <div class="n">${b.name}</div>
-      </div>`
+        (b) =>
+          `<div class="hcard"><div class="cover ${b.c}"></div><div class="n">${b.name}</div></div>`
       )
       .join("");
   }
 
   function renderShelf() {
-    const grid = $("shelfGrid");
-    grid.innerHTML = books
+    $("shelfGrid").innerHTML = books
       .map(
-        (b) => `
-      <div class="gitem">
-        <div class="cover ${b.c}"></div>
-        <div class="n">${b.name}</div>
-        <div class="p">${b.pct}%</div>
-      </div>`
+        (b) =>
+          `<div class="gitem"><div class="cover ${b.c}"></div><div class="n">${b.name}</div><div class="p">${b.pct}%</div></div>`
       )
       .join("");
   }
 
-  function renderHero() {
-    const b = books[0];
-    $("heroName").textContent = b.name;
-    $("heroAuthor").textContent = b.author;
-    $("heroChapter").textContent = b.ch;
-    $("heroPct").textContent = b.pct + "%";
-    $("heroFill").style.width = b.pct + "%";
-    const cover = $("heroCover");
-    cover.className = "cover " + b.c;
-  }
-
-  function renderGoal() {
-    const todayMin = demoRich ? 18 : 0;
-    const goal = 30;
-    const ratio = goal ? todayMin / goal : 0;
-    $("goalText").textContent = `${todayMin} / ${goal} 分钟`;
-    $("goalPct").textContent = Math.round(ratio * 100) + "%";
-    const circ = 2 * Math.PI * 32;
-    const ring = $("goalRing");
-    ring.style.strokeDasharray = String(circ);
-    ring.style.strokeDashoffset = String(circ * (1 - ratio));
-  }
-
   function applyDemo() {
-    const values = demoRich ? richMin : emptyMin;
-    drawChart(values);
-    if (!demoRich) {
-      $("heroName").textContent = "暂无最近阅读";
-      $("heroAuthor").textContent = "导入书籍后将出现在这里";
-      $("heroChapter").textContent = "";
-      $("heroPct").textContent = "—";
-      $("heroFill").style.width = "0%";
-    } else {
-      renderHero();
-    }
-    renderGoal();
-  }
-
-  function switchTab(tab) {
-    const map = { home: "首页", shelf: "书架", sources: "书源", settings: "设置" };
-    document.querySelectorAll(".tab").forEach((t) => {
-      t.classList.toggle("on", t.dataset.tab === tab);
-    });
-    document.querySelectorAll(".page").forEach((p) => {
-      p.classList.toggle("on", p.dataset.page === tab);
-    });
-    $("pageTitle").textContent = map[tab] || "首页";
+    heroIndex = 0; // 进入首页永远从今日目标起
+    drawChart(demoRich ? richMin : emptyMin);
+    renderHero();
+    armHero();
   }
 
   document.querySelectorAll(".tab").forEach((t) => {
     if (t.disabled) return;
-    t.addEventListener("click", () => switchTab(t.dataset.tab));
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
+      t.classList.add("on");
+      document.querySelectorAll(".page").forEach((p) => {
+        p.classList.toggle("on", p.dataset.page === t.dataset.tab);
+      });
+      $("pageTitle").textContent =
+        { home: "首页", shelf: "书架" }[t.dataset.tab] || "首页";
+      if (t.dataset.tab === "home") {
+        heroIndex = 0;
+        renderHero();
+        armHero();
+      }
+    });
   });
 
   $("modeBtn").addEventListener("click", () => {

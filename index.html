@@ -16,46 +16,20 @@
         <div class="hello">晚上好</div>
         <div class="app-title" id="pageTitle">首页</div>
       </div>
-      <button type="button" class="ghost-btn" id="modeBtn" aria-label="切换演示数据">演示数据</button>
+      <button type="button" class="ghost-btn" id="modeBtn">演示数据</button>
     </header>
 
-    <!-- HOME -->
     <main class="page on" id="page-home" data-page="home">
+      <!-- 1. Hero 轮换：首帧永远是今日目标 -->
       <section class="card hero-card" id="heroCard">
         <div class="hero-top">
-          <span class="hero-badge">继续阅读</span>
-          <span class="pct-chip" id="heroPct">42%</span>
+          <span class="hero-badge" id="heroBadge">今日目标</span>
+          <div class="hero-dots" id="heroDots" aria-hidden="true"></div>
         </div>
-        <div class="hero-body">
-          <div class="cover c1" id="heroCover"></div>
-          <div class="hero-meta">
-            <div class="book-name" id="heroName">雪中悍刀行</div>
-            <div class="book-sub" id="heroAuthor">烽火戏诸侯</div>
-            <div class="book-chapter" id="heroChapter">第 128 章 · 风雪夜归人</div>
-            <button type="button" class="cta">继续阅读</button>
-          </div>
-        </div>
-        <div class="hero-glow"><i id="heroFill"></i></div>
+        <div id="heroSlide"></div>
       </section>
 
-      <section class="card chart-card">
-        <div class="sec-head">
-          <div>
-            <div class="sec-title">近 7 日阅读</div>
-            <div class="sec-sub">分钟 · 折线趋势</div>
-          </div>
-          <div class="sec-kpi"><span id="weekSum">126</span><small>分钟</small></div>
-        </div>
-        <div class="chart-wrap">
-          <svg class="chart" id="chart" viewBox="0 0 320 120" preserveAspectRatio="none" aria-label="近七日阅读折线图"></svg>
-          <div class="chart-labels" id="chartLabels"></div>
-        </div>
-        <div class="chart-legend">
-          <span><i class="dot today"></i>今日</span>
-          <span><i class="dot"></i>往日</span>
-        </div>
-      </section>
-
+      <!-- 2. 统计（折线图上方） -->
       <section class="stats">
         <div class="card stat">
           <div class="stat-lb">读过</div>
@@ -71,6 +45,26 @@
         </div>
       </section>
 
+      <!-- 3. 折线图 -->
+      <section class="card chart-card">
+        <div class="sec-head">
+          <div>
+            <div class="sec-title">近 7 日阅读</div>
+            <div class="sec-sub">分钟 · 折线趋势</div>
+          </div>
+          <div class="sec-kpi"><span id="weekSum">126</span><small>分钟</small></div>
+        </div>
+        <div class="chart-wrap">
+          <svg class="chart" id="chart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+          <div class="chart-labels" id="chartLabels"></div>
+        </div>
+        <div class="chart-legend">
+          <span><i class="dot today"></i>今日</span>
+          <span><i class="dot"></i>往日</span>
+        </div>
+      </section>
+
+      <!-- 4. 最近阅读（底部） -->
       <section class="sec-block">
         <div class="sec-head plain">
           <div class="sec-title">最近阅读</div>
@@ -78,29 +72,10 @@
         </div>
         <div class="hrow" id="recentRow"></div>
       </section>
-
-      <section class="card goal-card">
-        <div class="sec-head">
-          <div class="sec-title">今日目标</div>
-          <div class="sec-sub" id="goalText">18 / 30 分钟</div>
-        </div>
-        <div class="goal-ring-row">
-          <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
-            <circle class="ring-bg" cx="40" cy="40" r="32" />
-            <circle class="ring-fg" id="goalRing" cx="40" cy="40" r="32" />
-          </svg>
-          <div class="goal-side">
-            <div class="goal-big" id="goalPct">60%</div>
-            <div class="sec-sub">完成度 · 点按调整目标</div>
-            <button type="button" class="chip-btn">调整目标</button>
-          </div>
-        </div>
-      </section>
     </main>
 
-    <!-- BOOKSHELF = 书库 -->
     <main class="page" id="page-shelf" data-page="shelf">
-      <div class="shelf-hint">书架 = 书库，不承载 Dashboard 图表</div>
+      <div class="shelf-hint">书架 = 书库 + 薄续读条（已定稿，Flutter 落地）</div>
       <section class="card thin-continue" id="thinContinue">
         <div class="cover c1 tiny"></div>
         <div class="thin-meta">
@@ -113,18 +88,10 @@
     </main>
 
     <nav class="tabbar" role="tablist">
-      <button type="button" class="tab on" data-tab="home">
-        <span class="ti">◎</span><span>首页</span>
-      </button>
-      <button type="button" class="tab" data-tab="shelf">
-        <span class="ti">▤</span><span>书架</span>
-      </button>
-      <button type="button" class="tab" data-tab="sources" disabled>
-        <span class="ti">☁</span><span>书源</span>
-      </button>
-      <button type="button" class="tab" data-tab="settings" disabled>
-        <span class="ti">⚙</span><span>设置</span>
-      </button>
+      <button type="button" class="tab on" data-tab="home"><span class="ti">◎</span><span>首页</span></button>
+      <button type="button" class="tab" data-tab="shelf"><span class="ti">▤</span><span>书架</span></button>
+      <button type="button" class="tab" disabled><span class="ti">☁</span><span>书源</span></button>
+      <button type="button" class="tab" disabled><span class="ti">⚙</span><span>设置</span></button>
     </nav>
   </div>
   <script src="index.js"></script>

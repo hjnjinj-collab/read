@@ -68,6 +68,17 @@ html, body {
   background: rgba(143,163,196,0.22); color: #c9d8f0;
   padding: 3px 8px; border-radius: 6px;
 }
+.hero-dots { display: flex; gap: 5px; }
+.hero-dots i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+}
+.hero-dots i.on { background: var(--primary); width: 14px; border-radius: 3px; }
+.slide { padding-bottom: 4px; }
+.slide-goal { display: flex; gap: 16px; align-items: center; padding: 4px 0 12px; }
+.slide-goal .ring { width: 88px; height: 88px; }
+.slide-goal .goal-side { flex: 1; }
+.goal-big { font-size: 30px; font-weight: 800; color: var(--primary); }
 .hero-body { display: flex; gap: 14px; align-items: center; padding-bottom: 12px; }
 .cover {
   width: 64px; height: 90px; border-radius: 12px; flex-shrink: 0;
@@ -94,18 +105,15 @@ html, body {
 }
 .cta.small { margin-top: 0; padding: 7px 12px; font-size: 12px; }
 .hero-glow {
-  height: 44px; margin: 0 -14px; position: relative;
-  background: linear-gradient(180deg, transparent, rgba(93,155,126,0.04));
+  height: 40px; margin: 0 -14px; position: relative;
 }
-.hero-glow i {
-  position: absolute; left: 0; bottom: 0; height: 3px; width: 42%;
+.hero-glow i.track-line {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: rgba(255,255,255,0.08);
+}
+.hero-glow i.fill-line {
+  position: absolute; left: 0; bottom: 0; height: 3px;
   background: var(--primary); border-radius: 2px;
-}
-.hero-glow::after {
-  content: ""; position: absolute; left: 0; bottom: 3px; width: 42%; height: 40px;
-  background: linear-gradient(180deg, rgba(93,155,126,0.28), transparent);
-  mask-image: linear-gradient(90deg, #000 60%, transparent);
-  -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent);
 }
 
 /* Chart */
