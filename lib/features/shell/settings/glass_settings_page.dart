@@ -444,8 +444,15 @@ class _LiquidValueSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // 静止/动画同色且半透明：玻璃折射透得出来，字用 primary 保证可读
-    final pillBase = scheme.primaryContainer.withValues(alpha: 0.55);
+    // 静止态包内只画 rest pill（DecoratedBox 直接用 appearance.color）。
+    // 真机反馈 α0.55 仍偏实：再向 surface 混淡 + α0.30，保证半透明观感。
+    // glass/rest 同色，避免动画收尾色跳。
+    final pillBase = Color.lerp(
+      scheme.primaryContainer,
+      scheme.surface,
+      0.28,
+    )!
+        .withValues(alpha: 0.30);
     final idx = values.indexOf(selected);
     return LiquidGlassSegmented(
       segments: segments,
