@@ -1,0 +1,360 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>书架续读主卡 · 布局稿</title>
+<style>
+  :root {
+    --bg: #0f1214;
+    --surface: #1a1f22;
+    --surface2: #242b2f;
+    --primary: #5d9b7e;
+    --primary-soft: #3d6b56;
+    --tertiary: #8a9bb8;
+    --text: #e8eef0;
+    --muted: #9aabae;
+    --radius: 16px;
+    --gap: 12px;
+    --pad: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .app {
+    max-width: 390px;
+    margin: 0 auto;
+    min-height: 100vh;
+    padding: 12px var(--pad) 96px;
+    background: linear-gradient(165deg, #15201c 0%, var(--bg) 45%, #141820 100%);
+  }
+  .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0 16px;
+  }
+  .top h1 { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
+  .seg {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 20px;
+    padding: 3px;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 16px;
+    cursor: pointer;
+  }
+  .seg button.on {
+    background: rgba(93,155,126,0.35);
+    color: #d4f0e2;
+    font-weight: 600;
+  }
+  .module-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: var(--primary);
+    margin: 4px 0 8px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    margin-bottom: var(--gap);
+    overflow: hidden;
+    position: relative;
+  }
+  .card.accent-top::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary), transparent);
+  }
+  /* M1 Continue card */
+  .m1 { padding: 14px 14px 0; min-height: 140px; }
+  .m1-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .m1-head .icon {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: rgba(93,155,126,0.2);
+    display: grid; place-items: center; font-size: 12px;
+  }
+  .m1-head .t { font-size: 15px; font-weight: 700; flex: 1; }
+  .chip {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(138,155,184,0.25);
+    color: #c5d4ea;
+  }
+  .m1-body { display: flex; gap: 14px; align-items: center; padding-bottom: 14px; }
+  .cover {
+    width: 56px; height: 78px; border-radius: 10px;
+    flex-shrink: 0;
+    background: linear-gradient(145deg, #3a5c4a, #1e3a2f 50%, #4a6a8a);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    position: relative;
+  }
+  .cover::after {
+    content: "";
+    position: absolute; inset: 6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+  }
+  .meta { flex: 1; min-width: 0; }
+  .meta .name {
+    font-size: 16px; font-weight: 700; line-height: 1.25;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .meta .author { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .meta .chapter {
+    font-size: 12px; color: var(--muted); margin-top: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cta {
+    margin-top: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: var(--primary);
+    color: #0c1812;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+  }
+  .progress-glow {
+    height: 48px;
+    position: relative;
+    margin: 0 -14px;
+  }
+  .progress-glow .track {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: rgba(255,255,255,0.1);
+  }
+  .progress-glow .fill {
+    position: absolute; left: 0; bottom: 0; height: 3px;
+    width: 42%;
+    background: var(--primary);
+  }
+  .progress-glow .beam {
+    position: absolute; left: 0; bottom: 3px; height: 45px;
+    width: 42%;
+    background: linear-gradient(180deg, transparent, rgba(93,155,126,0.22));
+    mask-image: linear-gradient(90deg, #000 70%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent);
+  }
+  /* stats */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+  .stat {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+  .stat .row { display: flex; gap: 10px; align-items: flex-start; }
+  .stat .ic { color: var(--primary); font-size: 16px; margin-top: 2px; }
+  .stat .lb { font-size: 12px; color: var(--muted); }
+  .stat .val { font-size: 20px; font-weight: 700; }
+  .stat .unit { font-size: 12px; color: var(--muted); margin-left: 3px; }
+  /* recent row */
+  .hrow { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; }
+  .hcard {
+    flex: 0 0 72px;
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 8px;
+  }
+  .hcard .c {
+    width: 56px; height: 78px; border-radius: 8px; margin: 0 auto 6px;
+    background: linear-gradient(160deg, #5a4a6a, #2a2840);
+  }
+  .hcard .n {
+    font-size: 10px; text-align: center; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* goal */
+  .goal { padding: 14px; }
+  .goal .title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+  .goal .bar {
+    height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08);
+    overflow: hidden; margin: 10px 0 6px;
+  }
+  .goal .bar i {
+    display: block; height: 100%; width: 60%;
+    background: linear-gradient(90deg, var(--primary), var(--tertiary));
+    border-radius: 4px;
+  }
+  .goal .sub { font-size: 12px; color: var(--muted); }
+  .empty .m1-body {
+    justify-content: center; color: var(--muted); font-size: 13px;
+    min-height: 72px; padding-bottom: 20px;
+  }
+  .empty .cover, .empty .cta, .empty .chip { display: none; }
+  .empty .progress-glow { display: none; }
+  .note {
+    font-size: 11px; color: var(--muted); line-height: 1.5;
+    margin: 16px 0 8px; padding: 10px 12px;
+    border-left: 3px solid var(--primary-soft);
+    background: rgba(255,255,255,0.03);
+    border-radius: 0 8px 8px 0;
+  }
+  .nav {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 12px; width: min(360px, calc(100% - 24px));
+    height: 56px; border-radius: 28px;
+    background: rgba(30,38,42,0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: space-around;
+    backdrop-filter: blur(12px);
+    font-size: 11px; color: var(--muted);
+  }
+  .nav .on { color: var(--primary); font-weight: 700; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+<div class="app" id="app">
+  <div class="top">
+    <h1>书架</h1>
+    <div class="seg" role="tablist">
+      <button type="button" data-mode="full" class="on">全模块</button>
+      <button type="button" data-mode="m1">仅主卡</button>
+      <button type="button" data-mode="empty">空态</button>
+    </div>
+  </div>
+
+  <div id="modules">
+    <div class="module-label">M1 · 续读主卡（P0）</div>
+    <div class="card accent-top m1" id="m1card">
+      <div class="m1-head">
+        <div class="icon">📖</div>
+        <div class="t">继续阅读</div>
+        <div class="chip">42%</div>
+      </div>
+      <div class="m1-body">
+        <div class="cover" aria-hidden="true"></div>
+        <div class="meta">
+          <div class="name">雪中悍刀行</div>
+          <div class="author">烽火戏诸侯</div>
+          <div class="chapter">第 128 章 · 风雪夜归人</div>
+          <button type="button" class="cta">继续 <span>▸</span></button>
+        </div>
+      </div>
+      <div class="progress-glow" aria-hidden="true">
+        <div class="beam"></div>
+        <div class="track"></div>
+        <div class="fill"></div>
+      </div>
+      <div class="empty-msg hidden" style="padding:20px 0;color:var(--muted);font-size:13px;text-align:center">暂无阅读进度</div>
+    </div>
+
+    <div class="module-label" id="lab-m2">M2 · 统计（P1）</div>
+    <div class="stats" id="m2">
+      <div class="stat">
+        <div class="row">
+          <div class="ic">📊</div>
+          <div>
+            <div class="lb">读过</div>
+            <div><span class="val">12</span><span class="unit">本</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="row">
+          <div class="ic">⏱</div>
+          <div>
+            <div class="lb">累计阅读</div>
+            <div><span class="val">36.5</span><span class="unit">小时</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="module-label" id="lab-m3">M3 · 最近阅读横滑（P1）</div>
+    <div id="m3">
+      <div class="hrow">
+        <div class="hcard"><div class="c"></div><div class="n">雪中悍刀行</div></div>
+        <div class="hcard"><div class="c" style="background:linear-gradient(160deg,#6a5a4a,#3a3020)"></div><div class="n">诡秘之主</div></div>
+        <div class="hcard"><div class="c" style="background:linear-gradient(160deg,#4a5a6a,#203040)"></div><div class="n">大奉打更人</div></div>
+        <div class="hcard"><div class="c" style="background:linear-gradient(160deg,#5a4a5a,#302030)"></div><div class="n">夜的命名术</div></div>
+      </div>
+    </div>
+
+    <div class="module-label" id="lab-m4">M4 · 今日阅读目标（P2）</div>
+    <div class="card goal" id="m4">
+      <div class="title">今日阅读目标</div>
+      <div class="sub">18 / 30 分钟</div>
+      <div class="bar"><i></i></div>
+      <div class="sub">点按调整目标 · 数据可后接阅读时长</div>
+    </div>
+  </div>
+
+  <div class="note" id="note">
+    布局契约：主卡为任务卡（tonal 一张皮 + 底缘进度光晕），不与封面网格抢视觉；无进度则整卡隐藏/空态。目标应用 <strong>legado-with-MD3</strong> → <code>HomeDashboardContent / RecentBookCard</code>。圆角对齐 <code>settingsCardRadius=16</code>。
+  </div>
+
+  <nav class="nav" aria-hidden="true">
+    <span class="on">书架</span>
+    <span>书源</span>
+    <span>更多</span>
+  </nav>
+</div>
+<script>
+  const app = document.getElementById("app");
+  const m1 = document.getElementById("m1card");
+  const modules = {
+    m2: document.getElementById("m2"),
+    m3: document.getElementById("m3"),
+    m4: document.getElementById("m4"),
+    lab2: document.getElementById("lab-m2"),
+    lab3: document.getElementById("lab-m3"),
+    lab4: document.getElementById("lab-m4"),
+  };
+  const emptyMsg = m1.querySelector(".empty-msg");
+
+  function setMode(mode) {
+    document.querySelectorAll(".seg button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.mode === mode);
+    });
+    const showAux = mode === "full";
+    [modules.m2, modules.m3, modules.m4, modules.lab2, modules.lab3, modules.lab4]
+      .forEach((el) => el && el.classList.toggle("hidden", !showAux));
+
+    if (mode === "empty") {
+      m1.classList.add("empty");
+      emptyMsg.classList.remove("hidden");
+      m1.querySelector(".m1-head .t").textContent = "暂无最近阅读";
+    } else {
+      m1.classList.remove("empty");
+      emptyMsg.classList.add("hidden");
+      m1.querySelector(".m1-head .t").textContent = "继续阅读";
+    }
+  }
+
+  document.querySelectorAll(".seg button").forEach((b) => {
+    b.addEventListener("click", () => setMode(b.dataset.mode));
+  });
+</script>
+</body>
+</html>
