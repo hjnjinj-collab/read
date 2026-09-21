@@ -107,7 +107,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                 16,
                 pad.top + 12,
                 16,
-                pad.bottom + 96,
+                // 收底：只留底栏安全区，消掉最近阅读下大块空白
+                pad.bottom + 76,
               ),
               children: [
                 Text(
@@ -122,7 +123,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 _statsRow(scheme),
                 const SizedBox(height: 12),
                 _chartCard(scheme),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 if (_entries.isNotEmpty) ...[
                   Text(
                     '最近阅读',
@@ -132,7 +133,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
-                    height: 118,
+                    height: 128,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: math.min(6, _entries.length),
@@ -141,7 +142,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         final (book, _) = _entries[i];
                         final cover = CoverStore.fileOf(book.filePath);
                         return SizedBox(
-                          width: 72,
+                          width: 78,
                           child: InkWell(
                             onTap: () => _openBook(book),
                             borderRadius: BorderRadius.circular(12),
@@ -150,8 +151,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: SizedBox(
-                                    width: 64,
-                                    height: 88,
+                                    width: 72,
+                                    height: 100,
                                     child: cover != null
                                         ? Image.file(
                                             cover,
@@ -194,62 +195,47 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _heroCard(ColorScheme scheme) {
     final cont = _continueItems;
-    final showGoalFirst = true;
     final slides = <Widget>[
-      if (showGoalFirst) _goalSlide(scheme),
-      for (final e in cont.take(2)) _continueSlide(e, scheme),
+      _goalSlide(scheme),
+      for (final e in cont.take(2)) _continueSlide(e),
     ];
-    final i = _heroIndex.clamp(0, slides.isEmpty ? 0 : slides.length - 1);
-    return Card(
-      elevation: 0,
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-      shape: RoundedRectangleBorder(
+    final i = _heroIndex.clamp(0, slides.length - 1);
+    // 定高：封面帧 / 目标帧同构，切换不推挤下方（无外层 Card）
+    return SizedBox(
+      height: 128,
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    i == 0 ? '今日目标' : '继续阅读',
-                    style: TextStyle(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                Row(
-                  children: List.generate(
-                    slides.length,
-                    (d) => Container(
-                      width: d == i ? 14 : 6,
-                      height: 6,
-                      margin: const EdgeInsets.only(left: 4),
-                      decoration: BoxDecoration(
-                        color: d == i
-                            ? scheme.primary
-                            : scheme.outlineVariant.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 320),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
               child: KeyedSubtree(
                 key: ValueKey('hero-$i'),
-                child: slides.isEmpty
-                    ? const SizedBox(height: 72)
-                    : slides[i],
+                child: slides[i],
+              ),
+            ),
+            // 轮换圆点叠在块上
+            Positioned(
+              top: 10,
+              right: 12,
+              child: Row(
+                children: List.generate(
+                  slides.length,
+                  (d) => Container(
+                    width: d == i ? 14 : 6,
+                    height: 6,
+                    margin: const EdgeInsets.only(left: 4),
+                    decoration: BoxDecoration(
+                      color: d == i
+                          ? Colors.white.withValues(alpha: 0.9)
+                          : Colors.white.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
@@ -260,70 +246,110 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _goalSlide(ColorScheme scheme) {
     final ratio = (_todayMinutes / _goalMinutes).clamp(0.0, 1.0);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 72,
-            height: 72,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: 72,
-                  height: 72,
-                  child: CircularProgressIndicator(
-                    value: ratio,
-                    strokeWidth: 6,
-                    backgroundColor:
-                        scheme.outlineVariant.withValues(alpha: 0.45),
-                    valueColor: AlwaysStoppedAnimation(scheme.primary),
-                    strokeCap: StrokeCap.round,
-                  ),
-                ),
-                Text(
-                  '${(ratio * 100).round()}%',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: scheme.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$_todayMinutes / $_goalMinutes 分钟',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+    return DecoratedBox(
+      key: const ValueKey('goal-slide'),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            scheme.primary.withValues(alpha: 0.28),
+            scheme.tertiary.withValues(alpha: 0.18),
+            scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+        child: Row(
+          children: [
+            // M3 Expressive 异变进度环（year2023: false）
+            SizedBox(
+              width: 84,
+              height: 84,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Theme(
+                    data: Theme.of(context).copyWith(
+                      progressIndicatorTheme: const ProgressIndicatorThemeData(
+                        // 显式选用 2024 Expressive 异变环（year2023 将来默认 false）
+                        // ignore: deprecated_member_use
+                        year2023: false,
                       ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '今日阅读目标',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                    ),
+                    child: SizedBox(
+                      width: 84,
+                      height: 84,
+                      child: CircularProgressIndicator(
+                        value: ratio,
+                        strokeWidth: 7,
+                        trackGap: 6,
+                        strokeCap: StrokeCap.round,
+                        backgroundColor:
+                            scheme.surface.withValues(alpha: 0.35),
+                        valueColor: AlwaysStoppedAnimation(scheme.primary),
                       ),
-                ),
-              ],
+                    ),
+                  ),
+                  Text(
+                    '${(ratio * 100).round()}%',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '今日目标',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$_todayMinutes / $_goalMinutes 分钟',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '加载圈随进度异变 · 点按可调目标',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _continueSlide((Book, ReadingProgressData?) item, ColorScheme scheme) {
-    // 复用海报风续读条（与书架顶条同语言）
-    return ThinContinueBar(
-      book: item.$1,
-      progress: item.$2,
-      onTap: () => _openBook(item.$1),
+  Widget _continueSlide((Book, ReadingProgressData?) item) {
+    // 与书架海报条同语言；定高槽内垂直居中，无额外外壳
+    return Align(
+      alignment: Alignment.center,
+      child: ThinContinueBar(
+        book: item.$1,
+        progress: item.$2,
+        onTap: () => _openBook(item.$1),
+      ),
     );
   }
 
@@ -442,7 +468,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
             const SizedBox(height: 10),
             SizedBox(
-              height: 120,
+              height: 136,
               child: CustomPaint(
                 painter: _WeekLinePainter(
                   values: base,
