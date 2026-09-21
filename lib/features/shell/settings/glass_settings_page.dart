@@ -587,28 +587,14 @@ class _LiquidValueSegmented extends StatelessWidget {
                     },
             ),
           ),
-          // B：前景 bevel（Clip 外）+ 外侧落影，明暗分档保证深色可辨
+          // B：前景 bevel（Clip 外）——上亮下浅白/灰，**不用 BoxShadow**
+          // （历史验证：黑影发脏）；圆角 + 非均匀色必须 CustomPaint
           Positioned.fill(
             child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_outerR),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                        alpha: light ? 0.10 : 0.38,
-                      ),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                      spreadRadius: -1,
-                    ),
-                  ],
-                ),
-                child: CustomPaint(
-                  painter: _BevelRimPainter(
-                    radius: _outerR,
-                    light: light,
-                  ),
+              child: CustomPaint(
+                painter: _BevelRimPainter(
+                  radius: _outerR,
+                  light: light,
                 ),
               ),
             ),
@@ -718,8 +704,7 @@ class _BevelRimPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 深色底上黑边 α 过低会看不见——分档抬高下缘对比与线宽
-    final stroke = light ? 1.0 : 1.35;
+    final stroke = light ? 1.0 : 1.2;
     final rrect = RRect.fromRectAndRadius(
       Offset.zero & size,
       Radius.circular(radius),
@@ -731,10 +716,14 @@ class _BevelRimPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Colors.white.withValues(alpha: light ? 0.62 : 0.48),
-          Colors.white.withValues(alpha: light ? 0.34 : 0.26),
-          // 下缘：立体感靠可辨的暗边，而非「看不见」
-          Colors.black.withValues(alpha: light ? 0.14 : 0.34),
+          // 上：最亮白
+          Colors.white.withValues(alpha: light ? 0.58 : 0.46),
+          // 侧：中等白
+          Colors.white.withValues(alpha: light ? 0.34 : 0.28),
+          // 下：浅白/灰（比上边弱，不用黑——黑影发脏且深色不可辨）
+          light
+              ? Colors.white.withValues(alpha: 0.22)
+              : const Color(0xFFB0B0B0).withValues(alpha: 0.28),
         ],
         stops: const [0, 0.42, 1],
       ).createShader(rrect.outerRect);
