@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/ffi/book_service.dart' show CoverStore;
+import '../../core/services/cover_palette.dart';
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart' show AppGlass;
 import '../reader/presentation/providers/reader_provider.dart'
@@ -133,7 +134,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
-                    height: 128,
+                    height: 148,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: math.min(6, _entries.length),
@@ -141,37 +142,57 @@ class _HomePageState extends ConsumerState<HomePage> {
                       itemBuilder: (context, i) {
                         final (book, _) = _entries[i];
                         final cover = CoverStore.fileOf(book.filePath);
+                        // 复用书架 CoverPalette 缓存，不重复提取
+                        final pal = CoverPalette.cached(book.filePath) ??
+                            CoverPalette.synthetic(book.title);
                         return SizedBox(
-                          width: 78,
+                          width: 88,
                           child: InkWell(
                             onTap: () => _openBook(book),
                             borderRadius: BorderRadius.circular(12),
                             child: Column(
                               children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: SizedBox(
-                                    width: 72,
-                                    height: 100,
-                                    child: cover != null
-                                        ? Image.file(
-                                            cover,
-                                            fit: BoxFit.cover,
-                                            cacheWidth: 160,
-                                            gaplessPlayback: true,
-                                            errorBuilder: (_, _, _) =>
-                                                ColoredBox(
-                                              color: scheme.primary
-                                                  .withValues(alpha: 0.2),
-                                            ),
-                                          )
-                                        : ColoredBox(
-                                            color: scheme.primary
-                                                .withValues(alpha: 0.2),
-                                          ),
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: pal.shadowColor
+                                            .withValues(alpha: 0.4),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 6),
+                                        spreadRadius: -2,
+                                      ),
+                                      BoxShadow(
+                                        color: pal.dominant
+                                            .withValues(alpha: 0.18),
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 8),
+                                        spreadRadius: -4,
+                                      ),
+                                    ],
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: SizedBox(
+                                      width: 84,
+                                      height: 118,
+                                      child: cover != null
+                                          ? Image.file(
+                                              cover,
+                                              fit: BoxFit.cover,
+                                              cacheWidth: 200,
+                                              gaplessPlayback: true,
+                                              errorBuilder: (_, _, _) =>
+                                                  ColoredBox(
+                                                color: pal.dark,
+                                              ),
+                                            )
+                                          : ColoredBox(color: pal.dark),
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 6),
                                 Text(
                                   book.title,
                                   maxLines: 1,
@@ -201,29 +222,36 @@ class _HomePageState extends ConsumerState<HomePage> {
     ];
     final i = _heroIndex.clamp(0, slides.length - 1);
     return SizedBox(
-      height: 140,
+      height: 152,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Fade + 轻 Slide：禁止双帧叠影
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 380),
+              duration: const Duration(milliseconds: 480),
+              reverseDuration: const Duration(milliseconds: 420),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               transitionBuilder: (child, anim) {
                 final slide = Tween<Offset>(
-                  begin: const Offset(0.08, 0),
+                  begin: const Offset(0.1, 0),
                   end: Offset.zero,
-                ).animate(anim);
+                ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
+                final scale = Tween<double>(begin: 0.97, end: 1.0)
+                    .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutBack));
                 return FadeTransition(
-                  opacity: anim,
-                  child: SlideTransition(position: slide, child: child),
+                  opacity: CurvedAnimation(
+                    parent: anim,
+                    curve: const Interval(0, 0.7, curve: Curves.easeOut),
+                  ),
+                  child: SlideTransition(
+                    position: slide,
+                    child: ScaleTransition(scale: scale, child: child),
+                  ),
                 );
               },
               layoutBuilder: (currentChild, previousChildren) {
-                // 只叠当前帧，避免双影
                 return Stack(
                   fit: StackFit.expand,
                   children: [?currentChild],
@@ -370,6 +398,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _statsRow(ColorScheme scheme) {
     Widget stat(IconData icon, String lb, String val, String unit) {
+      final target = double.tryParse(val) ?? 0;
+      final isInt = !val.contains('.');
       return Expanded(
         child: _FrostChromeCard(
           scheme: scheme,
@@ -392,13 +422,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
                 const SizedBox(height: 6),
                 TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: double.tryParse(val) ?? 0),
-                  duration: const Duration(milliseconds: 600),
+                  tween: Tween(begin: 0, end: target),
+                  duration: const Duration(milliseconds: 900),
                   curve: Curves.easeOutCubic,
                   builder: (context, v, _) {
-                    final text = val.contains('.')
-                        ? v.toStringAsFixed(1)
-                        : v.round().toString();
+                    // 滚动数字：格式与目标一致
+                    final text = isInt
+                        ? v.round().toString()
+                        : v.toStringAsFixed(1);
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -407,6 +438,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                           style:
                               Theme.of(context).textTheme.titleLarge?.copyWith(
                                     fontWeight: FontWeight.w800,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
                                   ),
                         ),
                         Padding(
@@ -498,16 +532,17 @@ class _HomePageState extends ConsumerState<HomePage> {
             const SizedBox(height: 10),
             SizedBox(
               height: 136,
-              child: TweenAnimationBuilder<List<double>>(
-                tween: ListTween(base),
-                duration: const Duration(milliseconds: 700),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: 1),
+                duration: const Duration(milliseconds: 1100),
                 curve: Curves.easeOutCubic,
-                builder: (context, values, _) {
+                builder: (context, t, _) {
                   return CustomPaint(
                     painter: _WeekLinePainter(
-                      values: values,
+                      values: base,
                       line: scheme.primary,
                       track: scheme.outlineVariant.withValues(alpha: 0.45),
+                      drawT: t,
                     ),
                   );
                 },
@@ -555,20 +590,6 @@ class _FrostChromeCard extends StatelessWidget {
   }
 }
 
-class ListTween extends Tween<List<double>> {
-  ListTween(List<double> end) : super(begin: List.filled(end.length, 0), end: end);
-
-  @override
-  List<double> lerp(double t) {
-    final a = begin ?? const <double>[];
-    final b = end ?? const <double>[];
-    return [
-      for (var i = 0; i < b.length; i++)
-        (i < a.length ? a[i] : b[i]) * (1 - t) + b[i] * t,
-    ];
-  }
-}
-
 class _DayLabel extends StatelessWidget {
   const _DayLabel(this.t, {this.emphasize = false});
   final String t;
@@ -592,15 +613,20 @@ class _WeekLinePainter extends CustomPainter {
     required this.values,
     required this.line,
     required this.track,
+    this.drawT = 1,
   });
 
   final List<double> values;
   final Color line;
   final Color track;
 
+  /// 0→1 描画进度（路径生长 + 点依次亮起）
+  final double drawT;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (values.isEmpty) return;
+    final t = drawT.clamp(0.0, 1.0);
     final maxV = math.max(10.0, values.reduce(math.max));
     final n = values.length;
     final padX = 4.0;
@@ -625,12 +651,19 @@ class _WeekLinePainter extends CustomPainter {
       trackPaint,
     );
 
+    // 按 drawT 生长路径
+    final visible = (t * (n - 1)).clamp(0.0, (n - 1).toDouble());
     final path = Path()..moveTo(pts.first.dx, pts.first.dy);
-    for (var i = 1; i < pts.length; i++) {
-      path.lineTo(pts[i].dx, pts[i].dy);
+    for (var i = 1; i < n; i++) {
+      final seg = (visible - (i - 1)).clamp(0.0, 1.0);
+      if (seg <= 0) break;
+      final from = pts[i - 1];
+      final to = pts[i];
+      final p = Offset.lerp(from, to, seg)!;
+      path.lineTo(p.dx, p.dy);
     }
     final area = Path.from(path)
-      ..lineTo(pts.last.dx, size.height - 4)
+      ..lineTo(pts.first.dx + visible * step, size.height - 4)
       ..lineTo(pts.first.dx, size.height - 4)
       ..close();
     canvas.drawPath(
@@ -651,26 +684,30 @@ class _WeekLinePainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round,
     );
-    for (var i = 0; i < pts.length; i++) {
+    for (var i = 0; i < n; i++) {
+      final appear = ((visible - i) * 3).clamp(0.0, 1.0);
+      if (appear <= 0) continue;
       final isToday = i == n - 1;
       if (isToday) {
         canvas.drawCircle(
           pts[i],
-          8,
+          8 * appear,
           Paint()..color = line.withValues(alpha: 0.2),
         );
       }
       canvas.drawCircle(
         pts[i],
-        isToday ? 4.5 : 3,
-        Paint()..color = line.withValues(alpha: isToday ? 1 : 0.55),
+        (isToday ? 4.5 : 3) * appear,
+        Paint()..color = line.withValues(alpha: (isToday ? 1 : 0.55) * appear),
       );
     }
   }
 
   @override
   bool shouldRepaint(covariant _WeekLinePainter old) =>
-      old.values != values || old.line != line;
+      old.values != values ||
+      old.line != line ||
+      old.drawT != drawT;
 }
 
 /// 底栏实底态（减弱动态）用

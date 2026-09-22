@@ -70,7 +70,7 @@ class ThinContinueBar extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: SizedBox(
-              height: 116,
+              height: 128,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -140,8 +140,8 @@ class ThinContinueBar extends StatelessWidget {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(10),
                             child: SizedBox(
-                              width: 64,
-                              height: 92,
+                              width: 72,
+                              height: 104,
                               child: cover != null
                                   ? Image.file(
                                       cover,

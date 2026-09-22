@@ -60,3 +60,4 @@ commits: 9fc7d94..HEAD
 - [x] T4: analyze 无新增 (covers: S2)
 - [x] T5: Hero 定高 128 + M3 异变环 + 去外层 Card + 收底留白 (covers: S2 Hero)
 - [x] T6: 封面放大+按钮实色+Hero/折线/统计过渡+取色投影+chrome 霜层 (covers: S2 质感)
+- [x] T7: Hero 480ms fade+slide+scale / 封面 72×104 与最近 84×118 / CoverPalette 缓存投影 / 折线 drawT 描画 / 统计 tabular 滚动数字 (covers: S2 动效)
