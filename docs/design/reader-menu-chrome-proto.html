@@ -289,6 +289,23 @@
     display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
   }
   .preset small { font-size: 9px; opacity: 0.85; }
+  .bg-tile {
+    height: 56px; border-radius: 10px; border: 0.5px solid var(--glass-edge);
+    cursor: pointer; position: relative; overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .bg-tile small {
+    position: absolute; left: 0; right: 0; bottom: 2px; text-align: center;
+    font-size: 9px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+  }
+  .bg-tile.on { outline: 2px solid var(--accent); }
+  .font-card {
+    border: 0.5px solid var(--glass-edge); border-radius: 12px; padding: 12px 10px;
+    background: var(--glass); cursor: pointer; text-align: center;
+  }
+  .font-card.on { border-color: var(--accent); background: var(--glass-strong); color: var(--accent); font-weight: 700; }
+  .font-card b { display: block; font-size: 14px; margin-bottom: 4px; }
+  .font-card small { font-size: 10px; color: var(--muted); font-weight: 400; }
 </style>
 </head>
 <body>
@@ -460,7 +477,9 @@
               <button class="chip" data-sub="pad">边距</button>
             </div>
             <div id="type-body">
-              <div class="form-row"><span>字体</span><span class="pill">默认 · 系统</span></div>
+              <div class="form-row"><span>字体</span>
+                <button class="chip" id="openFontBody">默认 · 系统 ▾</button>
+              </div>
               <div class="form-row"><span>字号</span>
                 <div class="stepper"><button class="lg lg-sm">−</button><span id="fsVal">15</span><button class="lg lg-sm">+</button></div>
               </div>
@@ -483,7 +502,9 @@
               </div>
             </div>
             <div id="type-title" style="display:none">
-              <div class="form-row"><span>标题字体</span><span class="pill">同正文</span></div>
+              <div class="form-row"><span>标题字体</span>
+                <button class="chip" id="openFontTitle">同正文 ▾</button>
+              </div>
               <div class="form-row"><span>标题上边距</span>
                 <div class="slider" style="max-width:140px"><i style="left:35%"></i></div>
                 <span class="pill">12</span>
@@ -555,6 +576,13 @@
                 <button class="chip on">纯色</button><button class="chip">日间图</button><button class="chip">夜间图</button><button class="chip">清除</button>
               </div>
             </div>
+            <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px">
+              <span>背景图网格</span>
+              <div id="bgGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"></div>
+              <div class="chips" style="margin-top:4px">
+                <button class="chip">从文件选择…</button>
+              </div>
+            </div>
             <div class="form-row"><span>背景透明度</span>
               <div class="slider" style="max-width:120px"><i style="left:70%"></i></div>
               <span class="pill">70%</span>
@@ -581,6 +609,26 @@
             <div class="form-row"><span>标题胶囊</span><button class="switch"><i></i></button></div>
           </div>
           <div class="note">顶栏 / 悬浮 / 工具 / 进度箭头：默认<strong>液态玻璃</strong>圆键。排版含字体/行段距/页眉页脚/四向边距。正文永不玻璃化。</div>
+        </div>
+      </div>
+
+      <div class="sheet" id="sheet-font" style="max-height:70%;z-index:11">
+        <header>
+          <h3 id="fontTitle">选择字体</h3>
+          <button class="chip" id="sysFontBtn">系统字</button>
+          <button class="chip" id="fontFolderBtn">文件夹</button>
+          <button class="lg lg-sm" data-close>×</button>
+        </header>
+        <div class="body">
+          <div class="form-row" style="padding-top:0">
+            <span style="color:var(--muted);font-size:11px" id="fontSelMeta">当前：系统默认 · 可排序</span>
+            <div class="chips" id="fontSort">
+              <button class="chip on">名↑</button><button class="chip">名↓</button>
+              <button class="chip">大小</button><button class="chip">时间</button>
+            </div>
+          </div>
+          <div id="fontGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px"></div>
+          <div class="note" style="margin-top:8px">对标 FontSelectSheet：系统字菜单 · 打开文件夹 · 文件网格（名/大小/时间排序）。正文/标题/页眉/页脚字体各自进入本层。</div>
         </div>
       </div>
 
@@ -617,13 +665,23 @@
         <div class="steps"><span class="step arrow">玻璃圆键</span><span class="step">sheet / 更多</span></div>
       </div>
       <div class="flow-card">
+        <strong>字体选择 sheet（二级）</strong>
+        <p>从排版「字体」进入：系统字菜单 · 打开文件夹 · 文件网格（名/大小/时间排序）· 选中高亮。</p>
+        <div class="steps"><span class="step arrow">字体</span><span class="step">网格选文件</span><span class="step">回排版</span></div>
+      </div>
+      <div class="flow-card">
+        <strong>背景图网格</strong>
+        <p>内置纹理格（亚麻/羊皮/宣纸/夜空…）+ 自定义图片；点格即时换阅读底。日间/夜间可各配一图。</p>
+        <div class="steps"><span class="step arrow">背景主题</span><span class="step">网格</span><span class="step">即时预览</span></div>
+      </div>
+      <div class="flow-card">
         <strong>目录 / 搜索</strong>
         <p>毛玻璃 sheet；搜索框与关闭键同为玻璃球语言；点条目跳转。</p>
         <div class="steps"><span class="step arrow">入口</span><span class="step">过滤/输入</span><span class="step">定位</span></div>
       </div>
       <div class="flow-card">
         <strong>设置（四页 · 含排版 + 背景）</strong>
-        <p>① 形态与图标<br/>② 排版布局：正文/标题/页眉页脚/边距<br/>③ <b>背景主题</b>：样式管理 · 日/夜背景色与图 · 透明度 · 预设<br/>④ 材质与顶栏</p>
+        <p>① 形态与图标<br/>② 排版布局：正文/标题/页眉页脚/边距 · <b>字体选择 sheet</b><br/>③ 背景主题：样式 · 日/夜色与图 · <b>背景图网格</b> · 透明度 · 预设<br/>④ 材质与顶栏</p>
         <div class="steps"><span class="step arrow">设置</span><span class="step">四 Tab</span><span class="step">预设即预览</span></div>
       </div>
     </div>
@@ -691,11 +749,97 @@
     scrim.classList.add('on');
     document.getElementById('sheet-' + id).classList.add('on');
   }
+  function openFontSheet(which) {
+    closeAll();
+    scrim.classList.add('on');
+    document.getElementById('sheet-settings').classList.add('on');
+    document.getElementById('sheet-font').classList.add('on');
+    document.getElementById('fontTitle').textContent =
+      which === 'title' ? '标题字体' : '选择字体';
+  }
   scrim.onclick = closeAll;
   document.querySelectorAll('[data-close]').forEach(b => b.onclick = closeAll);
   document.querySelectorAll('[data-open]').forEach(btn => {
     btn.onclick = () => openSheet(btn.getAttribute('data-open'));
   });
+  document.getElementById('openFontBody').onclick = () => openFontSheet('body');
+  document.getElementById('openFontTitle').onclick = () => openFontSheet('title');
+
+  (function bindFonts() {
+    const fonts = [
+      ['系统默认', 'System', 'serif'],
+      ['思源宋体', 'SourceHanSerif', 'serif'],
+      ['思源黑体', 'SourceHanSans', 'sans-serif'],
+      ['霞鹜文楷', 'LXGWWenKai', 'cursive'],
+      ['方正仿宋', 'FZFangSong', 'serif'],
+      ['JetBrains Mono', 'JetBrainsMono', 'monospace'],
+    ];
+    const grid = document.getElementById('fontGrid');
+    let sel = 0;
+    function render() {
+      grid.innerHTML = fonts.map((f, i) =>
+        `<div class="font-card${i === sel ? ' on' : ''}" data-i="${i}" style="font-family:${f[2]}">
+          <b>${f[0]}</b><small>${f[1]}.ttf · 4.2MB</small>
+        </div>`
+      ).join('');
+      grid.querySelectorAll('[data-i]').forEach(el => {
+        el.onclick = () => {
+          sel = +el.getAttribute('data-i');
+          document.getElementById('fontSelMeta').textContent = '当前：' + fonts[sel][0];
+          document.getElementById('openFontBody').textContent = fonts[sel][0] + ' ▾';
+          render();
+        };
+      });
+    }
+    render();
+    document.getElementById('sysFontBtn').onclick = () => {
+      sel = 0;
+      document.getElementById('fontSelMeta').textContent = '当前：系统默认';
+      document.getElementById('openFontBody').textContent = '系统默认 ▾';
+      render();
+    };
+    document.getElementById('fontFolderBtn').onclick = () => {
+      alert('打开字体文件夹（原型占位：SAF 选目录后列出 .ttf/.otf）');
+    };
+    document.querySelectorAll('#fontSort .chip').forEach(c => {
+      c.onclick = () => {
+        document.querySelectorAll('#fontSort .chip').forEach(x => x.classList.remove('on'));
+        c.classList.add('on');
+      };
+    });
+  })();
+
+  (function bindBgGrid() {
+    const tiles = [
+      ['亚麻', 'repeating-linear-gradient(45deg,#e8e0d4 0 2px,#f2ebe0 2px 6px)'],
+      ['羊皮', 'radial-gradient(circle at 30% 20%,#f3e6c8,#e0cfa8)'],
+      ['宣纸', 'linear-gradient(180deg,#f7f3ea,#efe6d8)'],
+      ['夜空', 'radial-gradient(circle at 70% 30%,#2a3550,#0e121c)'],
+      ['深林', 'linear-gradient(160deg,#1a2e22,#0c1812)'],
+      ['雾灰', 'linear-gradient(180deg,#d8ddd9,#c5ccc8)'],
+      ['暖沙', 'linear-gradient(180deg,#f0e2c8,#e4d2b0)'],
+      ['自定义', 'repeating-linear-gradient(90deg,#ccc 0 6px,#eee 6px 12px)'],
+    ];
+    const grid = document.getElementById('bgGrid');
+    const phone = document.getElementById('phone');
+    grid.innerHTML = tiles.map((t, i) =>
+      `<button class="bg-tile${i === 0 ? ' on' : ''}" data-i="${i}" style="background:${t[1]}"><small>${t[0]}</small></button>`
+    ).join('');
+    grid.querySelectorAll('.bg-tile').forEach(el => {
+      el.onclick = () => {
+        const i = +el.getAttribute('data-i');
+        grid.querySelectorAll('.bg-tile').forEach(x => x.classList.remove('on'));
+        el.classList.add('on');
+        if (i === 7) {
+          alert('从相册/文件选背景图（原型占位）');
+          return;
+        }
+        phone.style.background =
+          'radial-gradient(ellipse 120% 40% at 50% 0%, rgba(255,255,255,0.12), transparent 55%), ' +
+          tiles[i][1];
+      };
+    });
+  })();
 
   function applyMode(m) {
     mode = m;
