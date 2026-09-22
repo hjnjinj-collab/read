@@ -12,10 +12,12 @@ import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart' show AppGlass;
 import '../reader/presentation/providers/reader_provider.dart'
     show appDatabaseProvider;
+import 'bookshelf/bookshelf_layout.dart';
 import 'bookshelf/thin_continue_bar.dart';
 import 'providers/shell_settings.dart';
 import 'widgets/hero_slide.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
+import 'widgets/top_scroll_blur.dart';
 
 /// 切回首页 Tab 时递增，触发 Dashboard 入场动画重播。
 final ValueNotifier<int> homeIntroTick = ValueNotifier(0);
@@ -34,6 +36,7 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _loading = true;
   int _heroIndex = 0;
   Timer? _heroTimer;
+  double _scrollT = 0;
   late final AnimationController _introCtrl = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1100),
@@ -59,7 +62,12 @@ class _HomePageState extends ConsumerState<HomePage>
 
   void _replayIntro() {
     if (!mounted) return;
+    final reduce = MediaQuery.disableAnimationsOf(context);
     setState(() => _heroIndex = 0);
+    if (reduce) {
+      _introCtrl.value = 1;
+      return;
+    }
     _introCtrl.forward(from: 0);
     // 进页先停在「今日目标」，等入场播完再开始轮换（避免与页切换/入场抢戏）
     _armHero(firstDelay: const Duration(milliseconds: 1800));
@@ -67,8 +75,11 @@ class _HomePageState extends ConsumerState<HomePage>
 
   void _armHero({Duration firstDelay = const Duration(seconds: 6)}) {
     _heroTimer?.cancel();
+    // 减弱动态：不自动轮换
+    if (mounted && MediaQuery.disableAnimationsOf(context)) return;
     _heroTimer = Timer(firstDelay, () {
       if (!mounted || _entries.isEmpty) return;
+      if (MediaQuery.disableAnimationsOf(context)) return;
       final n = 1 + math.min(2, _continueItems.length).toInt();
       if (n <= 1) return;
       setState(() => _heroIndex = (_heroIndex + 1) % n);
@@ -97,6 +108,17 @@ class _HomePageState extends ConsumerState<HomePage>
 
   void _onIntroTick() => _replayIntro();
 
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    final metrics = n.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+    // 与书架同源：约 56px 内完成顶栏滤镜显现
+    final t = (metrics.pixels / 56.0).clamp(0.0, 1.0);
+    if ((t - _scrollT).abs() < 0.01) return false;
+    setState(() => _scrollT = t);
+    return false;
+  }
+
   List<(Book, ReadingProgressData?)> get _continueItems {
     final withP = _entries
         .where((e) => e.$2 != null && e.$2!.totalChapters > 0)
@@ -119,6 +141,9 @@ class _HomePageState extends ConsumerState<HomePage>
     final shell = ref.watch(shellSettingsProvider);
     final scheme = Theme.of(context).colorScheme;
     final pad = MediaQuery.paddingOf(context);
+    // 与书架同几何：固定顶栏玻璃高度 + 内容顶隙
+    final topGlass = pad.top + BookshelfLayout.headerContentH;
+    final contentTop = topGlass + BookshelfLayout.contentTopGap;
 
     return Scaffold(
       extendBody: true,
@@ -136,118 +161,161 @@ class _HomePageState extends ConsumerState<HomePage>
           if (_loading)
             const Center(child: CircularProgressIndicator())
           else
-            ListView(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                pad.top + 12,
-                16,
-                // 收底：只留底栏安全区，消掉最近阅读下大块空白
-                pad.bottom + 76,
-              ),
-              children: [
-                Text(
-                  '首页',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                _heroCard(scheme),
-                const SizedBox(height: 12),
-                _statsRow(scheme),
-                const SizedBox(height: 12),
-                _chartCard(scheme),
-                const SizedBox(height: 14),
-                if (_entries.isNotEmpty) ...[
-                  Text(
-                    '最近阅读',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    contentTop,
+                    16,
+                    // 收底：只留底栏安全区，消掉最近阅读下大块空白
+                    pad.bottom + 76,
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 168,
-                    child: ListView.separated(
-                      // 投影需要出界，默认 hardEdge 会裁掉
-                      clipBehavior: Clip.none,
-                      scrollDirection: Axis.horizontal,
-                      itemCount: math.min(6, _entries.length),
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, i) {
-                        final (book, _) = _entries[i];
-                        final cover = CoverStore.fileOf(book.filePath);
-                        final pal = CoverPalette.cached(book.filePath) ??
-                            CoverPalette.synthetic(book.title);
-                        return Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
-                          child: SizedBox(
-                            width: 96,
-                            child: InkWell(
-                              onTap: () => _openBook(book),
-                              borderRadius: BorderRadius.circular(12),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: pal.shadowColor
-                                              .withValues(alpha: 0.55),
-                                          blurRadius: 14,
-                                          offset: const Offset(0, 8),
-                                        ),
-                                        BoxShadow(
-                                          color: pal.dominant
-                                              .withValues(alpha: 0.28),
-                                          blurRadius: 20,
-                                          offset: const Offset(0, 12),
-                                          spreadRadius: -2,
-                                        ),
-                                      ],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: SizedBox(
-                                        width: 92,
-                                        // 120 + 4 + 文案 ≤ 列表 148 内容区，防 RenderFlex 溢出
-                                        height: 120,
-                                        child: cover != null
-                                            ? Image.file(
-                                                cover,
-                                                fit: BoxFit.cover,
-                                                cacheWidth: 240,
-                                                gaplessPlayback: true,
-                                                errorBuilder: (_, _, _) =>
-                                                    ColoredBox(color: pal.dark),
-                                              )
-                                            : ColoredBox(color: pal.dark),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    book.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
+                  children: [
+                    _heroCard(scheme),
+                    const SizedBox(height: 12),
+                    _statsRow(scheme),
+                    const SizedBox(height: 12),
+                    _chartCard(scheme),
+                    const SizedBox(height: 14),
+                    if (_entries.isNotEmpty) ...[
+                      Text(
+                        '最近阅读',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 168,
+                        child: ListView.separated(
+                          // 投影需要出界，默认 hardEdge 会裁掉
+                          clipBehavior: Clip.none,
+                          scrollDirection: Axis.horizontal,
+                          itemCount: math.min(6, _entries.length),
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (context, i) {
+                            final (book, _) = _entries[i];
+                            final cover = CoverStore.fileOf(book.filePath);
+                            final pal = CoverPalette.cached(book.filePath) ??
+                                CoverPalette.synthetic(book.title);
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+                              child: SizedBox(
+                                width: 96,
+                                child: InkWell(
+                                  onTap: () => _openBook(book),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: pal.shadowColor
+                                                  .withValues(alpha: 0.55),
+                                              blurRadius: 14,
+                                              offset: const Offset(0, 8),
+                                            ),
+                                            BoxShadow(
+                                              color: pal.dominant
+                                                  .withValues(alpha: 0.28),
+                                              blurRadius: 20,
+                                              offset: const Offset(0, 12),
+                                              spreadRadius: -2,
+                                            ),
+                                          ],
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          child: SizedBox(
+                                            width: 92,
+                                            // 120 + 4 + 文案 ≤ 列表 148 内容区，防 RenderFlex 溢出
+                                            height: 120,
+                                            child: cover != null
+                                                ? Image.file(
+                                                    cover,
+                                                    fit: BoxFit.cover,
+                                                    cacheWidth: 240,
+                                                    gaplessPlayback: true,
+                                                    errorBuilder:
+                                                        (_, _, _) =>
+                                                            ColoredBox(
+                                                                color:
+                                                                    pal.dark),
+                                                  )
+                                                : ColoredBox(color: pal.dark),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        book.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
+          // 顶栏渐变毛玻璃叠在内容上（书架同款）
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildHeader(),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final row = SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 2, 16, 4 - 2 * _scrollT),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '首页',
+            style: TextStyle.lerp(
+              Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+              Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
+              _scrollT,
+            ),
+          ),
+        ),
+      ),
+    );
+    return TopScrollBlurChrome(
+      scrollT: _scrollT,
+      headerContentH: BookshelfLayout.headerContentH,
+      topBlurExtend: BookshelfLayout.topBlurExtend,
+      child: row,
     );
   }
 
@@ -266,27 +334,28 @@ class _HomePageState extends ConsumerState<HomePage>
           radius: AppGlass.settingsCardRadius,
           child: slides[i],
         ),
-        // 轮换圆点叠在块上
-        Positioned(
-          top: 10,
-          right: 12,
-          child: Row(
-            children: List.generate(
-              slides.length,
-              (d) => Container(
-                width: d == i ? 14 : 6,
-                height: 6,
-                margin: const EdgeInsets.only(left: 4),
-                decoration: BoxDecoration(
-                  color: d == i
-                      ? Colors.white.withValues(alpha: 0.9)
-                      : Colors.white.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(3),
+        // 轮换圆点叠在块上（与书架一致：多帧才显示）
+        if (slides.length > 1)
+          Positioned(
+            top: 10,
+            right: 12,
+            child: Row(
+              children: List.generate(
+                slides.length,
+                (d) => Container(
+                  width: d == i ? 14 : 6,
+                  height: 6,
+                  margin: const EdgeInsets.only(left: 4),
+                  decoration: BoxDecoration(
+                    color: d == i
+                        ? Colors.white.withValues(alpha: 0.9)
+                        : Colors.white.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

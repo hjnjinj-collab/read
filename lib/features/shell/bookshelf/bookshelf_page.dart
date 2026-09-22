@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart' show listEquals;
 
@@ -24,6 +23,7 @@ import 'book_cover_card.dart';
 import 'bookshelf_layout.dart';
 import 'thin_continue_bar.dart';
 import '../widgets/hero_slide.dart';
+import '../widgets/top_scroll_blur.dart';
 
 /// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -48,6 +48,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
   // 用 Notification 监听滚动：同一 controller 不能挂两个 ScrollView
   // （grid/list 切换 + AnimatedSwitcher 会双挂触发 Scrollbar 断言）
   double _scrollT = 0;
+  int _bannerIndex = 0;
+  Timer? _bannerTimer;
 
   @override
   bool get wantKeepAlive => true;
@@ -78,9 +80,28 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
   @override
   void dispose() {
+    _bannerTimer?.cancel();
     _highlightTimer?.cancel();
     _flipClearTimer?.cancel();
     super.dispose();
+  }
+
+  /// 最近阅读前 3 本（lastRead 降序），供顶条轮换
+  List<(Book, ReadingProgressData?)> get _bannerItems =>
+      _entries.take(3).toList();
+
+  void _armBannerTimer({Duration firstDelay = const Duration(seconds: 6)}) {
+    _bannerTimer?.cancel();
+    // 减弱动态：不自动轮换
+    if (mounted && MediaQuery.disableAnimationsOf(context)) return;
+    final n = _bannerItems.length;
+    if (n <= 1) return;
+    _bannerTimer = Timer(firstDelay, () {
+      if (!mounted) return;
+      if (MediaQuery.disableAnimationsOf(context)) return;
+      setState(() => _bannerIndex = (_bannerIndex + 1) % n);
+      _armBannerTimer();
+    });
   }
 
   Future<void> _refresh({bool initial = false}) async {
@@ -103,10 +124,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       _entries = entries;
       _prevIndex = oldIndex;
       _prevOrder = order;
+      _bannerIndex = 0;
+      // 空架后内容不可滚，_scrollT 无法靠 ScrollNotification 回 0
+      if (entries.isEmpty) _scrollT = 0;
       _flipArmed = orderChanged &&
           !MediaQuery.disableAnimationsOf(context);
       if (initial) _loading = false;
     });
+    _armBannerTimer(firstDelay: const Duration(seconds: 6));
     if (_flipArmed) {
       _flipClearTimer?.cancel();
       _flipClearTimer = Timer(
@@ -270,9 +295,6 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
 
   Widget _buildHeader(BuildContext context, ShellSettings shell,
       ShellSettingsNotifier notifier, ColorScheme scheme) {
-    final disableBlur = MediaQuery.disableAnimationsOf(context);
-    final topPad = MediaQuery.paddingOf(context).top;
-
     final row = SafeArea(
       bottom: false,
       child: Padding(
@@ -383,86 +405,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
       ),
     );
 
-    if (disableBlur) {
-      return Material(color: scheme.surface, child: row);
-    }
-
-    // 静止：只画标题行，不叠模糊（避免暗色下「常显滤镜」）
-    // 高度只包标题行，避免 tight 约束把 Row 垂直居中、下压与横幅重叠
-    if (_scrollT < 0.02) {
-      return SizedBox(
-        height: topPad + BookshelfLayout.headerContentH,
-        child: row,
-      );
-    }
-
-    // 全宽渐变模糊：Blur + ShaderMask；雾色随 _scrollT 浮现主色 tint
-    // 向下延伸 topBlurExtend，衰减带盖住内容顶部，范围更长
-    final h = topPad + BookshelfLayout.headerContentH + BookshelfLayout.topBlurExtend;
-    final fog = AppGlass.topTint(scheme);
-    final fogA = _scrollT; // 0 静止 → 1 滚动
-    return SizedBox(
-      height: h,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 背景层不抢事件，衰减带下方内容可滚
-            IgnorePointer(
-              child: ShaderMask(
-                shaderCallback: (rect) {
-                  return LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.white,
-                      Colors.white.withValues(alpha: 0.92),
-                      Colors.white.withValues(alpha: 0.72),
-                      Colors.white.withValues(alpha: 0.40),
-                      Colors.white.withValues(alpha: 0.14),
-                      Colors.transparent,
-                    ],
-                    // 顶栏区保持强模糊，延伸带缓慢衰减
-                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
-                  ).createShader(rect);
-                },
-                blendMode: BlendMode.dstIn,
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: AppGlass.topBlurSigma,
-                    sigmaY: AppGlass.topBlurSigma,
-                  ),
-                  // 子色与雾色同源（topTint）：有模糊、退场时不会闪白
-                  child: ColoredBox(color: fog),
-                ),
-              ),
-            ),
-            IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      fog.withValues(alpha: 0.58 * fogA),
-                      fog.withValues(alpha: 0.48 * fogA),
-                      fog.withValues(alpha: 0.32 * fogA),
-                      fog.withValues(alpha: 0.16 * fogA),
-                      fog.withValues(alpha: 0.05 * fogA),
-                      Colors.transparent,
-                    ],
-                    stops: const [0, 0.22, 0.42, 0.62, 0.82, 1],
-                  ),
-                ),
-              ),
-            ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: row,
-            ),
-          ],
-        ),
-      ),
+    return TopScrollBlurChrome(
+      scrollT: _scrollT,
+      headerContentH: BookshelfLayout.headerContentH,
+      topBlurExtend: BookshelfLayout.topBlurExtend,
+      child: row,
     );
   }
 
@@ -481,33 +428,47 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     final contentTop = topGlass + BookshelfLayout.contentTopGap;
     final showHero = !_loading && _entries.isNotEmpty;
 
-    /// 薄续读条：优先最近且有章节进度的书；全无进度则不显示
-    (Book, ReadingProgressData?)? continueItem;
-    if (showHero) {
-      for (final e in _entries) {
-        final p = e.$2;
-        if (p != null && p.totalChapters > 0) {
-          continueItem = e;
-          break;
-        }
-      }
-      continueItem ??= _entries.first;
-    }
-
     Widget continueBar() {
-      final item = continueItem;
-      if (item == null) return const SizedBox.shrink();
+      final items = showHero ? _bannerItems : const [];
+      if (items.isEmpty) return const SizedBox.shrink();
+      final i = _bannerIndex.clamp(0, items.length - 1);
+      final item = items[i];
       // 与首页 Hero 同语言：换书时左入右出
-      return HeroSlideSwitcher(
-        index: 0,
-        height: 148,
-        radius: AppGlass.settingsCardRadius,
-        child: ThinContinueBar(
-          key: ValueKey('continue-${item.$1.filePath}'),
-          book: item.$1,
-          progress: item.$2,
-          onTap: () => _openBook(item.$1),
-        ),
+      return Stack(
+        children: [
+          HeroSlideSwitcher(
+            index: i,
+            height: 148,
+            radius: AppGlass.settingsCardRadius,
+            child: ThinContinueBar(
+              key: ValueKey('continue-${item.$1.filePath}'),
+              book: item.$1,
+              progress: item.$2,
+              onTap: () => _openBook(item.$1),
+            ),
+          ),
+          if (items.length > 1)
+            Positioned(
+              top: 10,
+              right: 12,
+              child: Row(
+                children: List.generate(
+                  items.length,
+                  (d) => Container(
+                    width: d == i ? 14 : 6,
+                    height: 6,
+                    margin: const EdgeInsets.only(left: 4),
+                    decoration: BoxDecoration(
+                      color: d == i
+                          ? Colors.white.withValues(alpha: 0.9)
+                          : Colors.white.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       );
     }
 

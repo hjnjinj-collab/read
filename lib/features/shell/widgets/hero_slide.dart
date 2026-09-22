@@ -46,6 +46,13 @@ class _HeroSlideSwitcherState extends State<HeroSlideSwitcher>
       _incoming = widget.child;
       return;
     }
+    // 减弱动态：直接换帧，不播推挤
+    if (mounted && MediaQuery.disableAnimationsOf(context)) {
+      _outgoing = null;
+      _incoming = widget.child;
+      _ctrl.value = 1;
+      return;
+    }
     _outgoing = _incoming;
     _incoming = widget.child;
     _ctrl.forward(from: 0).whenComplete(() {
