@@ -421,12 +421,13 @@
         </div>
       </div>
 
-      <div class="sheet" id="sheet-settings" style="max-height:80%">
+      <div class="sheet" id="sheet-settings" style="max-height:86%">
         <header><h3>阅读菜单设置</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
           <div class="tabs" id="setTabs">
             <button class="on" data-tab="0">形态与图标</button>
-            <button data-tab="1">材质与顶栏</button>
+            <button data-tab="1">排版布局</button>
+            <button data-tab="2">材质与顶栏</button>
           </div>
           <div id="set0">
             <div class="form-row"><span>菜单形态</span>
@@ -443,7 +444,89 @@
             <div class="form-row"><span>显示文字</span><button class="switch on"><i></i></button></div>
             <div class="form-row"><span>图标排序</span><span style="color:var(--muted)">可拖 · 默认搜索→设置</span></div>
           </div>
+
           <div id="set1" style="display:none">
+            <div class="chips" id="typeSub" style="margin-bottom:10px">
+              <button class="chip on" data-sub="body">正文</button>
+              <button class="chip" data-sub="title">标题</button>
+              <button class="chip" data-sub="tip">页眉页脚</button>
+              <button class="chip" data-sub="pad">边距</button>
+            </div>
+            <div id="type-body">
+              <div class="form-row"><span>字体</span><span class="pill">默认 · 系统</span></div>
+              <div class="form-row"><span>字号</span>
+                <div class="stepper"><button class="lg lg-sm">−</button><span id="fsVal">15</span><button class="lg lg-sm">+</button></div>
+              </div>
+              <div class="form-row"><span>行距</span>
+                <div class="slider" style="max-width:140px"><i style="left:40%"></i></div>
+                <span class="pill">1.6</span>
+              </div>
+              <div class="form-row"><span>段距</span>
+                <div class="slider" style="max-width:140px"><i style="left:30%"></i></div>
+                <span class="pill">0.8</span>
+              </div>
+              <div class="form-row"><span>字距</span>
+                <div class="slider" style="max-width:140px"><i style="left:50%"></i></div>
+                <span class="pill">0</span>
+              </div>
+              <div class="form-row"><span>文字色 / 强调色</span>
+                <div style="display:flex;gap:6px">
+                  <span class="pill">文字</span><span class="pill">强调</span>
+                </div>
+              </div>
+            </div>
+            <div id="type-title" style="display:none">
+              <div class="form-row"><span>标题字体</span><span class="pill">同正文</span></div>
+              <div class="form-row"><span>标题上边距</span>
+                <div class="slider" style="max-width:140px"><i style="left:35%"></i></div>
+                <span class="pill">12</span>
+              </div>
+              <div class="form-row"><span>标题上留白</span>
+                <div class="slider" style="max-width:140px"><i style="left:28%"></i></div>
+                <span class="pill">8</span>
+              </div>
+              <div class="form-row"><span>标题下留白</span>
+                <div class="slider" style="max-width:140px"><i style="left:28%"></i></div>
+                <span class="pill">8</span>
+              </div>
+              <div class="form-row"><span>副标题边距</span>
+                <div class="slider" style="max-width:140px"><i style="left:20%"></i></div>
+                <span class="pill">4</span>
+              </div>
+              <div class="form-row"><span>标题色</span><span class="pill">取色</span></div>
+            </div>
+            <div id="type-tip" style="display:none">
+              <div class="form-row"><span>页眉</span><button class="switch on"><i></i></button></div>
+              <div class="form-row"><span>页眉内容</span>
+                <div class="chips"><button class="chip on">书名</button><button class="chip">章节</button><button class="chip">进度</button></div>
+              </div>
+              <div class="form-row"><span>页脚</span><button class="switch on"><i></i></button></div>
+              <div class="form-row"><span>页脚内容</span>
+                <div class="chips"><button class="chip">页码</button><button class="chip on">进度%</button><button class="chip">时间</button></div>
+              </div>
+              <div class="form-row"><span>分隔线</span><button class="switch on"><i></i></button></div>
+              <div class="form-row"><span>页眉/页脚色</span><span class="pill">取色</span></div>
+            </div>
+            <div id="type-pad" style="display:none">
+              <div class="form-row"><span>正文 · 上</span>
+                <div class="slider" style="max-width:120px"><i style="left:25%"></i></div><span class="pill">16</span>
+              </div>
+              <div class="form-row"><span>正文 · 下</span>
+                <div class="slider" style="max-width:120px"><i style="left:25%"></i></div><span class="pill">16</span>
+              </div>
+              <div class="form-row"><span>正文 · 左</span>
+                <div class="slider" style="max-width:120px"><i style="left:30%"></i></div><span class="pill">18</span>
+              </div>
+              <div class="form-row"><span>正文 · 右</span>
+                <div class="slider" style="max-width:120px"><i style="left:30%"></i></div><span class="pill">18</span>
+              </div>
+              <div class="form-row"><span>页眉 · 上/下</span><span class="pill">8 / 4</span></div>
+              <div class="form-row"><span>页脚 · 上/下</span><span class="pill">4 / 8</span></div>
+              <div class="note" style="margin-top:8px">边距改动即时预览；对标 TypographyMarginTab（正文/页眉/页脚 四向）。</div>
+            </div>
+          </div>
+
+          <div id="set2" style="display:none">
             <div class="form-row"><span>面板圆角</span><span class="pill">22</span></div>
             <div class="form-row"><span>模糊</span>
               <div class="chips"><button class="chip">无</button><button class="chip on">渐变模糊</button></div>
@@ -452,7 +535,7 @@
             <div class="form-row"><span>合并顶栏按钮</span><button class="switch"><i></i></button></div>
             <div class="form-row"><span>标题胶囊</span><button class="switch"><i></i></button></div>
           </div>
-          <div class="note">顶栏 / 悬浮 / 工具 / 进度箭头：默认<strong>液态玻璃</strong>圆键。打开层毛玻璃。正文永不玻璃化。减弱动态：无液态动画。</div>
+          <div class="note">顶栏 / 悬浮 / 工具 / 进度箭头：默认<strong>液态玻璃</strong>圆键。排版含字体/行段距/页眉页脚/四向边距。正文永不玻璃化。</div>
         </div>
       </div>
 
@@ -494,9 +577,9 @@
         <div class="steps"><span class="step arrow">入口</span><span class="step">过滤/输入</span><span class="step">定位</span></div>
       </div>
       <div class="flow-card">
-        <strong>设置（预置两页）</strong>
-        <p>① 形态与图标 ② 材质与顶栏。分段/开关/chip 全玻璃语言，与壳设置同源。</p>
-        <div class="steps"><span class="step arrow">设置</span><span class="step">两 Tab</span><span class="step">即时预览</span></div>
+        <strong>设置（三页 · 含排版细页）</strong>
+        <p>① 形态与图标<br/>② <b>排版布局</b>：正文（字体/字号/行距/段距/字距/色）· 标题 · 页眉页脚 · 四向边距<br/>③ 材质与顶栏</p>
+        <div class="steps"><span class="step arrow">设置</span><span class="step">三 Tab</span><span class="step">排版子页签</span></div>
       </div>
     </div>
     <div class="note">设计稿 <code>reader-menu-chrome-ia.md</code> [S2.2] 材质总则 · 原型非产品代码。</div>
@@ -602,11 +685,31 @@
     b.onclick = () => {
       const t = b.getAttribute('data-tab');
       document.querySelectorAll('#setTabs button').forEach(x => x.classList.toggle('on', x === b));
-      document.getElementById('set0').style.display = t === '0' ? '' : 'none';
-      document.getElementById('set1').style.display = t === '1' ? '' : 'none';
+      ['0','1','2'].forEach(i => {
+        document.getElementById('set' + i).style.display = t === i ? '' : 'none';
+      });
     };
   });
+  document.querySelectorAll('#typeSub .chip').forEach(b => {
+    b.onclick = () => {
+      const s = b.getAttribute('data-sub');
+      document.querySelectorAll('#typeSub .chip').forEach(x => x.classList.toggle('on', x === b));
+      ['body','title','tip','pad'].forEach(k => {
+        document.getElementById('type-' + k).style.display = s === k ? '' : 'none';
+      });
+    };
+  });
+  (function bindFontStepper() {
+    const row = document.querySelector('#type-body .stepper');
+    if (!row) return;
+    const val = document.getElementById('fsVal');
+    const btns = row.querySelectorAll('button');
+    let n = 15;
+    btns[0].onclick = () => { n = Math.max(12, n - 1); val.textContent = n; };
+    btns[1].onclick = () => { n = Math.min(28, n + 1); val.textContent = n; };
+  })();
   document.querySelectorAll('.chips').forEach(row => {
+    if (row.id === 'typeSub') return;
     row.querySelectorAll('.chip').forEach(c => {
       c.onclick = () => {
         row.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
