@@ -29,7 +29,7 @@ class ExpandableGlassNav extends StatelessWidget {
     required this.circleStyle,
     required this.selectedColor,
     required this.unselectedColor,
-    this.height = 64,
+    this.height = 72,
   });
 
   final int selectedIndex;
@@ -46,7 +46,8 @@ class ExpandableGlassNav extends StatelessWidget {
   final Color unselectedColor;
   final double height;
 
-  static const double _barW = 196;
+  /// 三段主胶囊目标宽（真机反馈偏小，加宽触达/字面）
+  static const double _barW = 248;
 
   LiquidGlassSegmentedPillStyle _pill(double grow, Color pillBase) =>
       LiquidGlassSegmentedPillStyle(
@@ -74,7 +75,7 @@ class ExpandableGlassNav extends StatelessWidget {
   LiquidGlassSegmentedLabelStyle _labels() => LiquidGlassSegmentedLabelStyle(
         selectedColor: selectedColor,
         unselectedColor: unselectedColor,
-        fontSize: 11,
+        fontSize: 12,
         selectedFontWeight: FontWeight.w600,
         unselectedFontWeight: FontWeight.w500,
       );
@@ -97,34 +98,46 @@ class ExpandableGlassNav extends StatelessWidget {
     // 展开态：左圆键 + gap + 面板
     final panelW = (available - circle - tightGap).clamp(120.0, available);
 
+    // 主胶囊只承载 0–2；设置（3）时无段选中，禁止 clamp 成「书源」。
+    // selectedIndex 仅服务 pill/断言；点击用内层 GestureDetector 自接管，
+    // 绕开库内 `i != selectedIndex` 守卫（占位 0 会吞掉「首页」）。
+    final mainSel = selectedIndex <= 2 ? selectedIndex : 0;
+    final mainHasSel = selectedIndex <= 2;
     final mainBar = LiquidGlassSegmented(
       segments: const ['首页', '书架', '书源'],
-      selectedIndex: selectedIndex.clamp(0, 2),
-      onChanged: onChanged,
+      selectedIndex: mainSel,
+      onChanged: (_) {},
       width: barW,
       height: height - 4,
       style: barStyle,
-      pillStyle: _pill(12, pillBase),
+      pillStyle: _pill(12, mainHasSel ? pillBase : Colors.transparent),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {
         final icons = [AppIcons.home, AppIcons.bookshelf, AppIcons.sources];
-        final isSel = selectedIndex == i;
-        return AnimatedNavGlyph(
-          icon: icons[i],
-          label: ['首页', '书架', '书源'][i],
-          color: color,
-          selectedColor: selectedColor,
-          unselectedColor: unselectedColor,
-          selected: isSel,
-          accentColor: scheme.tertiary,
-          fontSize: 10,
+        final isSel = mainHasSel && selectedIndex == i;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onChanged(i),
+          child: AnimatedNavGlyph(
+            icon: icons[i],
+            label: ['首页', '书架', '书源'][i],
+            color: color,
+            selectedColor: selectedColor,
+            unselectedColor: unselectedColor,
+            selected: isSel,
+            accentColor: scheme.tertiary,
+            iconSize: 24,
+            fontSize: 12,
+          ),
         );
       },
     );
 
-    // 更多态：右侧多 —— 设置 | 添加书籍
+    // 更多态：右侧多 —— 设置 | 添加书籍（导入非分支，不占选中 pill）
+    final settingsSel = selectedIndex == 3;
     final morePanel = LiquidGlassSegmented(
       segments: const ['设置', '添加书籍'],
+      // pill 槽位固定在「设置」；未在设置时 rest 透明，与 builder isSel 同源
       selectedIndex: 0,
       onChanged: (_) {},
       width: panelW,
@@ -134,13 +147,15 @@ class ExpandableGlassNav extends StatelessWidget {
         glass: false,
         animated: false,
         restStyle: LiquidGlassStyle(
-          appearance: LiquidGlassAppearance(color: pillBase),
+          appearance: LiquidGlassAppearance(
+            color: settingsSel ? pillBase : Colors.transparent,
+          ),
         ),
       ),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {
         final icons = [AppIcons.settings, AppIcons.importFile];
-        final isSel = i == 0 && selectedIndex == 3;
+        final isSel = i == 0 && settingsSel;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
@@ -159,7 +174,8 @@ class ExpandableGlassNav extends StatelessWidget {
             selected: isSel,
             accentColor: Theme.of(context).colorScheme.tertiary,
             horizontal: true,
-            fontSize: 12,
+            iconSize: 22,
+            fontSize: 13,
           ),
         );
       },

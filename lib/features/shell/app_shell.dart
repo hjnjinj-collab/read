@@ -12,7 +12,8 @@ import 'widgets/expandable_glass_nav.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
 /// 四 Tab 应用壳（StatefulShell 状态保活）：0 首页 · 1 书架 · 2 书源 · 3 设置。
-/// 底栏主胶囊 `[首页|书架]` + 更多（默认进设置；在设置展开 `[书源|设置]`）。
+/// 底栏 IA（玻璃/Solid 同构）：默认 `[首页|书架|书源]` + 更多；
+/// 更多态左「首页」圆键 + 右 `[设置|添加书籍]`。
 /// Tab 切换：AppShell 自播方向轻 slide（禁止 Fade/Opacity 包 shell，
 /// Impeller 下页内液态在 opacity layer 会采样变暗）。
 class AppShell extends ConsumerStatefulWidget {
@@ -61,13 +62,26 @@ class _AppShellState extends ConsumerState<AppShell>
 
     void goBranch(int i, {bool collapseNav = true}) {
       final from = navigationShell.currentIndex;
+      final sameTab = i == from;
+      // 仅设置子页：同 Tab 重置回 hub；其它同 Tab no-op（保留滚动位/栈）
+      var resetToHub = false;
+      if (sameTab && i == 3) {
+        final path = GoRouter.of(context).state.uri.path;
+        resetToHub = path != '/settings';
+      }
+      if (sameTab && !resetToHub) {
+        if (collapseNav && _navExpanded) {
+          setState(() => _navExpanded = false);
+        }
+        return;
+      }
       navigationShell.goBranch(
         i,
-        initialLocation: i == from,
+        initialLocation: resetToHub,
       );
       _playTabTransition(from, i);
-      // 回首页：重播 Dashboard 入场（StatefulShell 保活不会重建）
-      if (i == 0) {
+      // 仅跨 Tab 进首页：重播 Dashboard 入场（同 Tab 重选不叠戏）
+      if (i == 0 && from != 0) {
         homeIntroTick.value++;
       }
       if (collapseNav && _navExpanded) {
@@ -76,12 +90,19 @@ class _AppShellState extends ConsumerState<AppShell>
     }
 
     // 更多：先展开导航（320ms），再落到设置——路由不抢在动画前
+    // 减弱动态：立即进设置（无展开延迟）
     void onToggleExpand() {
       final opening = !_navExpanded;
       setState(() => _navExpanded = opening);
       if (opening) {
+        if (MediaQuery.disableAnimationsOf(context)) {
+          goBranch(3, collapseNav: false);
+          return;
+        }
         Future.delayed(const Duration(milliseconds: 280), () {
           if (!mounted) return;
+          // 快速开→收：延迟回调不得在收起态仍强制进设置
+          if (!_navExpanded) return;
           goBranch(3, collapseNav: false);
         });
       }
@@ -90,8 +111,13 @@ class _AppShellState extends ConsumerState<AppShell>
     final chrome = disableBlur
         ? _SolidBottomNav(
             key: ValueKey('solid-${shell.glassMode}'),
-            index: navigationShell.currentIndex,
-            onIndexChanged: (i) => goBranch(i),
+            selectedIndex: navigationShell.currentIndex,
+            onChanged: (i) => goBranch(i),
+            expanded: _navExpanded,
+            onToggleExpand: onToggleExpand,
+            onCollapse: () => setState(() => _navExpanded = false),
+            onSettings: () => goBranch(3, collapseNav: false),
+            onImport: () => requestBookImport(ref),
           )
         : ExpandableGlassNav(
             key: ValueKey(
@@ -202,44 +228,167 @@ LiquidGlassStyle _shellFrost(
   );
 }
 
-/// 减弱动态：实底三 Tab
+/// 减弱动态：实底底栏 —— **与玻璃 IA 同构**（左三段 + 更多 / 更多态左首页 + 右设置|添加书籍）。
+/// 无液态、无宽度动画；布局与命中区对齐 `ExpandableGlassNav`。
 class _SolidBottomNav extends StatelessWidget {
   const _SolidBottomNav({
     super.key,
-    required this.index,
-    required this.onIndexChanged,
+    required this.selectedIndex,
+    required this.onChanged,
+    required this.expanded,
+    required this.onToggleExpand,
+    required this.onCollapse,
+    required this.onSettings,
+    required this.onImport,
   });
 
-  final int index;
-  final ValueChanged<int> onIndexChanged;
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+  final bool expanded;
+  final VoidCallback onToggleExpand;
+  final VoidCallback onCollapse;
+  final VoidCallback onSettings;
+  final VoidCallback onImport;
+
+  /// 与玻璃底栏放大后同高
+  static const double _height = 72;
+  static const double _barW = 248;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const items = [
-      (AppIcons.home, '首页'),
-      (AppIcons.bookshelf, '书架'),
-      (AppIcons.sources, '书源'),
-      (AppIcons.settings, '设置'),
-    ];
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppGlass.navBarRadius),
+    final bg = scheme.primaryContainer.withValues(alpha: 0.92);
+    final radius = AppGlass.navBarRadius;
+    final height = _height;
+    final circle = height;
+    final available = MediaQuery.sizeOf(context).width - 32;
+    const tightGap = 8.0;
+    var barW = (available - circle - tightGap).clamp(120.0, _barW);
+    if (barW + circle > available) {
+      barW = (available - circle - 4).clamp(80.0, _barW);
+    }
+    final panelW = (available - circle - tightGap).clamp(120.0, available);
+
+    final mainHasSel = selectedIndex <= 2;
+    final mainBar = ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
       child: ColoredBox(
-        color: scheme.primaryContainer.withValues(alpha: 0.92),
+        color: bg,
         child: SizedBox(
-          height: 64,
+          width: barW,
+          height: height - 4,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              for (var i = 0; i < items.length; i++)
-                _SolidTab(
-                  icon: items[i].$1,
-                  label: items[i].$2,
-                  selected: i == index,
-                  onTap: () => onIndexChanged(i),
+              for (var i = 0; i < 3; i++)
+                Expanded(
+                  child: _SolidTab(
+                    icon: const [AppIcons.home, AppIcons.bookshelf, AppIcons.sources][i],
+                    label: const ['首页', '书架', '书源'][i],
+                    selected: mainHasSel && selectedIndex == i,
+                    onTap: () => onChanged(i),
+                    iconSize: 24,
+                    fontSize: 12,
+                  ),
                 ),
             ],
           ),
+        ),
+      ),
+    );
+
+    final settingsSel = selectedIndex == 3;
+    final morePanel = ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: ColoredBox(
+        color: bg,
+        child: SizedBox(
+          width: panelW,
+          height: height - 4,
+          child: Row(
+            children: [
+              Expanded(
+                child: _SolidTab(
+                  icon: AppIcons.settings,
+                  label: '设置',
+                  selected: settingsSel,
+                  onTap: onSettings,
+                  horizontal: true,
+                  iconSize: 22,
+                  fontSize: 13,
+                ),
+              ),
+              Expanded(
+                child: _SolidTab(
+                  icon: AppIcons.importFile,
+                  label: '添加书籍',
+                  selected: false,
+                  onTap: onImport,
+                  horizontal: true,
+                  iconSize: 22,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    Widget solidCircle(IconData icon, VoidCallback onTap, {bool selected = false}) {
+      return ClipOval(
+        child: Material(
+          color: bg,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: circle,
+              height: circle,
+              child: Icon(
+                icon,
+                size: 24,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: height,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) {},
+        onPointerMove: (_) {},
+        onPointerUp: (_) {},
+        child: Row(
+          mainAxisAlignment: expanded
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.spaceBetween,
+          children: [
+            SizedBox(
+              width: expanded ? circle : barW,
+              height: height,
+              child: expanded
+                  ? solidCircle(
+                      AppIcons.home,
+                      () {
+                        onCollapse();
+                        onChanged(0);
+                      },
+                      selected: selectedIndex == 0,
+                    )
+                  : mainBar,
+            ),
+            if (expanded) const SizedBox(width: tightGap),
+            SizedBox(
+              width: expanded ? panelW : circle,
+              height: height,
+              child: expanded
+                  ? morePanel
+                  : solidCircle(Icons.more_horiz_rounded, onToggleExpand),
+            ),
+          ],
         ),
       ),
     );
@@ -252,12 +401,18 @@ class _SolidTab extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.horizontal = false,
+    this.iconSize = 22,
+    this.fontSize = 11,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool horizontal;
+  final double iconSize;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -267,22 +422,41 @@ class _SolidTab extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 22, color: color),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                color: color,
-              ),
-            ),
-          ],
+        padding: EdgeInsets.symmetric(
+          horizontal: horizontal ? 10 : 12,
+          vertical: 8,
         ),
+        child: horizontal
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: iconSize, color: color),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: color,
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: iconSize, color: color),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: color,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
