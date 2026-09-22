@@ -1,6 +1,6 @@
 ---
 feature: reader-menu-chrome-ia
-status: designed
+status: in-progress
 updated: 2026-09-20
 branch: master
 commits: 2b187d0..HEAD
@@ -13,6 +13,8 @@ commits: 2b187d0..HEAD
 > 真机截图对照：传统 MD3 底栏设置（字号/翻页方式/速度 + 工具图标排）。
 
 ## Report
+
+**Journey log 补** — 真机模糊泄露：阅读 chrome 多枚 `LiquidGlassTabBarAction` 叠 BF 必漏；圆键改无 Lens 玻璃观感，模糊只留上下 `ReaderBlurVeil` 各一层。
 
 ## [S1] Problem
 
@@ -150,6 +152,16 @@ commits: 2b187d0..HEAD
 - 减弱动态：无液态、无模糊动画；A/B 均实底；布局瞬时切换
 - 尺寸与壳底栏同语言：触达 ≥44，字面 11–12
 
+### [S2.7] 模糊垫与防泄露（真机反馈）
+
+| 契约 | 取值 |
+|------|------|
+| 圆键材质 | **保持液态玻璃**（`LiquidGlassTabBarAction`）；禁止改成纯观感假玻璃 |
+| 防泄露 | **ClipOval 裁切** Lens/模糊到圆内；不是去掉液态 |
+| 顶栏垫 | 菜单态：顶→底渐变模糊；阅读中：轻量无 BF 渐变（防常驻 BF 拖死开书） |
+| 底栏垫 | 菜单态：**底→顶**渐变模糊（壳滤镜镜像） |
+| BF 数量 | 垫各一层；圆键 Lens 由 ClipOval 收束 |
+
 ## [S3] Out of Scope
 
 - 本轮**零实现**（仅草稿）
@@ -160,8 +172,9 @@ commits: 2b187d0..HEAD
 
 ## Tasks（下轮实现时启用）
 
-- [ ] T1: 菜单形态开关 + A 传统底栏工具排（5 均分、字面可关） — acceptance: 切换形态布局即时变；A 排可进 5 动作 (covers: S2.1,S2.2A)
+- [x] T0: **外层壳子（本轮）** — 顶栏液态圆键（返回/书名/页码/更多）+ A 传统毛玻璃底板（进度/字号/翻页/速度/工具球排）+ B 悬浮工具球排；工具打开既有目录/搜索/设置对话框 — acceptance: 菜单态可见完整外壳；液态圆键可点；A/B 可切换布局 (covers: S2.1,S2.2,S2.2B)
+- [ ] T1: 菜单形态开关持久化 + A 传统底栏工具排（5 均分、字面可关） — acceptance: 切换形态布局即时变；A 排可进 5 动作 (covers: S2.1,S2.2A)
 - [ ] T2: B 悬浮圆键排 + 液态开关 + 溢出更多 — acceptance: 与 A 动作 id 对齐；液态/tonal 可切；≥6 收纳 (covers: S2.2B; depends: T1)
 - [ ] T3: 图标风格三档 / 每行·行数 — acceptance: 设置改后两套同步生效 (covers: S2.2)
-- [ ] T4: 设置面两页 IA 落地 — acceptance: 形态/图标/材质可改且持久化 (covers: S2.4; depends: T1,T2)
+- [ ] T4: 设置面四页 IA 落地 — acceptance: 形态/排版/背景/材质可改且持久化 (covers: S2.4; depends: T1,T2)
 - [ ] T5: 验证 + 真机 — acceptance: analyze 无新增；减弱动态/Impeller 约束不破 (covers: S2.5)
