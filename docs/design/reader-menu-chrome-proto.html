@@ -4,237 +4,284 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>阅读菜单 · 双套布局与功能流</title>
+<title>阅读菜单 · 双套布局与功能流（液态玻璃）</title>
 <style>
   :root {
-    --bg: #eef2ef;
-    --ink: #1c2420;
-    --muted: #5a6a60;
-    --card: #ffffff;
-    --line: #c5cfc9;
+    --bg: #e7efe9;
+    --ink: #1a2a22;
+    --muted: #5a7264;
     --accent: #2f6b4f;
-    --accent-soft: #dce8e1;
-    --glass: rgba(255,255,255,0.72);
-    --shadow: 0 8px 24px rgba(28,36,32,0.08);
-    --radius: 16px;
+    --accent-2: #4a8f6a;
+    --glass: rgba(255,255,255,0.42);
+    --glass-strong: rgba(255,255,255,0.58);
+    --glass-edge: rgba(255,255,255,0.75);
+    --frost: rgba(236,246,240,0.82);
+    --line: rgba(47,107,79,0.18);
+    --shadow: 0 8px 24px rgba(28,36,32,0.10);
+    --lg-shadow: 0 4px 14px rgba(28,60,42,0.14), inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(255,255,255,0.2);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: var(--bg);
+    background: linear-gradient(160deg, #dfece4, #eef5f0 40%, #d8e8de);
     color: var(--ink);
-    min-height: 720px;
+    min-height: 740px;
   }
   .wrap {
-    width: 960px;
-    margin: 0 auto;
-    padding: 20px 16px 28px;
-    display: grid;
-    grid-template-columns: 360px 1fr;
-    gap: 20px;
-    align-items: start;
+    width: 980px; margin: 0 auto; padding: 18px 16px 28px;
+    display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start;
   }
   h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-  .sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.5; }
-  .toolbar {
-    display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
-  }
+  .sub { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+
+  /* liquid pill segmented */
   .seg {
-    display: inline-flex; background: var(--card); border: 0.5px solid var(--line);
-    border-radius: 999px; padding: 3px; box-shadow: var(--shadow);
+    display: inline-flex; padding: 3px; border-radius: 999px;
+    background: var(--glass); border: 0.5px solid var(--glass-edge);
+    box-shadow: var(--lg-shadow); backdrop-filter: blur(14px) saturate(1.2);
   }
   .seg button {
     border: 0; background: transparent; color: var(--muted);
     font-size: 12px; padding: 7px 14px; border-radius: 999px; cursor: pointer;
   }
   .seg button.on {
-    background: var(--accent); color: #fff; font-weight: 600;
+    background: var(--glass-strong); color: var(--accent); font-weight: 700;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 4px rgba(47,107,79,0.12);
   }
-  .hint { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+  .hint { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 
-  /* Phone */
   .phone {
-    width: 340px; height: 680px;
-    background: #f7f3ea;
-    border-radius: 28px;
-    border: 0.5px solid var(--line);
-    box-shadow: var(--shadow);
-    position: relative;
-    overflow: hidden;
-    display: flex; flex-direction: column;
+    width: 340px; height: 700px; border-radius: 30px;
+    border: 0.5px solid rgba(255,255,255,0.55);
+    box-shadow: var(--shadow), 0 0 0 1px rgba(47,107,79,0.08);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    background:
+      radial-gradient(ellipse 120% 40% at 50% 0%, rgba(255,255,255,0.35), transparent 55%),
+      linear-gradient(180deg, #9ec9a8 0%, #c5e0cc 28%, #e8f3ea 55%, #dfeee3 100%);
   }
   .status {
-    height: 28px; display: flex; justify-content: space-between; align-items: center;
-    padding: 0 16px; font-size: 10px; color: var(--muted);
+    height: 26px; display: flex; justify-content: space-between; align-items: center;
+    padding: 0 18px; font-size: 10px; color: rgba(26,42,34,0.55);
   }
+
+  /* liquid glass circle button */
+  .lg {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 0.5px solid var(--glass-edge);
+    background:
+      radial-gradient(circle at 30% 25%, rgba(255,255,255,0.75), rgba(255,255,255,0.25) 45%, rgba(255,255,255,0.12) 100%);
+    box-shadow: var(--lg-shadow);
+    backdrop-filter: blur(12px) saturate(1.25);
+    cursor: pointer; color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 15px; position: relative;
+  }
+  .lg:hover { filter: brightness(1.05); }
+  .lg.lg-lg { width: 48px; height: 48px; font-size: 18px; }
+  .lg.lg-sm { width: 32px; height: 32px; font-size: 13px; }
+
   .reader-top {
-    display: flex; align-items: center; gap: 8px;
-    padding: 4px 12px 8px; font-size: 13px;
+    display: flex; align-items: center; gap: 8px; padding: 4px 12px 6px;
+    position: relative; z-index: 5;
   }
-  .reader-top .title { flex: 1; text-align: center; font-weight: 600; color: var(--accent); }
-  .reader-top .page { font-size: 11px; color: var(--muted); }
-  .icon-btn {
-    width: 32px; height: 32px; border: 0; border-radius: 50%;
-    background: transparent; cursor: pointer; color: var(--ink);
-    display: inline-flex; align-items: center; justify-content: center; font-size: 15px;
+  .reader-top .title {
+    flex: 1; text-align: center; font-weight: 700; font-size: 15px; color: var(--accent);
+    text-shadow: 0 1px 0 rgba(255,255,255,0.4);
   }
-  .icon-btn:hover { background: rgba(0,0,0,0.05); }
+  .reader-top .page { font-size: 11px; color: var(--muted); margin-right: 2px; }
+
   .content {
-    flex: 1; overflow: auto; padding: 8px 18px 120px;
-    font-size: 14px; line-height: 1.85; color: #2a322c;
+    flex: 1; overflow: auto; padding: 4px 18px 130px;
+    font-size: 14px; line-height: 1.9; color: #24352c;
   }
   .content p { margin-bottom: 12px; text-indent: 2em; }
-  .content .chapter { text-indent: 0; text-align: center; font-weight: 700; color: var(--accent); margin-bottom: 14px; }
+  .content .chapter {
+    text-indent: 0; text-align: center; font-weight: 700; color: var(--accent);
+    margin-bottom: 12px; font-size: 15px;
+  }
 
-  /* Chrome A traditional */
+  /* floating mid icons (B / reference mid cluster) */
+  .mid-fabs {
+    position: absolute; left: 0; right: 0; top: 42%;
+    display: flex; justify-content: center; gap: 12px; z-index: 4;
+    pointer-events: none;
+  }
+  .mid-fabs .lg { pointer-events: auto; }
+
+  /* A traditional frosted panel */
   .bar-a {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    background: rgba(255,255,255,0.94);
-    border-top: 0.5px solid var(--line);
-    border-radius: 18px 18px 0 0;
-    padding: 12px 14px 14px;
-    box-shadow: 0 -6px 20px rgba(28,36,32,0.06);
-    backdrop-filter: blur(12px);
+    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    border-radius: 22px;
+    background: var(--frost);
+    border: 0.5px solid var(--glass-edge);
+    box-shadow: var(--lg-shadow);
+    backdrop-filter: blur(18px) saturate(1.2);
+    padding: 12px 12px 10px; z-index: 6;
   }
-  .bar-a .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
-  .bar-a .row:last-child { margin-bottom: 0; }
-  .bar-a label { width: 52px; flex-shrink: 0; }
-  .slider { flex: 1; height: 4px; background: var(--accent-soft); border-radius: 2px; position: relative; }
-  .slider i { position: absolute; left: 18%; top: -5px; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; }
-  .stepper { display: inline-flex; align-items: center; gap: 6px; }
-  .stepper button {
-    width: 26px; height: 26px; border-radius: 50%; border: 0.5px solid var(--line);
-    background: var(--card); cursor: pointer; font-size: 14px;
+  .bar-a .row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    font-size: 12px; color: var(--muted);
   }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip {
-    border: 0.5px solid var(--line); background: var(--card);
-    border-radius: 999px; padding: 5px 10px; font-size: 11px; cursor: pointer; color: var(--ink);
-  }
-  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  .tool-row {
-    display: flex; justify-content: space-between; margin-top: 12px; padding-top: 10px;
-    border-top: 0.5px dashed var(--line);
-  }
-  .tool {
-    width: 52px; border: 0; background: transparent; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
-    color: var(--ink); font-size: 10px;
-  }
-  .tool .g {
-    width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft);
-    display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--accent);
-  }
-  .tool:hover .g { background: #c5d9cc; }
-
-  /* Chrome B floating */
-  .bar-b {
-    position: absolute; left: 0; right: 0; bottom: 18px;
-    display: flex; justify-content: center; gap: 10px;
-    padding: 0 12px;
-  }
-  .fab {
-    width: 48px; height: 48px; border-radius: 50%; border: 0.5px solid rgba(255,255,255,0.7);
-    background: var(--glass);
-    box-shadow: 0 4px 14px rgba(28,36,32,0.12);
-    backdrop-filter: blur(10px);
-    cursor: pointer; font-size: 16px; color: var(--accent);
-    display: flex; align-items: center; justify-content: center;
+  .bar-a label { width: 48px; flex-shrink: 0; }
+  .slider {
+    flex: 1; height: 6px; border-radius: 999px;
+    background: rgba(255,255,255,0.45); border: 0.5px solid rgba(255,255,255,0.5);
     position: relative;
   }
-  .fab span {
-    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
-    font-size: 9px; color: var(--muted); white-space: nowrap;
+  .slider i {
+    position: absolute; left: 18%; top: -4px; width: 14px; height: 14px;
+    background: radial-gradient(circle at 35% 30%, #fff, var(--accent-2));
+    border-radius: 50%; box-shadow: 0 1px 4px rgba(47,107,79,0.35);
+    border: 0.5px solid rgba(255,255,255,0.7);
   }
-  .bar-b-wrap { position: absolute; left: 0; right: 0; bottom: 0; height: 90px; pointer-events: none; }
-  .bar-b-wrap .bar-b { pointer-events: auto; }
+  .stepper { display: inline-flex; align-items: center; gap: 8px; }
+  .stepper span { min-width: 22px; text-align: center; color: var(--ink); font-weight: 600; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    border: 0.5px solid var(--glass-edge); background: var(--glass);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
+    backdrop-filter: blur(8px);
+    border-radius: 999px; padding: 5px 10px; font-size: 11px; cursor: pointer; color: var(--ink);
+  }
+  .chip.on {
+    background: var(--glass-strong); color: var(--accent); font-weight: 700;
+    border-color: rgba(47,107,79,0.35);
+  }
+  .tool-row {
+    display: flex; justify-content: space-between; margin-top: 10px; padding-top: 10px;
+    border-top: 0.5px solid rgba(255,255,255,0.45);
+  }
+  .tool {
+    width: 54px; border: 0; background: transparent; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    color: var(--accent); font-size: 10px;
+  }
 
-  /* Sheets */
-  .scrim {
-    position: absolute; inset: 0; background: rgba(20,28,24,0.28);
-    opacity: 0; pointer-events: none; transition: opacity .18s;
+  /* progress arrows like reference */
+  .prog-row {
+    position: absolute; left: 12px; right: 12px; bottom: 100px;
+    display: flex; align-items: center; gap: 10px; z-index: 5;
   }
-  .scrim.on { opacity: 1; pointer-events: auto; }
+  .prog-row .slider { flex: 1; }
+
+  /* B floating bottom tools */
+  .bar-b {
+    position: absolute; left: 0; right: 0; bottom: 14px;
+    display: flex; justify-content: center; gap: 14px; z-index: 6;
+  }
+  .tool-b {
+    border: 0; background: transparent; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    color: var(--accent); font-size: 10px;
+  }
+
+  .scrim {
+    position: absolute; inset: 0; background: rgba(18,32,24,0.22);
+    opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 8;
+    backdrop-filter: blur(0px);
+  }
+  .scrim.on { opacity: 1; pointer-events: auto; backdrop-filter: blur(2px); }
+
   .sheet {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    background: var(--card); border-radius: 18px 18px 0 0;
-    box-shadow: 0 -8px 28px rgba(28,36,32,0.12);
-    transform: translateY(105%); transition: transform .22s ease;
-    max-height: 72%; display: flex; flex-direction: column;
+    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    border-radius: 22px;
+    background: var(--frost);
+    border: 0.5px solid var(--glass-edge);
+    box-shadow: var(--lg-shadow);
+    backdrop-filter: blur(20px) saturate(1.25);
+    transform: translateY(110%); transition: transform .24s ease;
+    max-height: 74%; display: flex; flex-direction: column; z-index: 9;
   }
   .sheet.on { transform: translateY(0); }
   .sheet header {
     display: flex; align-items: center; gap: 8px;
-    padding: 14px 14px 8px; border-bottom: 0.5px solid var(--line);
+    padding: 14px 14px 10px; border-bottom: 0.5px solid rgba(255,255,255,0.45);
   }
-  .sheet header h3 { font-size: 14px; flex: 1; }
-  .sheet .body { overflow: auto; padding: 10px 14px 16px; }
+  .sheet header h3 { font-size: 14px; flex: 1; font-weight: 700; }
+  .sheet .body { overflow: auto; padding: 10px 12px 14px; }
   .list-item {
     display: flex; gap: 10px; align-items: center;
-    padding: 10px 8px; border-radius: 10px; cursor: pointer; font-size: 13px;
+    padding: 10px 10px; border-radius: 14px; cursor: pointer; font-size: 13px;
+    border: 0.5px solid transparent;
   }
-  .list-item:hover { background: var(--accent-soft); }
-  .list-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .list-item:hover {
+    background: var(--glass); border-color: var(--glass-edge);
+  }
+  .list-item.active {
+    background: var(--glass-strong); border-color: rgba(47,107,79,0.25);
+    color: var(--accent); font-weight: 700;
+  }
   .list-item .meta { flex: 1; }
-  .list-item .meta small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .pill { font-size: 10px; background: var(--accent-soft); color: var(--accent); padding: 2px 6px; border-radius: 999px; }
-
-  .search-box {
-    display: flex; gap: 8px; margin-bottom: 10px;
+  .list-item .meta small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; font-weight: 400; }
+  .pill {
+    font-size: 10px; background: var(--glass-strong); color: var(--accent);
+    padding: 2px 8px; border-radius: 999px; border: 0.5px solid var(--glass-edge);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
   }
+  .search-box { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
   .search-box input {
-    flex: 1; border: 0.5px solid var(--line); border-radius: 10px;
-    padding: 8px 10px; font-size: 13px; outline: none;
+    flex: 1; border: 0.5px solid var(--glass-edge); border-radius: 999px;
+    padding: 9px 14px; font-size: 13px; outline: none;
+    background: var(--glass); backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
   }
-  .search-box input:focus { border-color: var(--accent); }
+  .search-box input:focus { border-color: rgba(47,107,79,0.45); }
 
-  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
   .tabs button {
-    flex: 1; border: 0.5px solid var(--line); background: var(--card);
-    border-radius: 10px; padding: 8px; font-size: 12px; cursor: pointer;
+    flex: 1; border: 0.5px solid var(--glass-edge); background: var(--glass);
+    backdrop-filter: blur(8px); border-radius: 14px; padding: 10px; font-size: 12px; cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+    color: var(--ink);
   }
-  .tabs button.on { background: var(--accent); color: #fff; font-weight: 600; border-color: var(--accent); }
+  .tabs button.on {
+    background: var(--glass-strong); color: var(--accent); font-weight: 700;
+    border-color: rgba(47,107,79,0.3);
+  }
   .form-row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 4px; border-bottom: 0.5px dashed var(--line); font-size: 12px;
+    padding: 11px 6px; border-bottom: 0.5px dashed rgba(47,107,79,0.15); font-size: 12px;
   }
   .form-row:last-child { border-bottom: 0; }
   .switch {
-    width: 40px; height: 22px; border-radius: 999px; background: var(--line);
-    border: 0; cursor: pointer; position: relative;
+    width: 42px; height: 24px; border-radius: 999px;
+    background: rgba(255,255,255,0.4); border: 0.5px solid var(--glass-edge);
+    box-shadow: inset 0 1px 2px rgba(28,60,42,0.08);
+    cursor: pointer; position: relative;
   }
-  .switch.on { background: var(--accent); }
+  .switch.on { background: var(--accent-2); }
   .switch i {
     position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
-    background: #fff; border-radius: 50%; transition: left .15s;
+    background: radial-gradient(circle at 35% 30%, #fff, #e8f3ea);
+    border-radius: 50%; transition: left .15s;
+    box-shadow: 0 1px 3px rgba(28,60,42,0.2);
   }
   .switch.on i { left: 20px; }
 
-  /* Flow panel */
   .panel {
-    background: var(--card); border: 0.5px solid var(--line);
-    border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 16px;
+    background: var(--frost); border: 0.5px solid var(--glass-edge);
+    border-radius: 18px; box-shadow: var(--lg-shadow);
+    backdrop-filter: blur(14px); padding: 16px;
   }
   .panel h2 { font-size: 14px; margin-bottom: 8px; }
-  .flow {
-    display: grid; gap: 10px;
-  }
+  .flow { display: grid; gap: 10px; }
   .flow-card {
-    border: 0.5px solid var(--line); border-radius: 12px; padding: 12px;
-    background: #fafcfb;
+    border: 0.5px solid rgba(255,255,255,0.5); border-radius: 14px; padding: 12px;
+    background: var(--glass);
   }
   .flow-card strong { display: block; font-size: 13px; margin-bottom: 6px; color: var(--accent); }
   .flow-card p { font-size: 12px; color: var(--muted); line-height: 1.55; }
   .steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .step {
-    font-size: 11px; background: var(--accent-soft); color: var(--accent);
-    padding: 4px 8px; border-radius: 999px;
+    font-size: 11px; background: var(--glass-strong); color: var(--accent);
+    padding: 4px 8px; border-radius: 999px; border: 0.5px solid var(--glass-edge);
   }
   .step.arrow::after { content: " →"; opacity: 0.5; }
   .note {
     margin-top: 12px; font-size: 11px; color: var(--muted); line-height: 1.5;
-    padding: 10px; background: var(--accent-soft); border-radius: 10px;
+    padding: 10px; background: var(--glass); border-radius: 12px;
+    border: 0.5px solid var(--glass-edge);
   }
 </style>
 </head>
@@ -243,27 +290,27 @@
 
 <div class="wrap">
   <div>
-    <h1>阅读菜单 · 双套布局与功能流</h1>
-    <p class="sub">对标 legado-with-MD3。点工具图标可打开目录 / 搜索 / 设置（含菜单形态）。左上切换 A 传统底栏 · B 悬浮图标。</p>
+    <h1>阅读菜单 · 双套布局（液态玻璃）</h1>
+    <p class="sub">对齐对标截图：顶栏/悬浮/工具/进度箭头均为<strong>液态玻璃圆键</strong>；打开层毛玻璃 + 玻璃控件。切换 A/B 与液态开关可对比。</p>
     <div class="toolbar">
       <div class="seg" id="modeSeg">
         <button data-mode="A" class="on">A 传统底栏</button>
         <button data-mode="B">B 悬浮图标</button>
       </div>
       <div class="seg" id="glassSeg">
-        <button data-glass="0" class="on">实底</button>
-        <button data-glass="1">液态玻璃</button>
+        <button data-glass="1" class="on">液态玻璃</button>
+        <button data-glass="0">tonal 实底</button>
       </div>
     </div>
-    <p class="hint">试试点：目录 · 搜索 · 书签 · 笔记 · 设置 ·（B）更多 …</p>
+    <p class="hint">点：目录 · 搜索 · 书签 · 笔记 · 设置 ·（B/浮层）更多 …</p>
     <div class="phone" id="phone">
-      <div class="status"><span>9:41</span><span>阅读原型</span></div>
+      <div class="status"><span>13:56</span><span>阅读原型</span></div>
       <div class="reader-top">
-        <button class="icon-btn">←</button>
+        <button class="lg" title="返回">←</button>
         <div class="title">瓦尔登湖</div>
         <div class="page">5/23</div>
-        <button class="icon-btn">☾</button>
-        <button class="icon-btn">×</button>
+        <button class="lg" title="翻译">文</button>
+        <button class="lg" title="更多" data-open="more">⋯</button>
       </div>
       <div class="content" id="content">
         <div class="chapter">省俭有方</div>
@@ -274,16 +321,28 @@
         <p>我却觉得未必如此，而且考虑到当时情况，反而十分自然合理。</p>
       </div>
 
-      <!-- A traditional -->
+      <div class="mid-fabs" id="midFabs">
+        <button class="lg lg-lg" data-open="search">⌕</button>
+        <button class="lg lg-lg" title="自动翻页">▶</button>
+        <button class="lg lg-lg" data-open="toc">☰</button>
+        <button class="lg lg-lg" title="朗读">🎤</button>
+        <button class="lg lg-lg" data-open="settings">⚙</button>
+      </div>
+
+      <!-- A -->
       <div class="bar-a" id="barA">
         <div class="row">
           <label>进度</label>
+          <button class="lg lg-sm">‹</button>
           <div class="slider"><i></i></div>
-          <span style="width:36px;text-align:right">1/123</span>
+          <button class="lg lg-sm">›</button>
+          <span style="width:34px;text-align:right">1/123</span>
         </div>
         <div class="row">
           <label>字号</label>
-          <div class="stepper"><button>−</button><span>15</span><button>+</button></div>
+          <div class="stepper">
+            <button class="lg lg-sm">−</button><span>15</span><button class="lg lg-sm">+</button>
+          </div>
         </div>
         <div class="row">
           <label>翻页方式</label>
@@ -297,68 +356,73 @@
             <button class="chip on">快</button><button class="chip">中</button><button class="chip">慢</button>
           </div>
         </div>
-        <div class="tool-row" id="toolRowA">
-          <button class="tool" data-open="toc"><span class="g">☰</span>目录</button>
-          <button class="tool" data-open="search"><span class="g">⌕</span>搜索</button>
-          <button class="tool" data-open="marks"><span class="g">☆</span>书签</button>
-          <button class="tool" data-open="notes"><span class="g">✎</span>笔记</button>
-          <button class="tool" data-open="settings"><span class="g">⚙</span>设置</button>
+        <div class="tool-row">
+          <button class="tool" data-open="search"><span class="lg">⌕</span>全文搜索</button>
+          <button class="tool" title="自动翻页"><span class="lg">▶</span>自动翻页</button>
+          <button class="tool" data-open="toc"><span class="lg">☰</span>目录</button>
+          <button class="tool" title="朗读"><span class="lg">🎤</span>朗读</button>
+          <button class="tool" data-open="settings"><span class="lg">⚙</span>设置</button>
         </div>
       </div>
 
-      <!-- B floating -->
-      <div class="bar-b-wrap" id="barBWrap" style="display:none">
-        <div class="bar-b" id="barB">
-          <button class="fab" data-open="toc">☰<span>目录</span></button>
-          <button class="fab" data-open="search">⌕<span>搜索</span></button>
-          <button class="fab" data-open="marks">☆<span>书签</span></button>
-          <button class="fab" data-open="notes">✎<span>笔记</span></button>
-          <button class="fab" data-open="settings">⚙<span>设置</span></button>
-          <button class="fab" data-open="more">⋯<span>更多</span></button>
+      <!-- B progress + tools like reference -->
+      <div id="barB" style="display:none">
+        <div class="prog-row">
+          <button class="lg">‹</button>
+          <div class="slider"><i></i></div>
+          <button class="lg">›</button>
+        </div>
+        <div class="bar-b">
+          <button class="tool-b" data-open="search"><span class="lg lg-lg">⌕</span>全文搜索</button>
+          <button class="tool-b"><span class="lg lg-lg">▶</span>自动翻页</button>
+          <button class="tool-b" data-open="toc"><span class="lg lg-lg">☰</span>目录</button>
+          <button class="tool-b"><span class="lg lg-lg">🎤</span>朗读</button>
+          <button class="tool-b" data-open="settings"><span class="lg lg-lg">⚙</span>设置</button>
         </div>
       </div>
 
       <div class="scrim" id="scrim"></div>
 
-      <!-- TOC -->
       <div class="sheet" id="sheet-toc">
-        <header><h3>目录</h3><button class="icon-btn" data-close>×</button></header>
+        <header><h3>目录</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
-          <div class="search-box"><input placeholder="过滤章节…" id="tocFilter"/></div>
+          <div class="search-box">
+            <button class="lg lg-sm">⌕</button>
+            <input placeholder="过滤章节…" id="tocFilter"/>
+          </div>
           <div id="tocList"></div>
         </div>
       </div>
 
-      <!-- Search -->
       <div class="sheet" id="sheet-search">
-        <header><h3>搜索正文</h3><button class="icon-btn" data-close>×</button></header>
+        <header><h3>搜索正文</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
-          <div class="search-box"><input placeholder="输入关键词…" id="q" value="瓦尔登"/></div>
+          <div class="search-box">
+            <button class="lg lg-sm">⌕</button>
+            <input placeholder="输入关键词…" id="q" value="瓦尔登"/>
+          </div>
           <div id="searchResults"></div>
         </div>
       </div>
 
-      <!-- Marks -->
       <div class="sheet" id="sheet-marks">
-        <header><h3>书签</h3><button class="icon-btn" data-close>×</button></header>
+        <header><h3>书签</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
-          <div class="list-item"><span class="g">★</span><div class="meta">省俭有方 · 第 1 页<small>今天 09:12</small></div></div>
-          <div class="list-item"><span class="g">★</span><div class="meta">我生活的地方 · 第 3 页<small>昨天 22:40</small></div></div>
+          <div class="list-item"><span class="lg lg-sm">★</span><div class="meta">省俭有方 · 第 1 页<small>今天 09:12</small></div></div>
+          <div class="list-item"><span class="lg lg-sm">★</span><div class="meta">我生活的地方 · 第 3 页<small>昨天 22:40</small></div></div>
         </div>
       </div>
 
-      <!-- Notes -->
       <div class="sheet" id="sheet-notes">
-        <header><h3>笔记</h3><button class="icon-btn" data-close>×</button></header>
+        <header><h3>笔记</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
           <div class="list-item active"><div class="meta">「仅凭一双手养活自己」<small>省俭有方 · 高亮</small></div><span class="pill">本章</span></div>
           <div class="list-item"><div class="meta">「文明生活中的匆忙过客」<small>省俭有方 · 笔记</small></div><span class="pill">本章</span></div>
         </div>
       </div>
 
-      <!-- Settings -->
-      <div class="sheet" id="sheet-settings" style="max-height:78%">
-        <header><h3>阅读菜单设置</h3><button class="icon-btn" data-close>×</button></header>
+      <div class="sheet" id="sheet-settings" style="max-height:80%">
+        <header><h3>阅读菜单设置</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
           <div class="tabs" id="setTabs">
             <button class="on" data-tab="0">形态与图标</button>
@@ -377,80 +441,75 @@
             <div class="form-row"><span>每行个数</span><span class="pill">5</span></div>
             <div class="form-row"><span>行数</span><span class="pill">1</span></div>
             <div class="form-row"><span>显示文字</span><button class="switch on"><i></i></button></div>
-            <div class="form-row"><span>图标排序</span><span style="color:var(--muted)">可拖 · 默认目录→设置</span></div>
+            <div class="form-row"><span>图标排序</span><span style="color:var(--muted)">可拖 · 默认搜索→设置</span></div>
           </div>
           <div id="set1" style="display:none">
-            <div class="form-row"><span>面板圆角</span><span class="pill">18</span></div>
+            <div class="form-row"><span>面板圆角</span><span class="pill">22</span></div>
             <div class="form-row"><span>模糊</span>
-              <div class="chips"><button class="chip on">无</button><button class="chip">渐变模糊</button></div>
+              <div class="chips"><button class="chip">无</button><button class="chip on">渐变模糊</button></div>
             </div>
-            <div class="form-row"><span>悬浮键液态玻璃</span><button class="switch" id="glassSwitch"><i></i></button></div>
-            <div class="form-row"><span>顶栏合并按钮</span><button class="switch"><i></i></button></div>
+            <div class="form-row"><span>液态玻璃按键</span><button class="switch on" id="glassSwitch"><i></i></button></div>
+            <div class="form-row"><span>合并顶栏按钮</span><button class="switch"><i></i></button></div>
             <div class="form-row"><span>标题胶囊</span><button class="switch"><i></i></button></div>
           </div>
-          <div class="note">正文永不玻璃化。减弱动态：无液态/无模糊动画，布局瞬时切换。</div>
+          <div class="note">顶栏 / 悬浮 / 工具 / 进度箭头：默认<strong>液态玻璃</strong>圆键。打开层毛玻璃。正文永不玻璃化。减弱动态：无液态动画。</div>
         </div>
       </div>
 
-      <!-- More -->
       <div class="sheet" id="sheet-more">
-        <header><h3>更多</h3><button class="icon-btn" data-close>×</button></header>
+        <header><h3>更多</h3><button class="lg lg-sm" data-close>×</button></header>
         <div class="body">
           <div class="list-item"><div class="meta">上一章</div></div>
           <div class="list-item"><div class="meta">下一章</div></div>
-          <div class="list-item"><div class="meta">自动翻页</div></div>
-          <div class="list-item"><div class="meta">朗读</div></div>
+          <div class="list-item"><div class="meta">书签</div></div>
+          <div class="list-item"><div class="meta">笔记</div></div>
           <div class="list-item"><div class="meta">换源</div></div>
+          <div class="list-item"><div class="meta">夜间</div></div>
         </div>
       </div>
     </div>
   </div>
 
   <div class="panel">
-    <h2>布局契约 · 功能流</h2>
+    <h2>材质与流程（对齐对标）</h2>
     <div class="flow">
       <div class="flow-card">
+        <strong>液态玻璃圆键（默认）</strong>
+        <p>顶栏 ← / 文 / ⋯，中层浮钮，底栏工具球，进度 ‹ ›，字号 − + —— 统一玻璃球：内高光 + 轻描边 + 背景模糊。关「液态」→ tonal 实底。</p>
+        <div class="steps"><span class="step">玻璃球</span><span class="step">内高光</span><span class="step">backdrop blur</span></div>
+      </div>
+      <div class="flow-card">
         <strong>A 传统底栏</strong>
-        <p>整宽面板：进度 / 字号 / 翻页方式 / 翻页速度 + 底部工具排（默认 5 均分）。设置可内嵌或进 sheet。</p>
-        <div class="steps"><span class="step">点工具图标</span><span class="step">打开对应 sheet</span><span class="step">完成关闭</span></div>
+        <p>圆角毛玻璃面板内嵌进度/字号/翻页 + 工具排（默认 5）。</p>
+        <div class="steps"><span class="step arrow">点工具</span><span class="step">毛玻璃 sheet</span><span class="step">完成关闭</span></div>
       </div>
       <div class="flow-card">
         <strong>B 悬浮图标</strong>
-        <p>正文上一排圆键（可液态玻璃）。设置外置 sheet；溢出进「更多」。</p>
-        <div class="steps"><span class="step">点圆键</span><span class="step">sheet / 菜单</span><span class="step">点「更多」溢出</span></div>
+        <p>与对标一致：中层浮钮 + 底部工具球排 + 进度玻璃箭头；设置外置 sheet。</p>
+        <div class="steps"><span class="step arrow">玻璃圆键</span><span class="step">sheet / 更多</span></div>
       </div>
       <div class="flow-card">
-        <strong>目录</strong>
-        <p>章节列表；当前章高亮；顶部过滤；点章 → 关闭并跳转。</p>
-        <div class="steps"><span class="step arrow">目录</span><span class="step arrow">过滤/滚动</span><span class="step">点章跳转</span></div>
-      </div>
-      <div class="flow-card">
-        <strong>搜索</strong>
-        <p>关键词 → 结果（章 · 片段）；点结果跳转并高亮命中。</p>
-        <div class="steps"><span class="step arrow">搜索</span><span class="step">输入</span><span class="step">点结果定位</span></div>
+        <strong>目录 / 搜索</strong>
+        <p>毛玻璃 sheet；搜索框与关闭键同为玻璃球语言；点条目跳转。</p>
+        <div class="steps"><span class="step arrow">入口</span><span class="step">过滤/输入</span><span class="step">定位</span></div>
       </div>
       <div class="flow-card">
         <strong>设置（预置两页）</strong>
-        <p>① 形态与图标：A/B、图标风格三档、每行/行数、文字、排序<br/>② 材质与顶栏：圆角、模糊、悬浮液态、合并按钮、标题胶囊</p>
-        <div class="steps"><span class="step arrow">设置</span><span class="step">切 Tab</span><span class="step">改后即时预览</span></div>
-      </div>
-      <div class="flow-card">
-        <strong>书签 / 笔记</strong>
-        <p>列表 sheet；书签可加删；笔记带本章筛选；点条目跳转。</p>
-        <div class="steps"><span class="step">打开列表</span><span class="step">点条目跳转</span></div>
+        <p>① 形态与图标 ② 材质与顶栏。分段/开关/chip 全玻璃语言，与壳设置同源。</p>
+        <div class="steps"><span class="step arrow">设置</span><span class="step">两 Tab</span><span class="step">即时预览</span></div>
       </div>
     </div>
-    <div class="note">设计稿：<code>docs/compose/spec/reader-menu-chrome-ia.md</code> · 本页为交互草稿，非产品代码。实现见 Tasks T1–T5。</div>
+    <div class="note">设计稿 <code>reader-menu-chrome-ia.md</code> [S2.2] 材质总则 · 原型非产品代码。</div>
   </div>
 </div>
 <script>
 (function () {
-  const phone = document.getElementById('phone');
   const barA = document.getElementById('barA');
-  const barBWrap = document.getElementById('barBWrap');
+  const barB = document.getElementById('barB');
+  const midFabs = document.getElementById('midFabs');
   const scrim = document.getElementById('scrim');
   let mode = 'A';
-  let glass = false;
+  let glass = true;
 
   const chapters = [
     ['省俭有方', true], ['我生活的地方', false], ['阅读', false],
@@ -467,8 +526,7 @@
       </div>`).join('') || '<p style="color:var(--muted);font-size:12px">无匹配章节</p>';
     tocList.querySelectorAll('[data-goto]').forEach(el => {
       el.onclick = () => {
-        const name = el.getAttribute('data-goto');
-        document.querySelector('.content .chapter').textContent = name;
+        document.querySelector('.content .chapter').textContent = el.getAttribute('data-goto');
         closeAll();
       };
     });
@@ -507,7 +565,6 @@
   }
   scrim.onclick = closeAll;
   document.querySelectorAll('[data-close]').forEach(b => b.onclick = closeAll);
-
   document.querySelectorAll('[data-open]').forEach(btn => {
     btn.onclick = () => openSheet(btn.getAttribute('data-open'));
   });
@@ -515,7 +572,8 @@
   function applyMode(m) {
     mode = m;
     barA.style.display = m === 'A' ? '' : 'none';
-    barBWrap.style.display = m === 'B' ? '' : 'none';
+    barB.style.display = m === 'B' ? '' : 'none';
+    midFabs.style.display = m === 'B' ? '' : 'none';
     document.querySelectorAll('#modeSeg button, #setModeSeg button').forEach(b => {
       b.classList.toggle('on', b.getAttribute('data-mode') === m);
     });
@@ -530,11 +588,10 @@
       b.classList.toggle('on', (b.getAttribute('data-glass') === '1') === on);
     });
     document.getElementById('glassSwitch').classList.toggle('on', on);
-    document.querySelectorAll('.fab').forEach(f => {
-      f.style.background = on ? 'rgba(255,255,255,0.55)' : 'var(--glass)';
-      f.style.borderColor = on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.7)';
-    });
-    barA.style.backdropFilter = on ? 'blur(16px)' : 'blur(12px)';
+    document.documentElement.style.setProperty('--glass', on ? 'rgba(255,255,255,0.42)' : 'rgba(214,232,220,0.92)');
+    document.documentElement.style.setProperty('--glass-strong', on ? 'rgba(255,255,255,0.58)' : 'rgba(196,222,206,0.95)');
+    document.documentElement.style.setProperty('--glass-edge', on ? 'rgba(255,255,255,0.75)' : 'rgba(47,107,79,0.15)');
+    document.documentElement.style.setProperty('--frost', on ? 'rgba(236,246,240,0.82)' : 'rgba(228,240,232,0.97)');
   }
   document.querySelectorAll('#glassSeg button').forEach(b => {
     b.onclick = () => applyGlass(b.getAttribute('data-glass') === '1');
@@ -549,7 +606,6 @@
       document.getElementById('set1').style.display = t === '1' ? '' : 'none';
     };
   });
-
   document.querySelectorAll('.chips').forEach(row => {
     row.querySelectorAll('.chip').forEach(c => {
       c.onclick = () => {
@@ -564,7 +620,7 @@
   });
 
   applyMode('A');
-  applyGlass(false);
+  applyGlass(true);
 })();
 </script>
 </body>
