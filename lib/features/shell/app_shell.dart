@@ -74,7 +74,18 @@ class _AppShellState extends ConsumerState<AppShell>
       }
     }
 
-    // glassMode 变了必须重建：Engine 是静态开关，Lens 不会自己 invalidate
+    // 更多：先展开导航（320ms），再落到设置——路由不抢在动画前
+    void onToggleExpand() {
+      final opening = !_navExpanded;
+      setState(() => _navExpanded = opening);
+      if (opening) {
+        Future.delayed(const Duration(milliseconds: 280), () {
+          if (!mounted) return;
+          goBranch(3, collapseNav: false);
+        });
+      }
+    }
+
     final chrome = disableBlur
         ? _SolidBottomNav(
             key: ValueKey('solid-${shell.glassMode}'),
@@ -88,11 +99,9 @@ class _AppShellState extends ConsumerState<AppShell>
             selectedIndex: navigationShell.currentIndex,
             onChanged: (i) => goBranch(i),
             expanded: _navExpanded,
-            onToggleExpand: () =>
-                setState(() => _navExpanded = !_navExpanded),
+            onToggleExpand: onToggleExpand,
             onCollapse: () => setState(() => _navExpanded = false),
-            // 更多→设置：分支 index 3
-            onSettings: () => goBranch(3, collapseNav: true),
+            onSettings: () => goBranch(3, collapseNav: false),
             onSources: () => goBranch(2, collapseNav: true),
             onImport: () => requestBookImport(ref),
             barStyle: _shellFrost(

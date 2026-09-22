@@ -9,9 +9,10 @@ import '../../../core/theme/app_theme.dart' show AppGlass;
 
 /// 可扩展液态底栏。
 ///
-/// 默认：左 `[首页|书架]` 胶囊 + 右「更多」圆键。
-/// **更多**：不在设置 Tab 时直接进设置；已在设置时展开 `[书源|设置]`。
-/// 左圆键（展开态）：回首页并收起。
+/// **默认态（左多右少）**：左 `[首页|书架|书源]` 胶囊，点哪个进哪页；右「更多」圆键。
+/// **更多态（右多左少）**：左「首页」圆键（唯一返回键，回默认态并回首页）；
+/// 右 `[设置|添加书籍]`。
+/// 点「更多」：先展开动画，**再**由 AppShell 导航到设置（路由不抢跑）。
 /// 分支索引：0 首页 · 1 书架 · 2 书源 · 3 设置。
 class ExpandableGlassNav extends StatelessWidget {
   const ExpandableGlassNav({
@@ -97,10 +98,8 @@ class ExpandableGlassNav extends StatelessWidget {
     final panelW = (available - circle - tightGap).clamp(120.0, available);
 
     final mainBar = LiquidGlassSegmented(
-      segments: const ['首页', '书架'],
-      // 包 API 需要合法 index；视觉选中以 selectedIndex==i 为准
-      // （书源/设置时主胶囊不高亮「书架」）
-      selectedIndex: selectedIndex <= 1 ? selectedIndex : 0,
+      segments: const ['首页', '书架', '书源'],
+      selectedIndex: selectedIndex.clamp(0, 2),
       onChanged: onChanged,
       width: barW,
       height: height - 4,
@@ -108,23 +107,24 @@ class ExpandableGlassNav extends StatelessWidget {
       pillStyle: _pill(12, pillBase),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {
-        final icons = [AppIcons.home, AppIcons.bookshelf];
+        final icons = [AppIcons.home, AppIcons.bookshelf, AppIcons.sources];
         final isSel = selectedIndex == i;
         return AnimatedNavGlyph(
           icon: icons[i],
-          label: ['首页', '书架'][i],
+          label: ['首页', '书架', '书源'][i],
           color: color,
           selectedColor: selectedColor,
           unselectedColor: unselectedColor,
           selected: isSel,
           accentColor: scheme.tertiary,
+          fontSize: 10,
         );
       },
     );
 
-    // 展开：书源 | 设置（导入仍走书架 FAB / 空态）
+    // 更多态：右侧多 —— 设置 | 添加书籍
     final morePanel = LiquidGlassSegmented(
-      segments: const ['书源', '设置'],
+      segments: const ['设置', '添加书籍'],
       selectedIndex: 0,
       onChanged: (_) {},
       width: panelW,
@@ -139,21 +139,20 @@ class ExpandableGlassNav extends StatelessWidget {
       ),
       labelStyle: _labels(),
       segmentBuilder: (context, i, selected, color) {
-        final icons = [AppIcons.sources, AppIcons.settings];
-        final isSel = (i == 0 && selectedIndex == 2) ||
-            (i == 1 && selectedIndex == 3);
+        final icons = [AppIcons.settings, AppIcons.importFile];
+        final isSel = i == 0 && selectedIndex == 3;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
             if (i == 0) {
-              onSources();
-            } else {
               onSettings();
+            } else {
+              onImport();
             }
           },
           child: AnimatedNavGlyph(
             icon: icons[i],
-            label: ['书源', '设置'][i],
+            label: ['设置', '添加书籍'][i],
             color: isSel ? selectedColor : unselectedColor,
             selectedColor: selectedColor,
             unselectedColor: unselectedColor,
@@ -166,6 +165,7 @@ class ExpandableGlassNav extends StatelessWidget {
       },
     );
 
+    // 更多态左键：唯一返回 —— 收起并回首页
     final homeCircle = LiquidGlassTabBarAction(
       icon: AppIcons.home,
       size: circle,
@@ -173,8 +173,8 @@ class ExpandableGlassNav extends StatelessWidget {
       style: circleStyle,
       touch: const LiquidGlassTouch(flex: LiquidGlassFlex()),
       onTap: () {
-        onChanged(0);
         onCollapse();
+        onChanged(0);
       },
     );
 
@@ -185,13 +185,8 @@ class ExpandableGlassNav extends StatelessWidget {
       style: circleStyle,
       touch: const LiquidGlassTouch(flex: LiquidGlassFlex()),
       onTap: () {
-        // 用户预期：更多 = 默认进设置，不必再点一次。
-        // 已在设置 Tab 时改为展开面板（书源/设置）。
-        if (selectedIndex == 3) {
-          onToggleExpand();
-        } else {
-          onSettings();
-        }
+        // 先展开导航动画，路由由 AppShell 在动画后处理（onToggleExpand 内）
+        onToggleExpand();
       },
     );
 

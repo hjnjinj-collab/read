@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -32,6 +33,7 @@ class _HomePageState extends ConsumerState<HomePage>
   List<(Book, ReadingProgressData?)> _entries = [];
   bool _loading = true;
   int _heroIndex = 0;
+  Timer? _heroTimer;
   late final AnimationController _introCtrl = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1100),
@@ -50,6 +52,7 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void dispose() {
     homeIntroTick.removeListener(_onIntroTick);
+    _heroTimer?.cancel();
     _introCtrl.dispose();
     super.dispose();
   }
@@ -58,10 +61,20 @@ class _HomePageState extends ConsumerState<HomePage>
     if (!mounted) return;
     setState(() => _heroIndex = 0);
     _introCtrl.forward(from: 0);
-    _armHero();
+    // 进页先停在「今日目标」，等入场播完再开始轮换（避免与页切换/入场抢戏）
+    _armHero(firstDelay: const Duration(milliseconds: 1800));
   }
 
-  void _onIntroTick() => _replayIntro();
+  void _armHero({Duration firstDelay = const Duration(seconds: 6)}) {
+    _heroTimer?.cancel();
+    _heroTimer = Timer(firstDelay, () {
+      if (!mounted || _entries.isEmpty) return;
+      final n = 1 + math.min(2, _continueItems.length).toInt();
+      if (n <= 1) return;
+      setState(() => _heroIndex = (_heroIndex + 1) % n);
+      _armHero(firstDelay: const Duration(seconds: 6));
+    });
+  }
 
   Future<void> _load() async {
     final db = ref.read(appDatabaseProvider);
@@ -82,14 +95,7 @@ class _HomePageState extends ConsumerState<HomePage>
     _replayIntro();
   }
 
-  void _armHero() {
-    Future.delayed(const Duration(seconds: 4), () {
-      if (!mounted || _entries.isEmpty) return;
-      final n = 1 + math.min(2, _continueItems.length).toInt();
-      setState(() => _heroIndex = (_heroIndex + 1) % math.max(1, n));
-      _armHero();
-    });
-  }
+  void _onIntroTick() => _replayIntro();
 
   List<(Book, ReadingProgressData?)> get _continueItems {
     final withP = _entries
