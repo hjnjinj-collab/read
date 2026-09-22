@@ -5,6 +5,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/shell_glass_style.dart';
 import 'home_page.dart' show homeIntroTick;
 import 'providers/shell_actions.dart';
 import 'providers/shell_settings.dart';
@@ -201,30 +202,12 @@ LiquidGlassStyle _shellFrost(
   required double navTint,
   double radius = 28,
 }) {
-  return LiquidGlassStyle(
-    shape: LiquidGlassShape.continuousRoundedRectangle(
-      cornerRadius: radius,
-      borderWidth: 1.0,
-      borderColor: Colors.white.withValues(
-        alpha: scheme.brightness == Brightness.light ? 0.45 : 0.22,
-      ),
-      lightIntensity: 1.1,
-    ),
-    appearance: LiquidGlassAppearance(
-      color: AppGlass.navGlass(scheme, strength: navTint),
-      blur: LiquidGlassBlur(sigmaX: navBlur, sigmaY: navBlur),
-      shadow: LiquidGlassShadow(
-        blur: 18,
-        opacity: 0.16,
-        offset: const Offset(0, 6),
-        cornerRadius: radius,
-      ),
-    ),
-    refraction: const LiquidGlassRefraction(
-      distortion: 0.1,
-      distortionWidth: 28,
-      chromaticAberration: 0.002,
-    ),
+  // 与书架/阅读 chrome 同源唯一实现
+  return shellFrostLiquidStyle(
+    scheme,
+    navBlur: navBlur,
+    navTint: navTint,
+    radius: radius,
   );
 }
 
@@ -250,9 +233,9 @@ class _SolidBottomNav extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback onImport;
 
-  /// 与玻璃底栏放大后同高
-  static const double _height = 72;
-  static const double _barW = 248;
+  /// 与玻璃底栏放大后同高（真机反馈整体偏大，收回 60/208）
+  static const double _height = 60;
+  static const double _barW = 208;
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +250,8 @@ class _SolidBottomNav extends StatelessWidget {
     if (barW + circle > available) {
       barW = (available - circle - 4).clamp(80.0, _barW);
     }
-    final panelW = (available - circle - tightGap).clamp(120.0, available);
+    // 展开面板与收起主胶囊同宽，避免展开后尺寸暴涨
+    final panelW = barW;
 
     final mainHasSel = selectedIndex <= 2;
     final mainBar = ClipRRect(
@@ -286,8 +270,8 @@ class _SolidBottomNav extends StatelessWidget {
                     label: const ['首页', '书架', '书源'][i],
                     selected: mainHasSel && selectedIndex == i,
                     onTap: () => onChanged(i),
-                    iconSize: 24,
-                    fontSize: 12,
+                    iconSize: 22,
+                    fontSize: 11,
                   ),
                 ),
             ],
@@ -313,8 +297,8 @@ class _SolidBottomNav extends StatelessWidget {
                   selected: settingsSel,
                   onTap: onSettings,
                   horizontal: true,
-                  iconSize: 22,
-                  fontSize: 13,
+                  iconSize: 20,
+                  fontSize: 12,
                 ),
               ),
               Expanded(
@@ -324,8 +308,8 @@ class _SolidBottomNav extends StatelessWidget {
                   selected: false,
                   onTap: onImport,
                   horizontal: true,
-                  iconSize: 22,
-                  fontSize: 13,
+                  iconSize: 20,
+                  fontSize: 12,
                 ),
               ),
             ],

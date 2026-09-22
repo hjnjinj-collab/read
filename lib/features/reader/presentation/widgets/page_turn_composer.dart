@@ -1880,6 +1880,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _viewportFixInFlight = false;
           if (!mounted) return;
+          // 保留已登记 systemTop（onWindowResized 省略时不清零）
           ref.read(readerProvider.notifier).onWindowResized(w, h);
         });
       }

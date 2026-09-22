@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart' show Note;
 import '../../../../core/ffi/book_service.dart' show CoverStore;
@@ -14,7 +15,10 @@ import '../widgets/image_zoom_viewer.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
-import '../widgets/reader_menu.dart';
+import '../widgets/reader_chrome.dart';
+import '../widgets/chapter_list_dialog.dart';
+import '../widgets/book_search_dialog.dart';
+import '../widgets/reader_settings_dialog.dart';
 import '../widgets/reader_page_widget.dart';
 import '../widgets/selection_highlight_painter.dart';
 import '../widgets/text_selection_overlay.dart';
@@ -23,8 +27,7 @@ class ReaderPage extends ConsumerStatefulWidget {
   final String filePath;
   final String bookName;
 
-  const ReaderPage({Key? key, required this.filePath, required this.bookName})
-    : super(key: key);
+  const ReaderPage({super.key, required this.filePath, required this.bookName});
 
   @override
   ConsumerState<ReaderPage> createState() => _ReaderPageState();
@@ -32,7 +35,10 @@ class ReaderPage extends ConsumerStatefulWidget {
 
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _showMenu = false;
+  ReaderChromeMode _chromeMode = ReaderChromeMode.traditional;
   /// 封面提取色：顶栏雾 tint 用 dominant，与书架描边/氛围同调
+  // 顶栏取色预留（chrome 第二轮接入）
+  // ignore: unused_field
   CoverColors? _coverColors;
 
   /// P4: 翻页模式（2026-09-04 P1: 上移 ReaderNotifier 持久化——原 widget
@@ -655,10 +661,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(readerProvider);
-    return Scaffold(
-      // 2026-09-04 P1 暗黑主题：Scaffold 背景跟随阅读主题（内容区由
-      // PagePainter 纸色底全覆盖，此处主要影响加载/无内容态观感）
-      backgroundColor: PageContentRenderer.theme.scaffoldColor,
+    final readerTheme = PageContentRenderer.theme;
+    final dark = readerTheme.name == 'dark';
+    final sysTop = MediaQuery.viewPaddingOf(context).top;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        // 沉浸：状态栏透明，纸色从正文铺上来；图标随阅读日夜
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: readerTheme.paperColor,
+        systemNavigationBarIconBrightness:
+            dark ? Brightness.light : Brightness.dark,
+      ),
+      child: Scaffold(
+      // 沉浸：Scaffold 与纸同色，状态栏下无色缝
+      backgroundColor: readerTheme.paperColor,
       // A30b 真机修复：阅读器不参与键盘避让——配 合 manifest
       // adjustNothing（窗口不缩小），背景内容在软键盘弹出/收起全程
       // 纹丝不动（阅读场景无输入框，无需为键盘腾位）。
@@ -669,7 +687,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       // MediaQuery.size 全屏值）。
       // 【对照实验结论 2026-09-01】SafeArea 移除后 Windows 现象不变
       // → SafeArea 无罪，已恢复。偏右根因转向绘制端实测诊断。
+      // 沉浸（2026-09-20）：top: false，纸色/画布铺到状态栏下；
+      // 仅 bottom 护手势条。正文 padTop 并入 viewPadding.top。
       body: SafeArea(
+        top: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final notifier = ref.read(readerProvider.notifier);
@@ -697,20 +718,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
             if (!keyboardVisible &&
                 (wLayout != notifier.screenWidth ||
-                    hLayout != notifier.screenHeight)) {
+                    hLayout != notifier.screenHeight ||
+                    sysTop != notifier.systemTopInset)) {
               if (notifier.hasBook) {
                 // 已开书：尺寸变化 → postFrame 锚点重排（onWindowResized
                 // 内部 setScreenSize + FrameSet 作废 + 带锚点重载）
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  notifier.onWindowResized(wLayout, hLayout);
+                  notifier.onWindowResized(wLayout, hLayout, systemTop: sysTop);
                 });
               } else {
                 // 首帧/开书前：同步登记（纯字段赋值），openBook 排版
                 // 即用正确 viewport
-                notifier.setScreenSize(wLayout, hLayout);
+                notifier.setScreenSize(wLayout, hLayout, systemTop: sysTop);
               }
             }
             return Stack(
+              // 液态圆键祖先必须 Clip.none：默认 hardEdge 会切 lens 阴影/折射采样
+              clipBehavior: Clip.none,
               children: [
                 // P4: 阅读区域用 Listener + PageTurnComposer
                 Listener(
@@ -768,85 +792,118 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                     defaultTargetPlatform == TargetPlatform.macOS;
                 final showBar = _showMenu || desktop;
                 if (!showBar) return const SizedBox.shrink();
-                final dom = _coverColors?.dominant;
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      // 顶栏继承封面 dominant：与书架提取色同调；无色则黑雾
-                      colors: [
-                        if (dom != null)
-                          dom.withValues(alpha: desktop ? 0.38 : 0.48)
-                        else
-                          Colors.black.withValues(alpha: desktop ? 0.22 : 0.3),
-                        if (dom != null)
-                          dom.withValues(alpha: 0.12)
-                        else
-                          Colors.black.withValues(alpha: 0.06),
-                        Colors.transparent,
+                return ReaderTopChrome(
+                  withVeil: _showMenu,
+                  title: state.bookTitle ?? '',
+                  pageLabel:
+                      '${state.currentChapterIndex + 1}/${state.chapters.length}',
+                  onBack: () => Navigator.of(context).maybePop(),
+                  onMore: () async {
+                    final action = await showMenu<String>(
+                      context: context,
+                      position: RelativeRect.fromLTRB(
+                        MediaQuery.sizeOf(context).width - 72,
+                        48,
+                        12,
+                        0,
+                      ),
+                      items: const [
+                        PopupMenuItem(value: 'theme', child: Text('切换明暗')),
+                        PopupMenuItem(value: 'mode', child: Text('切换菜单形态')),
+                        PopupMenuItem(value: 'close', child: Text('关闭菜单')),
                       ],
-                      stops: const [0, 0.55, 1],
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        tooltip: '返回书架',
-                        onPressed: () => Navigator.of(context).maybePop(),
-                      ),
-                      Expanded(
-                        child: Text(
-                          state.bookTitle ?? '',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${state.currentChapterIndex + 1}/${state.chapters.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                  ),
+                    );
+                    if (!context.mounted || action == null) return;
+                    if (action == 'theme') _toggleThemeDark();
+                    if (action == 'mode') {
+                      setState(() {
+                        _chromeMode = _chromeMode == ReaderChromeMode.traditional
+                            ? ReaderChromeMode.floating
+                            : ReaderChromeMode.traditional;
+                      });
+                    }
+                    if (action == 'close') setState(() => _showMenu = false);
+                  },
                 );
               }),
             ),
 
-            // Bottom menu
+            // Bottom menu shell（A 传统 / B 悬浮；设置内页后续迁入）
             if (_showMenu)
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: ReaderMenu(
-                  onClose: () => setState(() => _showMenu = false),
-                  pageTurnMode: notifier.pageTurnMode,
-                  onPageTurnModeChanged: _setPageTurnMode,
-                  pageTurnSpeed: notifier.pageTurnSpeed,
-                  onPageTurnSpeedChanged: _setPageTurnSpeed,
-                  themeDark: notifier.themeDark,
-                  onToggleTheme: _toggleThemeDark,
-                ),
+                child: Builder(builder: (context) {
+                  final notifier = ref.read(readerProvider.notifier);
+                  final pageCount = state.currentChapterPageCount;
+                  final progress = pageCount <= 0
+                      ? 0.0
+                      : state.currentPageIndex / (pageCount > 1 ? pageCount - 1 : 1);
+                  return ReaderBottomChrome(
+                    mode: _chromeMode,
+                    onToggleMode: () => setState(() {
+                      _chromeMode =
+                          _chromeMode == ReaderChromeMode.traditional
+                              ? ReaderChromeMode.floating
+                              : ReaderChromeMode.traditional;
+                    }),
+                    progress: progress.clamp(0, 1),
+                    progressLabel: pageCount <= 0
+                        ? '—'
+                        : '${state.currentPageIndex + 1}/$pageCount',
+                    onSeek: (t) {
+                      if (pageCount <= 0) return;
+                      final idx =
+                          (t * (pageCount > 1 ? pageCount - 1 : 0)).round();
+                      notifier.jumpToPage(idx);
+                    },
+                    fontSize: notifier.fontSize,
+                    onFontSize: (v) {
+                      ref.read(readerProvider.notifier).setFontSize(v);
+                      setState(() {});
+                    },
+                    pageTurnMode: notifier.pageTurnMode,
+                    onPageTurnMode: _setPageTurnMode,
+                    pageTurnSpeed: notifier.pageTurnSpeed,
+                    onPageTurnSpeed: _setPageTurnSpeed,
+                    onCatalog: () {
+                      // ignore: avoid_print
+                      print('[reader-chrome] open catalog');
+                      showDialog(
+                        context: context,
+                        builder: (context) => const ChapterListDialog(),
+                      );
+                    },
+                    onSearch: () {
+                      // ignore: avoid_print
+                      print('[reader-chrome] open search');
+                      showDialog(
+                        context: context,
+                        builder: (context) => const BookSearchDialog(),
+                      );
+                    },
+                    onBookmark: () => readerChromeStub(context, '书签'),
+                    onNotes: () => readerChromeStub(context, '笔记'),
+                    onSettings: () {
+                      // ignore: avoid_print
+                      print('[reader-chrome] open settings');
+                      showDialog(
+                        context: context,
+                        builder: (context) => const ReaderSettingsDialog(),
+                      );
+                    },
+                    onMore: () => readerChromeStub(context, '更多动作'),
+                  );
+                }),
               ),
               ],
             ); // Stack
-          }, // LayoutBuilder builder
-        ),
-      ),
-    );
+        }, // LayoutBuilder builder
+        ), // LayoutBuilder
+      ), // SafeArea
+      ), // Scaffold
+    ); // AnnotatedRegion
   }
 }
 

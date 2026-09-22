@@ -29,7 +29,7 @@ class ExpandableGlassNav extends StatelessWidget {
     required this.circleStyle,
     required this.selectedColor,
     required this.unselectedColor,
-    this.height = 72,
+    this.height = 60,
   });
 
   final int selectedIndex;
@@ -47,7 +47,7 @@ class ExpandableGlassNav extends StatelessWidget {
   final double height;
 
   /// 三段主胶囊目标宽（真机反馈偏小，加宽触达/字面）
-  static const double _barW = 248;
+  static const double _barW = 208;
 
   LiquidGlassSegmentedPillStyle _pill(double grow, Color pillBase) =>
       LiquidGlassSegmentedPillStyle(
@@ -75,7 +75,7 @@ class ExpandableGlassNav extends StatelessWidget {
   LiquidGlassSegmentedLabelStyle _labels() => LiquidGlassSegmentedLabelStyle(
         selectedColor: selectedColor,
         unselectedColor: unselectedColor,
-        fontSize: 12,
+        fontSize: 11,
         selectedFontWeight: FontWeight.w600,
         unselectedFontWeight: FontWeight.w500,
       );
@@ -96,7 +96,8 @@ class ExpandableGlassNav extends StatelessWidget {
       barW = (available - circle - 4).clamp(80.0, _barW);
     }
     // 展开态：左圆键 + gap + 面板
-    final panelW = (available - circle - tightGap).clamp(120.0, available);
+    // 展开面板与收起主胶囊**同宽**（禁止撑到 available——真机展开会莫名变大）
+    final panelW = barW;
 
     // 主胶囊只承载 0–2；设置（3）时无段选中，禁止 clamp 成「书源」。
     // selectedIndex 仅服务 pill/断言；点击用内层 GestureDetector 自接管，
@@ -126,8 +127,8 @@ class ExpandableGlassNav extends StatelessWidget {
             unselectedColor: unselectedColor,
             selected: isSel,
             accentColor: scheme.tertiary,
-            iconSize: 24,
-            fontSize: 12,
+            iconSize: 22,
+            fontSize: 11,
           ),
         );
       },
@@ -174,8 +175,8 @@ class ExpandableGlassNav extends StatelessWidget {
             selected: isSel,
             accentColor: Theme.of(context).colorScheme.tertiary,
             horizontal: true,
-            iconSize: 22,
-            fontSize: 13,
+            iconSize: 20,
+            fontSize: 12,
           ),
         );
       },

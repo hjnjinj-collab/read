@@ -85,6 +85,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _screenWidth = 360.0;
   double _screenHeight = 640.0;
 
+  /// 状态栏/挖孔高度（viewPadding.top）。沉浸模式下画布含状态栏，
+  /// 正文 padTop 必须并入该值，避免字面压到系统图标下。
+  double _systemTopInset = 0.0;
+
   // Reading settings
   double _fontSize = 18.0;
   double _lineHeight = 1.5;
@@ -238,10 +242,22 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 当前书是否按 EPUB 结构化路径渲染
   bool get renderAsEpub => _isEpub;
 
-  void setScreenSize(double width, double height) {
+  void setScreenSize(
+    double width,
+    double height, {
+    double? systemTop,
+  }) {
     _screenWidth = width;
     _screenHeight = height;
+    if (systemTop != null) _systemTopInset = systemTop;
   }
+
+  /// 生效顶边距 = 系统状态栏高 + 收紧后的上呼吸（沉浸后大片空白要压掉）。
+  /// 不用完整 paddingVertical——那会把首行再往下推一大截。
+  double get _padTop => _systemTopInset + (_paddingVertical * 0.35).clamp(6.0, 12.0);
+
+  /// 当前已登记的系统顶距（状态栏/挖孔），供 resize 判等
+  double get systemTopInset => _systemTopInset;
 
   /// 权威 viewport（SafeArea 内实际可用区域，逻辑像素）
   ///
@@ -273,6 +289,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   Timer? _resizeDebounce;
   double? _pendingResizeW;
   double? _pendingResizeH;
+  double? _pendingResizeTop;
 
   /// 搜索对话框打开期间冻结视口尺寸处理（接线：book_search_dialog
   /// initState/dispose）。冻结期间 onWindowResized 直接忽略，不更新
@@ -287,31 +304,52 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
   }
 
-  Future<void> onWindowResized(double width, double height) async {
-    if (width == _screenWidth && height == _screenHeight) return;
+  Future<void> onWindowResized(
+    double width,
+    double height, {
+    double? systemTop,
+  }) async {
+    final top = systemTop ?? _systemTopInset;
+    if (width == _screenWidth &&
+        height == _screenHeight &&
+        top == _systemTopInset) {
+      return;
+    }
     if (_viewportResizeFrozen) {
       readerTrace('viewport.resize.frozen', {'w': width, 'h': height});
       return;
     }
     _pendingResizeW = width;
     _pendingResizeH = height;
+    _pendingResizeTop = top;
     _resizeDebounce?.cancel();
     _resizeDebounce = Timer(const Duration(milliseconds: 200), () {
       final w = _pendingResizeW;
       final h = _pendingResizeH;
+      final t = _pendingResizeTop ?? _systemTopInset;
       _pendingResizeW = null;
       _pendingResizeH = null;
+      _pendingResizeTop = null;
       if (w != null && h != null) {
-        _applyViewportResize(w, h);
+        _applyViewportResize(w, h, t);
       }
     });
   }
 
   /// 防抖到期后的实际尺寸应用（原 onWindowResized 主体）
-  Future<void> _applyViewportResize(double width, double height) async {
-    if (width == _screenWidth && height == _screenHeight) return;
+  Future<void> _applyViewportResize(
+    double width,
+    double height,
+    double systemTop,
+  ) async {
+    if (width == _screenWidth &&
+        height == _screenHeight &&
+        systemTop == _systemTopInset) {
+      return;
+    }
     _screenWidth = width;
     _screenHeight = height;
+    _systemTopInset = systemTop;
     _invalidatePageCountCache(); // M8-P4：窗口尺寸变更清页数缓存
     _invalidateFrames(reason: 'window-resized'); // 旧尺寸 FrameSet 作废
     if (state.bookId == null || state.isLoading) return;
@@ -868,7 +906,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
           paddingLeft: _paddingHorizontal,
-          paddingTop: _paddingVertical,
+          paddingTop: _padTop,
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
           fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
@@ -901,7 +939,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
             fontSize: _fontSize,
             lineHeightMultiplier: _lineHeight,
             paddingLeft: _paddingHorizontal,
-            paddingTop: _paddingVertical,
+            paddingTop: _padTop,
             paddingRight: _paddingHorizontal,
             paddingBottom: _paddingVertical,
             fontName: ReaderFont.family,
@@ -934,7 +972,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
           paddingLeft: _paddingHorizontal,
-          paddingTop: _paddingVertical,
+          paddingTop: _padTop,
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
           fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
@@ -1602,7 +1640,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
         paddingLeft: _paddingHorizontal,
-        paddingTop: _paddingVertical,
+        paddingTop: _padTop,
         paddingRight: _paddingHorizontal,
         paddingBottom: _paddingVertical,
         fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
@@ -1630,7 +1668,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
         paddingLeft: _paddingHorizontal,
-        paddingTop: _paddingVertical,
+        paddingTop: _padTop,
         paddingRight: _paddingHorizontal,
         paddingBottom: _paddingVertical,
         fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
@@ -1670,7 +1708,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
         paddingLeft: _paddingHorizontal,
-        paddingTop: _paddingVertical,
+        paddingTop: _padTop,
         paddingRight: _paddingHorizontal,
         paddingBottom: _paddingVertical,
         chineseConvert: convertCode,
@@ -1763,7 +1801,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
               fontSize: _fontSize,
               lineHeightMultiplier: _lineHeight,
               paddingLeft: _paddingHorizontal,
-              paddingTop: _paddingVertical,
+              paddingTop: _padTop,
               paddingRight: _paddingHorizontal,
               paddingBottom: _paddingVertical,
               fontName: ReaderFont.family,
@@ -2243,7 +2281,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   String layoutFingerprint() {
     return '${_screenWidth}_${_screenHeight}_'
         '${_fontSize}_${_lineHeight}_'
-        '${_paddingHorizontal}_${_paddingVertical}_'
+        '${_paddingHorizontal}_${_padTop}_${_paddingVertical}_'
         '${_pageFillThreshold}_${_showComments}_'
         '${_removeDuplicateTitle}_'
         '${_chineseConvert.index}_'
@@ -2308,7 +2346,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       fontSize: _fontSize,
       lineHeight: _lineHeight,
       padH: _paddingHorizontal,
-      padV: _paddingVertical,
+      padTop: _padTop,
+      padBottom: _paddingVertical,
     );
     if (_isEpub) {
       // 简繁编码与 TXT 同口径；页数与页内容必须同参（否则错位）
@@ -2325,9 +2364,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
         fontSize: common.fontSize,
         lineHeightMultiplier: common.lineHeight,
         paddingLeft: common.padH,
-        paddingTop: common.padV,
+        paddingTop: common.padTop,
         paddingRight: common.padH,
-        paddingBottom: common.padV,
+        paddingBottom: common.padBottom,
         fontName: ReaderFont.family,
         chineseConvert: chineseConvertCode,
         pageFillThreshold: _pageFillThreshold,
@@ -2352,9 +2391,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
       fontSize: common.fontSize,
       lineHeightMultiplier: common.lineHeight,
       paddingLeft: common.padH,
-      paddingTop: common.padV,
+      paddingTop: common.padTop,
       paddingRight: common.padH,
-      paddingBottom: common.padV,
+      paddingBottom: common.padBottom,
       removeDuplicateTitle: _removeDuplicateTitle,
       reSegment: _reSegment,
       chineseConvert: chineseConvertCode,
@@ -2756,7 +2795,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
           paddingLeft: _paddingHorizontal,
-          paddingTop: _paddingVertical,
+          paddingTop: _padTop,
           paddingRight: _paddingHorizontal,
           paddingBottom: _paddingVertical,
           fontName: _customFontFamily.isNotEmpty ? _customFontFamily : 'default',
