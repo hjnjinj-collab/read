@@ -5,6 +5,7 @@ import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../core/theme/app_icons.dart';
 import '../../core/theme/app_theme.dart';
+import 'home_page.dart' show homeIntroTick;
 import 'providers/shell_actions.dart';
 import 'providers/shell_settings.dart';
 import 'widgets/expandable_glass_nav.dart';
@@ -64,6 +65,10 @@ class _AppShellState extends ConsumerState<AppShell>
         initialLocation: i == from,
       );
       _playTabTransition(from, i);
+      // 回首页：重播 Dashboard 入场（StatefulShell 保活不会重建）
+      if (i == 0) {
+        homeIntroTick.value++;
+      }
       if (collapseNav && _navExpanded) {
         setState(() => _navExpanded = false);
       }

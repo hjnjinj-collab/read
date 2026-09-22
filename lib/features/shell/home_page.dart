@@ -15,6 +15,9 @@ import 'bookshelf/thin_continue_bar.dart';
 import 'providers/shell_settings.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
+/// 切回首页 Tab 时递增，触发 Dashboard 入场动画重播。
+final ValueNotifier<int> homeIntroTick = ValueNotifier(0);
+
 /// 首页 Dashboard：Hero 轮换（首帧今日目标）→ 统计 → 折线 → 最近阅读。
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -39,14 +42,25 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void initState() {
     super.initState();
+    homeIntroTick.addListener(_onIntroTick);
     _load();
   }
 
   @override
   void dispose() {
+    homeIntroTick.removeListener(_onIntroTick);
     _introCtrl.dispose();
     super.dispose();
   }
+
+  void _replayIntro() {
+    if (!mounted) return;
+    setState(() => _heroIndex = 0);
+    _introCtrl.forward(from: 0);
+    _armHero();
+  }
+
+  void _onIntroTick() => _replayIntro();
 
   Future<void> _load() async {
     final db = ref.read(appDatabaseProvider);
@@ -64,8 +78,7 @@ class _HomePageState extends ConsumerState<HomePage>
       _heroIndex = 0;
     });
     // 数据就绪后强制播放入场，避免 Tween 在首帧前结束
-    _introCtrl.forward(from: 0);
-    _armHero();
+    _replayIntro();
   }
 
   void _armHero() {
@@ -160,13 +173,14 @@ class _HomePageState extends ConsumerState<HomePage>
                         final pal = CoverPalette.cached(book.filePath) ??
                             CoverPalette.synthetic(book.title);
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+                          padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
                           child: SizedBox(
                             width: 96,
                             child: InkWell(
                               onTap: () => _openBook(book),
                               borderRadius: BorderRadius.circular(12),
                               child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   DecoratedBox(
                                     decoration: BoxDecoration(
@@ -191,7 +205,8 @@ class _HomePageState extends ConsumerState<HomePage>
                                       borderRadius: BorderRadius.circular(10),
                                       child: SizedBox(
                                         width: 92,
-                                        height: 130,
+                                        // 120 + 4 + 文案 ≤ 列表 148 内容区，防 RenderFlex 溢出
+                                        height: 120,
                                         child: cover != null
                                             ? Image.file(
                                                 cover,
@@ -205,7 +220,7 @@ class _HomePageState extends ConsumerState<HomePage>
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 4),
                                   Text(
                                     book.title,
                                     maxLines: 1,
