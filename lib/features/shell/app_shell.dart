@@ -13,7 +13,8 @@ import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
 /// 四 Tab 应用壳（StatefulShell 状态保活）：0 首页 · 1 书架 · 2 书源 · 3 设置。
 /// 底栏主胶囊 `[首页|书架]` + 更多（默认进设置；在设置展开 `[书源|设置]`）。
-/// Tab 切换：AppShell 自播 Fade+方向轻 slide（shell 不 remount，状态保活）。
+/// Tab 切换：AppShell 自播方向轻 slide（禁止 Fade/Opacity 包 shell，
+/// Impeller 下页内液态在 opacity layer 会采样变暗）。
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key, required this.navigationShell});
 
@@ -124,7 +125,6 @@ class _AppShellState extends ConsumerState<AppShell>
       parent: _tabAnim,
       curve: AppMotion.tabCurve,
     );
-    final tabFade = Tween<double>(begin: 0.55, end: 1.0).animate(curved);
     final tabSlide = Tween<Offset>(
       begin: _tabSlideBegin,
       end: Offset.zero,
@@ -150,10 +150,8 @@ class _AppShellState extends ConsumerState<AppShell>
             builder: (context, child) {
               // 静止（含减弱动态 / 动画结束前未触发）：直接挂 shell
               if (_tabAnim.isDismissed) return child!;
-              return FadeTransition(
-                opacity: tabFade,
-                child: SlideTransition(position: tabSlide, child: child),
-              );
+              // 仅 slide：禁止 Fade/Opacity 包住含 LiquidGlass 的 navigationShell
+              return SlideTransition(position: tabSlide, child: child);
             },
             child: navigationShell,
           ),
