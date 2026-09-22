@@ -3,7 +3,7 @@ feature: reader-statusbar-immersive-glass
 status: delivered
 updated: 2026-09-20
 branch: master
-commits: 8bf211d..WORKTREE
+commits: 8bf211d..83d588c
 ---
 
 # 阅读页状态栏沉浸 + 液态玻璃修复
