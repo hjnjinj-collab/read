@@ -23,6 +23,7 @@ import '../providers/shell_settings.dart';
 import 'book_cover_card.dart';
 import 'bookshelf_layout.dart';
 import 'thin_continue_bar.dart';
+import '../widgets/hero_slide.dart';
 
 /// 书架 Tab：紧凑顶栏 + 满铺封面网格 / 列表
 class BookshelfPage extends ConsumerStatefulWidget {
@@ -496,10 +497,17 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     Widget continueBar() {
       final item = continueItem;
       if (item == null) return const SizedBox.shrink();
-      return ThinContinueBar(
-        book: item.$1,
-        progress: item.$2,
-        onTap: () => _openBook(item.$1),
+      // 与首页 Hero 同语言：换书时左入右出
+      return HeroSlideSwitcher(
+        index: 0,
+        height: 148,
+        radius: AppGlass.settingsCardRadius,
+        child: ThinContinueBar(
+          key: ValueKey('continue-${item.$1.filePath}'),
+          book: item.$1,
+          progress: item.$2,
+          onTap: () => _openBook(item.$1),
+        ),
       );
     }
 

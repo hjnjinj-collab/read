@@ -13,6 +13,7 @@ import '../reader/presentation/providers/reader_provider.dart'
     show appDatabaseProvider;
 import 'bookshelf/thin_continue_bar.dart';
 import 'providers/shell_settings.dart';
+import 'widgets/hero_slide.dart';
 import 'widgets/shell_ambient.dart' show AmbientDir, ShellAmbient;
 
 /// 切回首页 Tab 时递增，触发 Dashboard 入场动画重播。
@@ -251,70 +252,36 @@ class _HomePageState extends ConsumerState<HomePage>
       for (final e in cont.take(2)) _continueSlide(e),
     ];
     final i = _heroIndex.clamp(0, slides.length - 1);
-    return SizedBox(
-      height: 152,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 480),
-              reverseDuration: const Duration(milliseconds: 420),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, anim) {
-                final slide = Tween<Offset>(
-                  begin: const Offset(0.1, 0),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
-                final scale = Tween<double>(begin: 0.97, end: 1.0)
-                    .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutBack));
-                return FadeTransition(
-                  opacity: CurvedAnimation(
-                    parent: anim,
-                    curve: const Interval(0, 0.7, curve: Curves.easeOut),
-                  ),
-                  child: SlideTransition(
-                    position: slide,
-                    child: ScaleTransition(scale: scale, child: child),
-                  ),
-                );
-              },
-              layoutBuilder: (currentChild, previousChildren) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [?currentChild],
-                );
-              },
-              child: KeyedSubtree(
-                key: ValueKey('hero-$i'),
-                child: slides[i],
-              ),
-            ),
-            Positioned(
-              top: 10,
-              right: 12,
-              child: Row(
-                children: List.generate(
-                  slides.length,
-                  (d) => Container(
-                    width: d == i ? 14 : 6,
-                    height: 6,
-                    margin: const EdgeInsets.only(left: 4),
-                    decoration: BoxDecoration(
-                      color: d == i
-                          ? Colors.white.withValues(alpha: 0.9)
-                          : Colors.white.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
+    return Stack(
+      children: [
+        HeroSlideSwitcher(
+          index: i,
+          height: 152,
+          radius: AppGlass.settingsCardRadius,
+          child: slides[i],
+        ),
+        // 轮换圆点叠在块上
+        Positioned(
+          top: 10,
+          right: 12,
+          child: Row(
+            children: List.generate(
+              slides.length,
+              (d) => Container(
+                width: d == i ? 14 : 6,
+                height: 6,
+                margin: const EdgeInsets.only(left: 4),
+                decoration: BoxDecoration(
+                  color: d == i
+                      ? Colors.white.withValues(alpha: 0.9)
+                      : Colors.white.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(3),
                 ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
