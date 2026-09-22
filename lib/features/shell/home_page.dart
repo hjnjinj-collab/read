@@ -23,10 +23,15 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with SingleTickerProviderStateMixin {
   List<(Book, ReadingProgressData?)> _entries = [];
   bool _loading = true;
   int _heroIndex = 0;
+  late final AnimationController _introCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  );
 
   static const _goalMinutes = 30;
   int get _todayMinutes => _entries.isEmpty ? 0 : 18;
@@ -35,6 +40,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _introCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -52,6 +63,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       _loading = false;
       _heroIndex = 0;
     });
+    // 数据就绪后强制播放入场，避免 Tween 在首帧前结束
+    _introCtrl.forward(from: 0);
     _armHero();
   }
 
@@ -134,72 +147,74 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
-                    height: 148,
+                    height: 168,
                     child: ListView.separated(
+                      // 投影需要出界，默认 hardEdge 会裁掉
+                      clipBehavior: Clip.none,
                       scrollDirection: Axis.horizontal,
                       itemCount: math.min(6, _entries.length),
                       separatorBuilder: (_, _) => const SizedBox(width: 8),
                       itemBuilder: (context, i) {
                         final (book, _) = _entries[i];
                         final cover = CoverStore.fileOf(book.filePath);
-                        // 复用书架 CoverPalette 缓存，不重复提取
                         final pal = CoverPalette.cached(book.filePath) ??
                             CoverPalette.synthetic(book.title);
-                        return SizedBox(
-                          width: 88,
-                          child: InkWell(
-                            onTap: () => _openBook(book),
-                            borderRadius: BorderRadius.circular(12),
-                            child: Column(
-                              children: [
-                                DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(10),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: pal.shadowColor
-                                            .withValues(alpha: 0.4),
-                                        blurRadius: 12,
-                                        offset: const Offset(0, 6),
-                                        spreadRadius: -2,
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+                          child: SizedBox(
+                            width: 96,
+                            child: InkWell(
+                              onTap: () => _openBook(book),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Column(
+                                children: [
+                                  DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(10),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: pal.shadowColor
+                                              .withValues(alpha: 0.55),
+                                          blurRadius: 14,
+                                          offset: const Offset(0, 8),
+                                        ),
+                                        BoxShadow(
+                                          color: pal.dominant
+                                              .withValues(alpha: 0.28),
+                                          blurRadius: 20,
+                                          offset: const Offset(0, 12),
+                                          spreadRadius: -2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: SizedBox(
+                                        width: 92,
+                                        height: 130,
+                                        child: cover != null
+                                            ? Image.file(
+                                                cover,
+                                                fit: BoxFit.cover,
+                                                cacheWidth: 240,
+                                                gaplessPlayback: true,
+                                                errorBuilder: (_, _, _) =>
+                                                    ColoredBox(color: pal.dark),
+                                              )
+                                            : ColoredBox(color: pal.dark),
                                       ),
-                                      BoxShadow(
-                                        color: pal.dominant
-                                            .withValues(alpha: 0.18),
-                                        blurRadius: 18,
-                                        offset: const Offset(0, 8),
-                                        spreadRadius: -4,
-                                      ),
-                                    ],
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
-                                    child: SizedBox(
-                                      width: 84,
-                                      height: 118,
-                                      child: cover != null
-                                          ? Image.file(
-                                              cover,
-                                              fit: BoxFit.cover,
-                                              cacheWidth: 200,
-                                              gaplessPlayback: true,
-                                              errorBuilder: (_, _, _) =>
-                                                  ColoredBox(
-                                                color: pal.dark,
-                                              ),
-                                            )
-                                          : ColoredBox(color: pal.dark),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  book.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    book.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -421,27 +436,22 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: target),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, v, _) {
-                    // 滚动数字：格式与目标一致
-                    final text = isInt
-                        ? v.round().toString()
-                        : v.toStringAsFixed(1);
+                AnimatedBuilder(
+                  animation: _introCtrl,
+                  builder: (context, _) {
+                    final v = target *
+                        Curves.easeOutCubic.transform(_introCtrl.value);
+                    final text =
+                        isInt ? v.round().toString() : v.toStringAsFixed(1);
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
                           text,
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
-                                  ),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         Padding(
                           padding: const EdgeInsets.only(left: 2, bottom: 3),
@@ -532,17 +542,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             const SizedBox(height: 10),
             SizedBox(
               height: 136,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 1100),
-                curve: Curves.easeOutCubic,
-                builder: (context, t, _) {
+              child: AnimatedBuilder(
+                animation: _introCtrl,
+                builder: (context, _) {
                   return CustomPaint(
                     painter: _WeekLinePainter(
                       values: base,
                       line: scheme.primary,
                       track: scheme.outlineVariant.withValues(alpha: 0.45),
-                      drawT: t,
+                      drawT: Curves.easeOutCubic.transform(_introCtrl.value),
                     ),
                   );
                 },
