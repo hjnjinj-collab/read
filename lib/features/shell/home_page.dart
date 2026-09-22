@@ -200,24 +200,40 @@ class _HomePageState extends ConsumerState<HomePage> {
       for (final e in cont.take(2)) _continueSlide(e),
     ];
     final i = _heroIndex.clamp(0, slides.length - 1);
-    // 定高：封面帧 / 目标帧同构，切换不推挤下方（无外层 Card）
     return SizedBox(
-      height: 128,
+      height: 140,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // Fade + 轻 Slide：禁止双帧叠影
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 320),
+              duration: const Duration(milliseconds: 380),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, anim) {
+                final slide = Tween<Offset>(
+                  begin: const Offset(0.08, 0),
+                  end: Offset.zero,
+                ).animate(anim);
+                return FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(position: slide, child: child),
+                );
+              },
+              layoutBuilder: (currentChild, previousChildren) {
+                // 只叠当前帧，避免双影
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [?currentChild],
+                );
+              },
               child: KeyedSubtree(
                 key: ValueKey('hero-$i'),
                 child: slides[i],
               ),
             ),
-            // 轮换圆点叠在块上
             Positioned(
               top: 10,
               right: 12,
@@ -342,7 +358,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _continueSlide((Book, ReadingProgressData?) item) {
-    // 与书架海报条同语言；定高槽内垂直居中，无额外外壳
     return Align(
       alignment: Alignment.center,
       child: ThinContinueBar(
@@ -354,45 +369,59 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _statsRow(ColorScheme scheme) {
-    Widget stat(String lb, String val, String unit) {
+    Widget stat(IconData icon, String lb, String val, String unit) {
       return Expanded(
-        child: Card(
-          elevation: 0,
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
-          ),
+        child: _FrostChromeCard(
+          scheme: scheme,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  lb,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 4),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    Icon(icon, size: 16, color: scheme.primary),
+                    const SizedBox(width: 6),
                     Text(
-                      val,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
+                      lb,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2, bottom: 3),
-                      child: Text(
-                        unit,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ),
                   ],
+                ),
+                const SizedBox(height: 6),
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: double.tryParse(val) ?? 0),
+                  duration: const Duration(milliseconds: 600),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, v, _) {
+                    final text = val.contains('.')
+                        ? v.toStringAsFixed(1)
+                        : v.round().toString();
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          text,
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 2, bottom: 3),
+                          child: Text(
+                            unit,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -403,11 +432,11 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return Row(
       children: [
-        stat('读过', '${_entries.length}', '本'),
+        stat(AppIcons.bookshelf, '读过', '${_entries.length}', '本'),
         const SizedBox(width: 8),
-        stat('累计', '36.5', 'h'),
+        stat(AppIcons.materialFx, '累计', '36.5', 'h'),
         const SizedBox(width: 8),
-        stat('连续', '5', '天'),
+        stat(AppIcons.pageTint, '连续', '5', '天'),
       ],
     );
   }
@@ -418,13 +447,8 @@ class _HomePageState extends ConsumerState<HomePage> {
         ? <double>[0, 0, 0, 0, 0, 0, 0]
         : <double>[12, 28, 8, 35, 22, 41, _todayMinutes.toDouble()];
     final week = base.fold<double>(0, (a, b) => a + b);
-    return Card(
-      elevation: 0,
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _FrostChromeCard(
+      scheme: scheme,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Column(
@@ -451,12 +475,17 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ],
                   ),
                 ),
-                Text(
-                  '${week.round()}',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w800,
-                      ),
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: week),
+                  duration: const Duration(milliseconds: 700),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, v, _) => Text(
+                    '${v.round()}',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
                 ),
                 Text(
                   ' 分钟',
@@ -469,12 +498,19 @@ class _HomePageState extends ConsumerState<HomePage> {
             const SizedBox(height: 10),
             SizedBox(
               height: 136,
-              child: CustomPaint(
-                painter: _WeekLinePainter(
-                  values: base,
-                  line: scheme.primary,
-                  track: scheme.outlineVariant.withValues(alpha: 0.45),
-                ),
+              child: TweenAnimationBuilder<List<double>>(
+                tween: ListTween(base),
+                duration: const Duration(milliseconds: 700),
+                curve: Curves.easeOutCubic,
+                builder: (context, values, _) {
+                  return CustomPaint(
+                    painter: _WeekLinePainter(
+                      values: values,
+                      line: scheme.primary,
+                      track: scheme.outlineVariant.withValues(alpha: 0.45),
+                    ),
+                  );
+                },
               ),
             ),
             const SizedBox(height: 6),
@@ -494,6 +530,42 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
       ),
     );
+  }
+}
+
+/// chrome 卡：轻霜/tonal（对齐设置页），封面海报则用取色投影，不套霜
+class _FrostChromeCard extends StatelessWidget {
+  const _FrostChromeCard({required this.scheme, required this.child});
+  final ColorScheme scheme;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppGlass.settingsCardRadius),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.38),
+        border: Border.all(
+          color: AppGlass.floatRowRim(scheme).withValues(alpha: 0.6),
+          width: 0.6,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+class ListTween extends Tween<List<double>> {
+  ListTween(List<double> end) : super(begin: List.filled(end.length, 0), end: end);
+
+  @override
+  List<double> lerp(double t) {
+    final a = begin ?? const <double>[];
+    final b = end ?? const <double>[];
+    return [
+      for (var i = 0; i < b.length; i++)
+        (i < a.length ? a[i] : b[i]) * (1 - t) + b[i] * t,
+    ];
   }
 }
 

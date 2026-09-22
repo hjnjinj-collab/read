@@ -37,6 +37,17 @@ commits: 9fc7d94..HEAD
 | Hero 外还有一层 Card | **去掉外包装**；与书架顶条一样直接海报块（圆点叠在块上） |
 | 最近阅读下留白 | 收紧 bottom pad / 加高图表与横滑，消掉无效空白 |
 
+### 首页质感（真机再一轮）
+
+| 项 | 契约 |
+|----|------|
+| 续读封面 | 加大（约 56×80 → 64×92） |
+| 继续按钮 | 提高不透明度（restPill α 提高或 primaryContainer 近实色）+ 文字 onPrimaryContainer |
+| Hero 切换 | 明确 **Fade + 轻 Slide** 过渡，禁止双帧叠影 |
+| 折线 / 统计 | 数据变化 **补间过渡**；统计加 Iconsax 图标 |
+| 封面投影 | 封面类卡片用 **CoverPalette 取色阴影** 悬浮感 |
+| 外层卡霜层 | **设计结论**：统计/图表等 chrome 卡 **采用霜层/tonal 轻霜**（对齐设置页）；封面海报 **不套霜**（用取色投影），避免材质打架 |
+
 ## [S3] Out of Scope
 
 真实时长埋点、WebDav 卡、solid 底栏与玻璃底栏 IA 完全统一
@@ -48,3 +59,4 @@ commits: 9fc7d94..HEAD
 - [x] T3: HomePage 模块布局 (covers: S2)
 - [x] T4: analyze 无新增 (covers: S2)
 - [x] T5: Hero 定高 128 + M3 异变环 + 去外层 Card + 收底留白 (covers: S2 Hero)
+- [x] T6: 封面放大+按钮实色+Hero/折线/统计过渡+取色投影+chrome 霜层 (covers: S2 质感)
