@@ -4,22 +4,25 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+
 import '../../../../core/database/app_database.dart' show Note;
 import '../../../../core/ffi/book_service.dart' show CoverStore;
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/cover_palette.dart';
-import '../services/book_image_store.dart';
-import '../providers/reader_provider.dart';
+import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
+import '../providers/reader_provider.dart';
+import '../services/book_image_store.dart';
+import '../widgets/book_search_dialog.dart';
+import '../widgets/chapter_list_dialog.dart';
 import '../widgets/image_zoom_viewer.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/page_turn_composer.dart';
 import '../widgets/reader_chrome.dart';
-import '../widgets/chapter_list_dialog.dart';
-import '../widgets/book_search_dialog.dart';
-import '../widgets/reader_settings_dialog.dart';
 import '../widgets/reader_page_widget.dart';
+import '../widgets/reader_visual_settings_sheet.dart';
 import '../widgets/selection_highlight_painter.dart';
 import '../widgets/text_selection_overlay.dart';
 
@@ -940,10 +943,25 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                             onSettings: () {
                               // ignore: avoid_print
                               print('[reader-chrome] open settings');
-                              showDialog(
+                              final scheme = Theme.of(context).colorScheme;
+                              final shell = ref.read(shellSettingsProvider);
+                              // 液态玻璃 sheet：与圆键同源 shellFrostLiquidStyle。
+                              // Impeller：blur 强制 0（blur≠0 挂 BF → 正文缩放）。
+                              // 禁止 LiquidGlassBatch（见 progress-summary）。
+                              showLiquidGlassSheet(
                                 context: context,
+                                isScrollControlled: true,
+                                anchor: LiquidGlassSheetAnchor.attached,
+                                grabber: true,
+                                style: shellFrostLiquidStyle(
+                                  scheme,
+                                  navBlur: 0,
+                                  navTint: shell.navTintStrength,
+                                  radius: 28,
+                                ),
+                                foregroundColor: scheme.onSurface,
                                 builder: (context) =>
-                                    const ReaderSettingsDialog(),
+                                    const ReaderVisualSettingsSheet(),
                               );
                             },
                             onMore: () => readerChromeStub(context, '更多动作'),
