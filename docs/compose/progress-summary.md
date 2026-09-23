@@ -14,7 +14,7 @@
 | 阅读菜单设计 | 对标 `legado-with-MD3`，双套 chrome + HTML 可点原型 | **设计完成**（多轮 present commit） |
 | 阅读 UI 外壳 | `reader_chrome.dart` T0：顶栏/A/B 底栏/工具球 | **已实现，待真机**（未 commit） |
 | 防泄露修正 | 恢复液态玻璃 + ClipOval 裁切；BF 渐变垫仅菜单态 | **已改**（ClipOval 实为液态杀手，已换 Batch/Clip.none） |
-| 状态栏沉浸 + 液态修复 | 纸色铺满；圆键同源 shellFrost；键 52；顶距收紧；底栏 60/208；底部雾加浓 | **已实现**（待 push） |
+| 阅读菜单控件 | 固定液态胶囊齿轮循环+图标；方式\|速度并栏；亮度行 | **已实现**（未 commit） |
 
 远端：`origin/master` @ `2b187d0`（及之前的 present commit）。  
 工作区未提交：`reader_chrome.dart`（新）、`reader_page.dart`、`reader-menu-chrome-ia.md`、本文件。

@@ -96,8 +96,8 @@ class ExpandableGlassNav extends StatelessWidget {
       barW = (available - circle - 4).clamp(80.0, _barW);
     }
     // 展开态：左圆键 + gap + 面板
-    // 展开面板与收起主胶囊**同宽**（禁止撑到 available——真机展开会莫名变大）
-    final panelW = barW;
+    // 展开面板：居右、向右满宽填充（原布局）；只缩高度/收起 barW，不改位置与动画
+    final panelW = (available - circle - tightGap).clamp(120.0, available);
 
     // 主胶囊只承载 0–2；设置（3）时无段选中，禁止 clamp 成「书源」。
     // selectedIndex 仅服务 pill/断言；点击用内层 GestureDetector 自接管，

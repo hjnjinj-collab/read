@@ -193,7 +193,6 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   bool _lastIdleViewportMismatch = false;
 
   /// 绘制层自愈兜底的防抖标记（帧末一次性调度）
-  bool _viewportFixInFlight = false;
 
   /// 权威 viewport（SafeArea 内实际可用区域，逻辑像素）
   ///
@@ -1850,9 +1849,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 约束，必须与排版 LayoutConfig（notifier.screenWidth/Height）一致；
     // 不一致 = 移动端「内容偏右/右侧空白消失」类几何错位的直接证据。
     return LayoutBuilder(builder: (context, constraints) {
+      // >2px 才算真 mismatch：菜单开合/亚像素抖动不得触发空白+重排
+      // （观感像正文缩放/跳动）。
       final mismatch =
-          (constraints.maxWidth - notifier.screenWidth).abs() > 0.5 ||
-              (constraints.maxHeight - notifier.screenHeight).abs() > 0.5;
+          (constraints.maxWidth - notifier.screenWidth).abs() > 2.0 ||
+              (constraints.maxHeight - notifier.screenHeight).abs() > 2.0;
       if (mismatch != _lastIdleViewportMismatch) {
         _lastIdleViewportMismatch = mismatch;
         final mq = MediaQuery.maybeOf(context);
@@ -1869,28 +1870,11 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           },
         });
       }
-      // 绘制层自愈兜底（第二道防线）：画布约束 ≠ 排版宽说明重排链
-      // 某环被吞（如 resize 事件与 openBook 竞态）——帧末强制按当前
-      // 约束重排一次。onWindowResized 自带判等守卫 + 分页缓存键隔离，
-      // 与 reader_page 的 LayoutBuilder 调度重复调用幂等。
-      if (mismatch && !_viewportFixInFlight) {
-        _viewportFixInFlight = true;
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _viewportFixInFlight = false;
-          if (!mounted) return;
-          // 保留已登记 systemTop（onWindowResized 省略时不清零）
-          ref.read(readerProvider.notifier).onWindowResized(w, h);
-        });
-      }
-      // v6 修复（重影根因）：resize 风暴期间 mismatch=true 时绘制旧尺寸
-      // page 与新尺寸 canvas 错位 → 视觉重影/左右偏。mismatch 时返回空
-      // SizedBox 不绘制任何内容，让重排 commit 后再渲染——避免错误
-      // size 的 page 在屏幕上闪现，也避免双版本共存视觉重影。
-      if (mismatch) {
-        return const SizedBox.expand();
-      }
+      // viewport 只由 reader_page 外层 LayoutBuilder 登记。这里不能在绘制
+      // 子树内反向触发 onWindowResized：菜单 chrome 的挂载/重建若造成一次
+      // 短暂约束差异，会被误判为窗口变化并触发整章重排，Windows 上表现为
+      // 正文缩放、位移或闪空白。短暂 mismatch 仍使用当前画布绘制，避免正文
+      // 因 chrome 重建被清空；真实窗口变化由外层防抖路径处理。
       // A31 布局层单轨：笔记已写入 pageInfo.segments，此处不再传 notes
       return RepaintBoundary(
         child: ReaderPageWidget(

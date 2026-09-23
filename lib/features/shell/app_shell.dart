@@ -250,8 +250,8 @@ class _SolidBottomNav extends StatelessWidget {
     if (barW + circle > available) {
       barW = (available - circle - 4).clamp(80.0, _barW);
     }
-    // 展开面板与收起主胶囊同宽，避免展开后尺寸暴涨
-    final panelW = barW;
+    // 展开面板：居右、向右满宽填充（与玻璃同构原布局）
+    final panelW = (available - circle - tightGap).clamp(120.0, available);
 
     final mainHasSel = selectedIndex <= 2;
     final mainBar = ClipRRect(

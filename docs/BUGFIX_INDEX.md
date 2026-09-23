@@ -1,6 +1,6 @@
 # Bug 修复索引
 
-> 最后更新: 2026-09-19
+> 最后更新: 2026-09-23
 > 用途：遇到问题时按**症状**或**错误信息**快速定位到根因和修复方案。
 > 详细修复步骤在 [BUG_FIXES.md](./BUG_FIXES.md)；单次问题的完整分析报告在 [bugfixes/](./bugfixes/)。
 
@@ -28,6 +28,7 @@
 | **真实书籍目录标题全空/无嵌套，合成测试书正常** | roxmltree 默认拒绝带 DOCTYPE 的 XML（`XML with DTD detected`） | [bugfixes/2026-08-22_roxmltree拒绝DTD致目录全空](./bugfixes/2026-08-22_roxmltree拒绝DTD致目录全空.md) ⭐ parse_with_options(allow_dtd:true) |
 | **EPUB 普通正文被误判为本章说（灰色小字）** | CSS 兜底门槛过宽：font_scale<0.85 + 字数<200 捕获普通小字号段落 | A15：门槛收紧 0.85→0.75 + 字数 200→150 + 三重验证（祖先链/类名/孤立块） |
 | **底部留白过大（长段落推下页场景）** | 90% 阈值仅对可拆分段落有效，长段落无法容纳时整段推下页 | A15：场景 B（低填充率<50% 首行强制留当前页）+ 场景 C（标题孤立避免） |
+| **进入阅读页/开菜单时正文缩放、清晰度变化** | `liquid_glass_lite` 在 `LiquidGlassBlur(sigma≠0)` 时挂 `BackdropFilter`；阅读页 Rust 文本画布 + BF = Impeller 缩放 | `reader_chrome.dart` `ReaderGlassCircle`：`navBlur: 0` + `shadow: null`；`ReaderBlurVeil` 纯渐变禁 BF；`_GlassTrackSlider` 纯绘制无 BF |
 | **EPUB 正文行截断+下一行重复整段前缀（超宽行被 Dart 缩字渲染成"小字行"，看似本章说误标+内容重复）** | **断行禁则回退（M7-P4）flush 后未清空 pieces 已发射前缀，pulled 压在前缀之上——下一行重复发射整个前缀；EPUB styled 与 TXT 双路径同源** | M9.1：pull-back 分支 flush 后 `pieces.clear()` 再保留 pulled（layout_engine lib.rs 双路径）；回归测试 `kinsoku_pullback_no_text_duplication` + 真书探针 `jianlai_ch2_probe` 永久断言 |
 | **表格单元格内容出现"首行提前换行但不右移"的破碎缩进** | CSS text-indent 经选择器/继承渗入单元格段落，三层链路（解析物化→IR 透传→布局渲染）无一处按容器上下文过滤；表格内只裁宽度不加 x 偏移 | M9.2：解析层 `clear_cell_indent` 递归清零（epub_parser Table 分支）+ 转换层强制 None（api.rs blocks_to_layout_items）；List/Quote 内段落属合法缩进保留 |
 | **重新分段开启后超长段原样保留（TXT 尤甚）** | TXT Smart 模式只做软换行合并**从不切长段**；EPUB 切分器缺 ASCII 句读、回退扫全文无上界、cut==total 产空尾段、省略号可从中间切、闭引号悬段首、子段丢 align | M9.2：共享切分器 `paragraph_splitter.rs`（区间契约）双路径统一；阈值 Smart/Aggressive **用户可调**（默认 200/100，设置面板滑杆）；强标点纯 CJK 集+次级有界回退+闭标吸附+省略号原子+尾段再平衡；切口后剩余内容作为新段落从头计数继续切分（split_ranges while 循环不变式） |

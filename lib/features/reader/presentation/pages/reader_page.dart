@@ -34,8 +34,14 @@ class ReaderPage extends ConsumerStatefulWidget {
 }
 
 class _ReaderPageState extends ConsumerState<ReaderPage> {
-  bool _showMenu = false;
+  /// 菜单显隐用 ValueNotifier：开合**不整页 setState**，
+  /// 避免正文 CustomPaint/viewport 自愈链被触发（观感像缩放/跳动）。
+  final ValueNotifier<bool> _menuVisible = ValueNotifier(false);
   ReaderChromeMode _chromeMode = ReaderChromeMode.traditional;
+
+  /// 页面亮度 0.25–1。用 ValueNotifier：拖动只重绘遮罩/滑轨，
+  /// **禁止**整页 setState（CustomPaint 重建会导致首拖卡住）。
+  final ValueNotifier<double> _pageBrightness = ValueNotifier(1.0);
   /// 封面提取色：顶栏雾 tint 用 dominant，与书架描边/氛围同调
   // 顶栏取色预留（chrome 第二轮接入）
   // ignore: unused_field
@@ -115,6 +121,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   @override
   void dispose() {
     _longPressTimer?.cancel();
+    _menuVisible.dispose();
+    _pageBrightness.dispose();
     final notifier = _notifier;
     _notifier = null;
     // dispose 期间不得改 provider（会触发 building 中 modify 崩溃）
@@ -125,9 +133,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   void _toggleMenu() {
-    setState(() {
-      _showMenu = !_showMenu;
-    });
+    _menuVisible.value = !_menuVisible.value;
   }
 
   /// A31-bugfix: 点击已有笔记高亮 → 弹出编辑/删除菜单
@@ -781,122 +787,158 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 ),
               ),
 
-            // Top status bar（桌面常显返回键；移动端仅菜单态露出标题条）
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Builder(builder: (context) {
-                final desktop = defaultTargetPlatform == TargetPlatform.windows ||
-                    defaultTargetPlatform == TargetPlatform.linux ||
-                    defaultTargetPlatform == TargetPlatform.macOS;
-                final showBar = _showMenu || desktop;
-                if (!showBar) return const SizedBox.shrink();
-                return ReaderTopChrome(
-                  withVeil: _showMenu,
-                  title: state.bookTitle ?? '',
-                  pageLabel:
-                      '${state.currentChapterIndex + 1}/${state.chapters.length}',
-                  onBack: () => Navigator.of(context).maybePop(),
-                  onMore: () async {
-                    final action = await showMenu<String>(
-                      context: context,
-                      position: RelativeRect.fromLTRB(
-                        MediaQuery.sizeOf(context).width - 72,
-                        48,
-                        12,
-                        0,
-                      ),
-                      items: const [
-                        PopupMenuItem(value: 'theme', child: Text('切换明暗')),
-                        PopupMenuItem(value: 'mode', child: Text('切换菜单形态')),
-                        PopupMenuItem(value: 'close', child: Text('关闭菜单')),
-                      ],
-                    );
-                    if (!context.mounted || action == null) return;
-                    if (action == 'theme') _toggleThemeDark();
-                    if (action == 'mode') {
-                      setState(() {
-                        _chromeMode = _chromeMode == ReaderChromeMode.traditional
-                            ? ReaderChromeMode.floating
-                            : ReaderChromeMode.traditional;
-                      });
-                    }
-                    if (action == 'close') setState(() => _showMenu = false);
-                  },
+            // 页面亮度遮罩（与滑轨共用 ValueNotifier，不触发整页重建）
+            ValueListenableBuilder<double>(
+              valueListenable: _pageBrightness,
+              builder: (context, b, _) {
+                if (b >= 0.995) return const SizedBox.shrink();
+                return Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 1 - b),
+                    ),
+                  ),
                 );
-              }),
+              },
             ),
 
-            // Bottom menu shell（A 传统 / B 悬浮；设置内页后续迁入）
-            if (_showMenu)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Builder(builder: (context) {
-                  final notifier = ref.read(readerProvider.notifier);
-                  final pageCount = state.currentChapterPageCount;
-                  final progress = pageCount <= 0
-                      ? 0.0
-                      : state.currentPageIndex / (pageCount > 1 ? pageCount - 1 : 1);
-                  return ReaderBottomChrome(
-                    mode: _chromeMode,
-                    onToggleMode: () => setState(() {
-                      _chromeMode =
-                          _chromeMode == ReaderChromeMode.traditional
-                              ? ReaderChromeMode.floating
-                              : ReaderChromeMode.traditional;
-                    }),
-                    progress: progress.clamp(0, 1),
-                    progressLabel: pageCount <= 0
-                        ? '—'
-                        : '${state.currentPageIndex + 1}/$pageCount',
-                    onSeek: (t) {
-                      if (pageCount <= 0) return;
-                      final idx =
-                          (t * (pageCount > 1 ? pageCount - 1 : 0)).round();
-                      notifier.jumpToPage(idx);
-                    },
-                    fontSize: notifier.fontSize,
-                    onFontSize: (v) {
-                      ref.read(readerProvider.notifier).setFontSize(v);
-                      setState(() {});
-                    },
-                    pageTurnMode: notifier.pageTurnMode,
-                    onPageTurnMode: _setPageTurnMode,
-                    pageTurnSpeed: notifier.pageTurnSpeed,
-                    onPageTurnSpeed: _setPageTurnSpeed,
-                    onCatalog: () {
-                      // ignore: avoid_print
-                      print('[reader-chrome] open catalog');
-                      showDialog(
-                        context: context,
-                        builder: (context) => const ChapterListDialog(),
-                      );
-                    },
-                    onSearch: () {
-                      // ignore: avoid_print
-                      print('[reader-chrome] open search');
-                      showDialog(
-                        context: context,
-                        builder: (context) => const BookSearchDialog(),
-                      );
-                    },
-                    onBookmark: () => readerChromeStub(context, '书签'),
-                    onNotes: () => readerChromeStub(context, '笔记'),
-                    onSettings: () {
-                      // ignore: avoid_print
-                      print('[reader-chrome] open settings');
-                      showDialog(
-                        context: context,
-                        builder: (context) => const ReaderSettingsDialog(),
-                      );
-                    },
-                    onMore: () => readerChromeStub(context, '更多动作'),
-                  );
-                }),
-              ),
+            // Top/Bottom chrome：菜单显隐只重建本段，**不碰正文**
+            ValueListenableBuilder<bool>(
+              valueListenable: _menuVisible,
+              builder: (context, menuOn, _) {
+                final desktop =
+                    defaultTargetPlatform == TargetPlatform.windows ||
+                        defaultTargetPlatform == TargetPlatform.linux ||
+                        defaultTargetPlatform == TargetPlatform.macOS;
+                final showBar = menuOn || desktop;
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    if (showBar)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Builder(builder: (context) {
+                          return ReaderTopChrome(
+                            withVeil: menuOn,
+                            title: state.bookTitle ?? '',
+                            pageLabel:
+                                '${state.currentChapterIndex + 1}/${state.chapters.length}',
+                            onBack: () => Navigator.of(context).maybePop(),
+                            onMore: () async {
+                              final action = await showMenu<String>(
+                                context: context,
+                                position: RelativeRect.fromLTRB(
+                                  MediaQuery.sizeOf(context).width - 72,
+                                  48,
+                                  12,
+                                  0,
+                                ),
+                                items: const [
+                                  PopupMenuItem(
+                                      value: 'theme', child: Text('切换明暗')),
+                                  PopupMenuItem(
+                                      value: 'mode', child: Text('切换菜单形态')),
+                                  PopupMenuItem(
+                                      value: 'close', child: Text('关闭菜单')),
+                                ],
+                              );
+                              if (!context.mounted || action == null) return;
+                              if (action == 'theme') _toggleThemeDark();
+                              if (action == 'mode') {
+                                setState(() {
+                                  _chromeMode =
+                                      _chromeMode == ReaderChromeMode.traditional
+                                          ? ReaderChromeMode.floating
+                                          : ReaderChromeMode.traditional;
+                                });
+                              }
+                              if (action == 'close') _menuVisible.value = false;
+                            },
+                          );
+                        }),
+                      ),
+                    // Bottom menu shell（A 传统 / B 悬浮）
+                    if (menuOn)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Builder(builder: (context) {
+                          final notifier = ref.read(readerProvider.notifier);
+                          final pageCount = state.currentChapterPageCount;
+                          final progress = pageCount <= 0
+                              ? 0.0
+                              : state.currentPageIndex /
+                                  (pageCount > 1 ? pageCount - 1 : 1);
+                          return ReaderBottomChrome(
+                            mode: _chromeMode,
+                            onToggleMode: () => setState(() {
+                              _chromeMode =
+                                  _chromeMode == ReaderChromeMode.traditional
+                                      ? ReaderChromeMode.floating
+                                      : ReaderChromeMode.traditional;
+                            }),
+                            progress: progress.clamp(0, 1),
+                            progressLabel: pageCount <= 0
+                                ? '—'
+                                : '${state.currentPageIndex + 1}/$pageCount',
+                            onSeek: (t) {
+                              if (pageCount <= 0) return;
+                              final idx =
+                                  (t * (pageCount > 1 ? pageCount - 1 : 0))
+                                      .round();
+                              notifier.jumpToPage(idx);
+                            },
+                            brightness: _pageBrightness,
+                            onBrightness: (v) {
+                              _pageBrightness.value = v.clamp(0.25, 1.0);
+                            },
+                            fontSize: notifier.fontSize,
+                            onFontSize: (v) {
+                              ref.read(readerProvider.notifier).setFontSize(v);
+                              setState(() {});
+                            },
+                            pageTurnMode: notifier.pageTurnMode,
+                            onPageTurnMode: _setPageTurnMode,
+                            pageTurnSpeed: notifier.pageTurnSpeed,
+                            onPageTurnSpeed: _setPageTurnSpeed,
+                            onCatalog: () {
+                              // ignore: avoid_print
+                              print('[reader-chrome] open catalog');
+                              showDialog(
+                                context: context,
+                                builder: (context) => const ChapterListDialog(),
+                              );
+                            },
+                            onSearch: () {
+                              // ignore: avoid_print
+                              print('[reader-chrome] open search');
+                              showDialog(
+                                context: context,
+                                builder: (context) => const BookSearchDialog(),
+                              );
+                            },
+                            onBookmark: () => readerChromeStub(context, '书签'),
+                            onNotes: () => readerChromeStub(context, '笔记'),
+                            onSettings: () {
+                              // ignore: avoid_print
+                              print('[reader-chrome] open settings');
+                              showDialog(
+                                context: context,
+                                builder: (context) =>
+                                    const ReaderSettingsDialog(),
+                              );
+                            },
+                            onMore: () => readerChromeStub(context, '更多动作'),
+                          );
+                        }),
+                      ),
+                  ],
+                );
+              },
+            ),
               ],
             ); // Stack
         }, // LayoutBuilder builder
