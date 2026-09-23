@@ -36,6 +36,7 @@ class ShellSettings {
     this.frostGradB,
     this.frostGradDepth = 1.0,
     this.lgMotionOn = true,
+    this.readerChromeMode = 'traditional',
   });
 
   final bool bookshelfGrid;
@@ -106,6 +107,9 @@ class ShellSettings {
 
   /// 液态玻璃果冻/形变效果开关（滑杆 squash、分段鼓动等）
   final bool lgMotionOn;
+
+  /// 阅读菜单形态：traditional | floating
+  final String readerChromeMode;
 
   static const List<String> ambientDirs = [
     'tlbr',
@@ -223,6 +227,11 @@ class ShellSettings {
         frostGradDepth:
             (map['frostGradDepth'] as num?)?.toDouble() ?? 1.0,
         lgMotionOn: map['lgMotionOn'] as bool? ?? true,
+        readerChromeMode: switch (map['readerChromeMode'] as String?) {
+          'floating' => 'floating',
+          'traditional' => 'traditional',
+          _ => 'traditional',
+        },
       );
     } catch (_) {
       return const ShellSettings();
@@ -256,6 +265,7 @@ class ShellSettings {
         'frostGradB': frostGradB,
         'frostGradDepth': frostGradDepth,
         'lgMotionOn': lgMotionOn,
+        'readerChromeMode': readerChromeMode,
       });
 
   ShellSettings copyWith({
@@ -284,6 +294,7 @@ class ShellSettings {
     bool clearFrostGradB = false,
     double? frostGradDepth,
     bool? lgMotionOn,
+    String? readerChromeMode,
   }) {
     return ShellSettings(
       bookshelfGrid: bookshelfGrid ?? this.bookshelfGrid,
@@ -311,6 +322,7 @@ class ShellSettings {
           clearFrostGradB ? null : (frostGradB ?? this.frostGradB),
       frostGradDepth: frostGradDepth ?? this.frostGradDepth,
       lgMotionOn: lgMotionOn ?? this.lgMotionOn,
+      readerChromeMode: readerChromeMode ?? this.readerChromeMode,
     );
   }
 }
@@ -468,6 +480,11 @@ class ShellSettingsNotifier extends Notifier<ShellSettings> {
   void setLgMotionOn(bool value) {
     if (state.lgMotionOn == value) return;
     _persist(state.copyWith(lgMotionOn: value));
+  }
+
+  void setReaderChromeMode(String mode) {
+    if (state.readerChromeMode == mode) return;
+    _persist(state.copyWith(readerChromeMode: mode));
   }
 }
 

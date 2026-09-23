@@ -1,9 +1,9 @@
 ---
 feature: reader-menu-chrome-ia
 status: in-progress
-updated: 2026-09-20
+updated: 2026-09-23
 branch: master
-commits: 2b187d0..HEAD
+commits: c84cfa2..uncommitted
 ---
 
 # 阅读菜单 Chrome · 双套布局（草稿）
@@ -170,11 +170,25 @@ commits: 2b187d0..HEAD
 - 顶栏合并按钮的最终视觉
 - 点击分区/手势设置（另稿）
 
-## Tasks（下轮实现时启用）
+## Tasks（三阶段实施计划）
 
-- [x] T0: **外层壳子（本轮）** — 顶栏液态圆键（返回/书名/页码/更多）+ A 传统毛玻璃底板（进度/字号/翻页/速度/工具球排）+ B 悬浮工具球排；工具打开既有目录/搜索/设置对话框 — acceptance: 菜单态可见完整外壳；液态圆键可点；A/B 可切换布局 (covers: S2.1,S2.2,S2.2B)
-- [ ] T1: 菜单形态开关持久化 + A 传统底栏工具排（5 均分、字面可关） — acceptance: 切换形态布局即时变；A 排可进 5 动作 (covers: S2.1,S2.2A)
-- [ ] T2: B 悬浮圆键排 + 液态开关 + 溢出更多 — acceptance: 与 A 动作 id 对齐；液态/tonal 可切；≥6 收纳 (covers: S2.2B; depends: T1)
-- [ ] T3: 图标风格三档 / 每行·行数 — acceptance: 设置改后两套同步生效 (covers: S2.2)
-- [ ] T4: 设置面四页 IA 落地 — acceptance: 形态/排版/背景/材质可改且持久化 (covers: S2.4; depends: T1,T2)
-- [ ] T5: 验证 + 真机 — acceptance: analyze 无新增；减弱动态/Impeller 约束不破 (covers: S2.5)
+### Phase 1：菜单完善
+
+- [x] T0: 外层壳子 — 顶栏液态圆键 + A 传统底板 + B 悬浮工具球排 (covers: S2.1,S2.2)
+- [ ] T1.1: 形态持久化：`_chromeMode` 写入 ShellSettings，重进阅读记住上次形态 — acceptance: 切换→退出→重进，形态不变 (covers: S2.1)
+- [ ] T1.2: 传统底栏工具排对齐 IA：5 均分、glyph 22–24、label 11–12 — acceptance: 与设置页图标排视觉一致 (covers: S2.2A)
+- [ ] T1.3: 悬浮模式圆键排完善：间距 8、居中对齐、第 6 个进「更多」 — acceptance: ≥6 动作收纳进溢出菜单 (covers: S2.2B)
+
+### Phase 2：设置四页
+
+- [ ] T2.1: 形态与图标页：传统/悬浮切换、图标风格三档、每行个数、行数 — acceptance: 改后两套 chrome 同步生效 (covers: S2.4; depends: T1.1)
+- [ ] T2.2: 排版布局页：字体/字号/行距/段距/字距 + 标题 + 页眉页脚 + 边距 — acceptance: 参数持久化，正文实时刷新 (covers: S2.4)
+- [ ] T2.3: 背景主题页：日夜背景色/图/透明度 + 内置背景图网格 + 预设主题卡 — acceptance: 背景切换即时生效 (covers: S2.4)
+- [ ] T2.4: 材质与顶栏页：面板圆角/模糊档、悬浮键液态开关、合并顶栏按钮 — acceptance: 材质参数与设置页同源 (covers: S2.4)
+- [ ] T2.5: 字体选择 sheet：系统字体 + 字体文件夹 + 文件网格 + 选中高亮 — acceptance: 选字体后正文实时刷新 (covers: S2.4)
+
+### Phase 3：验证与收尾
+
+- [ ] T3.1: 全量 flutter analyze — acceptance: 零新增 error (covers: S2.6)
+- [ ] T3.2: Windows + 手机真机验证 — acceptance: 无缩放、无阴影、交互流畅 (covers: S2.6,S2.7)
+- [ ] T3.3: 更新 progress-summary + spec 收口 + 提交推送 — acceptance: 文档与代码同步 (covers: S2)

@@ -197,7 +197,7 @@ class ReaderToolBall extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 color: scheme.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
@@ -364,8 +364,19 @@ class ReaderBottomChrome extends StatelessWidget {
         ReaderToolBall(icon: Icons.bookmark_outline, label: '书签', onTap: onBookmark),
         ReaderToolBall(icon: Icons.edit_note_rounded, label: '笔记', onTap: onNotes),
         ReaderToolBall(icon: Icons.settings_outlined, label: '设置', onTap: onSettings),
+        // 第 6 个：溢出「更多」→ 下拉菜单收纳额外动作
+        ReaderToolBall(
+          icon: Icons.more_horiz_rounded,
+          label: '更多',
+          onTap: () => _showOverflowMenu(),
+        ),
       ],
     );
+  }
+
+  void _showOverflowMenu() {
+    // 溢出动作：上/下章、自动翻页、朗读（后续接线）
+    // 当前用 stub，与 onCatalog/onSearch 等同层
   }
 
   @override
@@ -387,11 +398,37 @@ class ReaderBottomChrome extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 _tools(),
-                TextButton(
-                  onPressed: onToggleMode,
-                  child: Text(
-                    '传统形态',
-                    style: TextStyle(fontSize: 13, color: scheme.primary),
+                Center(
+                  child: GestureDetector(
+                    onTap: onToggleMode,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppGlass.restPillTint(scheme),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Colors.white.withValues(
+                            alpha: scheme.brightness == Brightness.light
+                                ? 0.42
+                                : 0.24,
+                          ),
+                          width: 1.0,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          '传统形态',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -452,11 +489,35 @@ class ReaderBottomChrome extends StatelessWidget {
                         onTap: () => onFontSize((fontSize + 1).clamp(12, 28)),
                       ),
                       const Spacer(),
-                      TextButton(
-                        onPressed: onToggleMode,
-                        child: Text(
-                          '悬浮形态',
-                          style: TextStyle(fontSize: 13, color: scheme.primary),
+                      GestureDetector(
+                        onTap: onToggleMode,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppGlass.restPillTint(scheme),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(
+                                alpha: scheme.brightness == Brightness.light
+                                    ? 0.42
+                                    : 0.24,
+                              ),
+                              width: 1.0,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            child: Text(
+                              '悬浮形态',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -581,7 +642,7 @@ class ReaderBottomChrome extends StatelessWidget {
     );
   }
 
-  /// 进度滑轨：无 BF 玻璃外观，不触发 Impeller 缩放。
+  /// 进度滑轨：纯绘制（LiquidGlassSlider 内部 BF 触发缩放）
   Widget _liquidProgress(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return _GlassTrackSlider(
@@ -1032,13 +1093,13 @@ class _GearScrollPickerState extends State<_GearScrollPicker> {
           Positioned(
             child: IgnorePointer(
               child: SizedBox(
-                width: 72,
-                height: 44,
+                width: 60,
+                height: 36,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     // 与设置页 LiquidValueSegmented pill 同色
                     color: AppGlass.restPillTint(scheme),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: Colors.white.withValues(
                         alpha: scheme.brightness == Brightness.light

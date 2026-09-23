@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +10,7 @@ import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/cover_palette.dart';
 import '../services/book_image_store.dart';
 import '../providers/reader_provider.dart';
+import '../../../shell/providers/shell_settings.dart';
 import '../widgets/image_zoom_viewer.dart';
 import '../widgets/page_turn/page_turn_gesture.dart';
 import '../widgets/page_turn/page_turn_types.dart';
@@ -99,6 +99,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   void initState() {
     super.initState();
     _notifier = ref.read(readerProvider.notifier);
+    // 从 ShellSettings 读取持久化的菜单形态
+    final savedMode = ref.read(shellSettingsProvider).readerChromeMode;
+    _chromeMode = savedMode == 'floating'
+        ? ReaderChromeMode.floating
+        : ReaderChromeMode.traditional;
     _loadCoverTint();
     // 转场一插入就开书：620ms 缩放期间完成解析/分页，落地不再闪 "No content"。
     // viewport 由首帧 LayoutBuilder 登记；openBook 内部读 notifier 的
@@ -806,11 +811,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             ValueListenableBuilder<bool>(
               valueListenable: _menuVisible,
               builder: (context, menuOn, _) {
-                final desktop =
-                    defaultTargetPlatform == TargetPlatform.windows ||
-                        defaultTargetPlatform == TargetPlatform.linux ||
-                        defaultTargetPlatform == TargetPlatform.macOS;
-                final showBar = menuOn || desktop;
+                final showBar = menuOn;
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -853,6 +854,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                           ? ReaderChromeMode.floating
                                           : ReaderChromeMode.traditional;
                                 });
+                                ref.read(shellSettingsProvider.notifier)
+                                    .setReaderChromeMode(
+                                  _chromeMode == ReaderChromeMode.floating
+                                      ? 'floating'
+                                      : 'traditional',
+                                );
                               }
                               if (action == 'close') _menuVisible.value = false;
                             },
@@ -874,12 +881,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                   (pageCount > 1 ? pageCount - 1 : 1);
                           return ReaderBottomChrome(
                             mode: _chromeMode,
-                            onToggleMode: () => setState(() {
-                              _chromeMode =
-                                  _chromeMode == ReaderChromeMode.traditional
-                                      ? ReaderChromeMode.floating
-                                      : ReaderChromeMode.traditional;
-                            }),
+                            onToggleMode: () {
+                              setState(() {
+                                _chromeMode =
+                                    _chromeMode == ReaderChromeMode.traditional
+                                        ? ReaderChromeMode.floating
+                                        : ReaderChromeMode.traditional;
+                              });
+                              ref.read(shellSettingsProvider.notifier)
+                                  .setReaderChromeMode(
+                                _chromeMode == ReaderChromeMode.floating
+                                    ? 'floating'
+                                    : 'traditional',
+                              );
+                            },
                             progress: progress.clamp(0, 1),
                             progressLabel: pageCount <= 0
                                 ? '—'
