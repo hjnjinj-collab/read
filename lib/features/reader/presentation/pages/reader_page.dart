@@ -811,21 +811,64 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             ),
 
             // Top/Bottom chrome：菜单显隐只重建本段，**不碰正文**
+            // 动效：仅 Slide（禁止 Fade/Opacity 包 LiquidGlass）
+            // 雾垫 [ReaderMenuFog] **固定贴边**、不随 slide 平移——
+            // 否则弹出过程中强端被推到屏外 → 顶/底边空白。
             ValueListenableBuilder<bool>(
               valueListenable: _menuVisible,
               builder: (context, menuOn, _) {
-                final showBar = menuOn;
+                final pad = MediaQuery.paddingOf(context);
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    if (showBar)
+                    if (menuOn) ...[
                       Positioned(
                         top: 0,
                         left: 0,
                         right: 0,
-                        child: Builder(builder: (context) {
-                          return ReaderTopChrome(
-                            withVeil: menuOn,
+                        child: IgnorePointer(
+                          child: ReaderMenuFog(
+                            fromTop: true,
+                            height: pad.top + 100,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: IgnorePointer(
+                          child: ReaderMenuFog(
+                            fromTop: false,
+                            height: pad.bottom +
+                                (_chromeMode == ReaderChromeMode.floating
+                                    ? 300
+                                    : 420),
+                          ),
+                        ),
+                      ),
+                    ],
+                    // 液态果冻开合：easeOutBack 短促回弹；减弱动态瞬时
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        ignoring: !menuOn,
+                        child: AnimatedSlide(
+                          offset: menuOn ? Offset.zero : const Offset(0, -1),
+                          duration: Duration(
+                            milliseconds: MediaQuery.disableAnimationsOf(
+                                    context)
+                                ? 0
+                                : 260,
+                          ),
+                          curve: MediaQuery.disableAnimationsOf(context)
+                              ? Curves.linear
+                              : Curves.easeOutBack,
+                          child: Builder(builder: (context) {
+                            return ReaderTopChrome(
+                            withVeil: false,
                             title: state.bookTitle ?? '',
                             pageLabel:
                                 '${state.currentChapterIndex + 1}/${state.chapters.length}',
@@ -867,22 +910,63 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                               if (action == 'close') _menuVisible.value = false;
                             },
                           );
-                        }),
+                          }),
+                        ),
                       ),
+                    ),
                     // Bottom menu shell（A 传统 / B 悬浮）
-                    if (menuOn)
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Builder(builder: (context) {
-                          final notifier = ref.read(readerProvider.notifier);
-                          final pageCount = state.currentChapterPageCount;
-                          final progress = pageCount <= 0
-                              ? 0.0
-                              : state.currentPageIndex /
-                                  (pageCount > 1 ? pageCount - 1 : 1);
-                          return ReaderBottomChrome(
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        ignoring: !menuOn,
+                        child: AnimatedSlide(
+                          offset: menuOn ? Offset.zero : const Offset(0, 1),
+                          duration: Duration(
+                            milliseconds: MediaQuery.disableAnimationsOf(
+                                    context)
+                                ? 0
+                                : 280,
+                          ),
+                          curve: MediaQuery.disableAnimationsOf(context)
+                              ? Curves.linear
+                              : Curves.easeOutBack,
+                          child: Builder(builder: (context) {
+                            final notifier = ref.read(readerProvider.notifier);
+                            final pageCount = state.currentChapterPageCount;
+                            final progress = pageCount <= 0
+                                ? 0.0
+                                : state.currentPageIndex /
+                                    (pageCount > 1 ? pageCount - 1 : 1);
+                            return AnimatedSwitcher(
+                              duration: Duration(
+                                milliseconds: MediaQuery.disableAnimationsOf(
+                                        context)
+                                    ? 0
+                                    : 240,
+                              ),
+                              switchInCurve: Curves.easeOutBack,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, anim) {
+                                // 仅 Transform：Fade 会隔离 LiquidGlass 背板
+                                return ScaleTransition(
+                                  scale: anim,
+                                  child: SlideTransition(
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0, 0.12),
+                                      end: Offset.zero,
+                                    ).animate(anim),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: ReaderBottomChrome(
+                                key: ValueKey(_chromeMode),
+                                embedVeil: false,
+                                iconShowText:
+                                    ref.watch(shellSettingsProvider)
+                                        .readerIconShowText,
                             mode: _chromeMode,
                             onToggleMode: () {
                               setState(() {
@@ -943,33 +1027,50 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                             onSettings: () {
                               // ignore: avoid_print
                               print('[reader-chrome] open settings');
-                              final scheme = Theme.of(context).colorScheme;
-                              final shell = ref.read(shellSettingsProvider);
                               // 液态玻璃 sheet：与圆键同源 shellFrostLiquidStyle。
-                              // Impeller：blur 强制 0（blur≠0 挂 BF → 正文缩放）。
-                              // 禁止 LiquidGlassBatch（见 progress-summary）。
-                              showLiquidGlassSheet(
+                              // 轻模糊仅作用本弹层（readerSheetBlur*），默认开供真机测
+                              // Impeller 缩放；关掉即回到 blur0。禁止 LiquidGlassBatch。
+                              // Consumer 包住 GlassSheet：材质页开关即时生效。
+                              showModalBottomSheet(
                                 context: context,
                                 isScrollControlled: true,
-                                anchor: LiquidGlassSheetAnchor.attached,
-                                grabber: true,
-                                style: shellFrostLiquidStyle(
-                                  scheme,
-                                  navBlur: 0,
-                                  navTint: shell.navTintStrength,
-                                  radius: 28,
-                                  // 大面板强档：折射带 + 光学描边（圆键保持 0）
-                                  strength: 1,
+                                backgroundColor: Colors.transparent,
+                                elevation: 0,
+                                clipBehavior: Clip.none,
+                                builder: (sheetCtx) => Consumer(
+                                  builder: (sheetCtx, ref, _) {
+                                    final scheme =
+                                        Theme.of(sheetCtx).colorScheme;
+                                    final shell =
+                                        ref.watch(shellSettingsProvider);
+                                    final blur = shell.readerSheetBlurOn
+                                        ? shell.readerSheetBlurSigma
+                                        : 0.0;
+                                    return LiquidGlassSheet(
+                                      anchor: LiquidGlassSheetAnchor.attached,
+                                      grabber: true,
+                                      style: shellFrostLiquidStyle(
+                                        scheme,
+                                        navBlur: blur,
+                                        navTint: shell.navTintStrength,
+                                        radius: 28,
+                                        // 大面板强档：折射 + 加厚着色体
+                                        strength: 1,
+                                      ),
+                                      foregroundColor: scheme.onSurface,
+                                      child: const ReaderVisualSettingsSheet(),
+                                    );
+                                  },
                                 ),
-                                foregroundColor: scheme.onSurface,
-                                builder: (context) =>
-                                    const ReaderVisualSettingsSheet(),
                               );
                             },
                             onMore: () => readerChromeStub(context, '更多动作'),
+                          ),
                           );
-                        }),
+                          }),
+                        ),
                       ),
+                    ),
                   ],
                 );
               },

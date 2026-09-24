@@ -523,6 +523,107 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
   }
 
+  // ── 设置 sheet 轻量 setter：单参变更即时重排（避免走整包 apply 对话框） ──
+
+  void _reloadAfterLayoutChange(String reason) {
+    _persistSettings();
+    _invalidatePageCountCache();
+    _invalidateFrames(reason: reason);
+    if (state.bookId != null) {
+      _loadCurrentPage(anchorCharOffset: state.currentPage?.startCharIndex);
+      unawaited(refreshCurrentChapterPageCount());
+    }
+  }
+
+  Future<void> _syncParagraphFormat() async {
+    await _bookService.setParagraphFormatSettings(
+      enableIndent: _enableIndent,
+      indentSizeChars: _indentSizeChars,
+      paragraphSpacingMultiplier: _paragraphSpacingMultiplier,
+      reParagraphMode: _reParagraphMode,
+      smartSplitThreshold: _smartSplitThreshold,
+      aggressiveSplitThreshold: _aggressiveSplitThreshold,
+      justify: _justify,
+      punctuationCompress: _punctuationCompress,
+      commentScale: _commentScale,
+    );
+    _paraFormatHash = _computeParaFormatHash();
+    _renderStore.advanceSession(
+      sessionEpoch: _sessionEpoch,
+      configFingerprint: layoutFingerprint(),
+    );
+  }
+
+  void setBoldEnabled(bool v) {
+    if (_boldEnabled == v) return;
+    _boldEnabled = v;
+    _reloadAfterLayoutChange('bold');
+  }
+
+  void setItalicEnabled(bool v) {
+    if (_italicEnabled == v) return;
+    _italicEnabled = v;
+    _reloadAfterLayoutChange('italic');
+  }
+
+  void setParagraphSpacing(double v) {
+    final x = v.clamp(0.5, 2.0);
+    if ((_paragraphSpacingMultiplier - x).abs() < 0.01) return;
+    _paragraphSpacingMultiplier = x;
+    unawaited(_syncParagraphFormat());
+    _reloadAfterLayoutChange('para-spacing');
+  }
+
+  void setEnableIndent(bool v) {
+    if (_enableIndent == v) return;
+    _enableIndent = v;
+    unawaited(_syncParagraphFormat());
+    _reloadAfterLayoutChange('indent');
+  }
+
+  void setIndentSizeChars(int v) {
+    final x = v.clamp(0, 4);
+    if (_indentSizeChars == x) return;
+    _indentSizeChars = x;
+    unawaited(_syncParagraphFormat());
+    _reloadAfterLayoutChange('indent-chars');
+  }
+
+  void setJustify(bool v) {
+    if (_justify == v) return;
+    _justify = v;
+    unawaited(_syncParagraphFormat());
+    _reloadAfterLayoutChange('justify');
+  }
+
+  void setPunctuationCompress(bool v) {
+    if (_punctuationCompress == v) return;
+    _punctuationCompress = v;
+    unawaited(_syncParagraphFormat());
+    _reloadAfterLayoutChange('punct');
+  }
+
+  /// 边距：左右同源 padH，上下同源 padVertical（引擎当前两轴模型）
+  void setPadding({double? horizontal, double? vertical}) {
+    var dirty = false;
+    if (horizontal != null) {
+      final x = horizontal.clamp(0.0, 48.0);
+      if ((_paddingHorizontal - x).abs() >= 0.5) {
+        _paddingHorizontal = x;
+        dirty = true;
+      }
+    }
+    if (vertical != null) {
+      final x = vertical.clamp(0.0, 64.0);
+      if ((_paddingVertical - x).abs() >= 0.5) {
+        _paddingVertical = x;
+        dirty = true;
+      }
+    }
+    if (!dirty) return;
+    _reloadAfterLayoutChange('padding');
+  }
+
   /// P6：自定义字体持久化（FontProvider 选择成功后调用）。
   ///
   /// [fontFamily] 注册名（两侧引擎同名）、[fontFilePath] 应用目录内

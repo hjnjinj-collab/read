@@ -37,6 +37,14 @@ class ShellSettings {
     this.frostGradDepth = 1.0,
     this.lgMotionOn = true,
     this.readerChromeMode = 'traditional',
+    this.readerSheetBlurOn = true,
+    this.readerSheetBlurSigma = 4,
+    this.readerIconStyle = 1,
+    this.readerIconItemsPerRow = 5,
+    this.readerIconRowCount = 1,
+    this.readerIconShowText = true,
+    this.readerTopMergeButtons = false,
+    this.readerTopTitlePill = false,
   });
 
   final bool bookshelfGrid;
@@ -110,6 +118,31 @@ class ShellSettings {
 
   /// 阅读菜单形态：traditional | floating
   final String readerChromeMode;
+
+  /// 阅读「设置 sheet」轻模糊开关（**仅本弹层**，不影响圆键/底栏）。
+  /// 开 = 挂 ImageFilter.blur BF，用于测 Impeller 是否缩放正文。
+  final bool readerSheetBlurOn;
+
+  /// 设置 sheet 轻模糊 sigma（轻档默认 4；关时不读）。
+  final double readerSheetBlurSigma;
+
+  /// 阅读菜单图标风格：0 线性 / 1 面性（默认）/ 2 双色（Iconsax）
+  final int readerIconStyle;
+
+  /// 工具排每行个数 4–6
+  final int readerIconItemsPerRow;
+
+  /// 工具排行数 1–2
+  final int readerIconRowCount;
+
+  /// 图标下方中文名
+  final bool readerIconShowText;
+
+  /// 顶栏合并按钮（返回/更多一胶囊）
+  final bool readerTopMergeButtons;
+
+  /// 顶栏标题胶囊
+  final bool readerTopTitlePill;
 
   static const List<String> ambientDirs = [
     'tlbr',
@@ -232,6 +265,22 @@ class ShellSettings {
           'traditional' => 'traditional',
           _ => 'traditional',
         },
+        // 默认开：真机测轻模糊；若 Impeller 缩放正文可关
+        readerSheetBlurOn: map['readerSheetBlurOn'] as bool? ?? true,
+        readerSheetBlurSigma:
+            (map['readerSheetBlurSigma'] as num?)?.toDouble() ?? 4,
+        readerIconStyle: switch (map['readerIconStyle'] as num?) {
+          0 => 0,
+          2 => 2,
+          _ => 1,
+        },
+        readerIconItemsPerRow:
+            ((map['readerIconItemsPerRow'] as num?)?.toInt() ?? 5).clamp(4, 6),
+        readerIconRowCount:
+            ((map['readerIconRowCount'] as num?)?.toInt() ?? 1).clamp(1, 2),
+        readerIconShowText: map['readerIconShowText'] as bool? ?? true,
+        readerTopMergeButtons: map['readerTopMergeButtons'] as bool? ?? false,
+        readerTopTitlePill: map['readerTopTitlePill'] as bool? ?? false,
       );
     } catch (_) {
       return const ShellSettings();
@@ -266,6 +315,14 @@ class ShellSettings {
         'frostGradDepth': frostGradDepth,
         'lgMotionOn': lgMotionOn,
         'readerChromeMode': readerChromeMode,
+        'readerSheetBlurOn': readerSheetBlurOn,
+        'readerSheetBlurSigma': readerSheetBlurSigma,
+        'readerIconStyle': readerIconStyle,
+        'readerIconItemsPerRow': readerIconItemsPerRow,
+        'readerIconRowCount': readerIconRowCount,
+        'readerIconShowText': readerIconShowText,
+        'readerTopMergeButtons': readerTopMergeButtons,
+        'readerTopTitlePill': readerTopTitlePill,
       });
 
   ShellSettings copyWith({
@@ -295,6 +352,14 @@ class ShellSettings {
     double? frostGradDepth,
     bool? lgMotionOn,
     String? readerChromeMode,
+    bool? readerSheetBlurOn,
+    double? readerSheetBlurSigma,
+    int? readerIconStyle,
+    int? readerIconItemsPerRow,
+    int? readerIconRowCount,
+    bool? readerIconShowText,
+    bool? readerTopMergeButtons,
+    bool? readerTopTitlePill,
   }) {
     return ShellSettings(
       bookshelfGrid: bookshelfGrid ?? this.bookshelfGrid,
@@ -323,6 +388,17 @@ class ShellSettings {
       frostGradDepth: frostGradDepth ?? this.frostGradDepth,
       lgMotionOn: lgMotionOn ?? this.lgMotionOn,
       readerChromeMode: readerChromeMode ?? this.readerChromeMode,
+      readerSheetBlurOn: readerSheetBlurOn ?? this.readerSheetBlurOn,
+      readerSheetBlurSigma:
+          readerSheetBlurSigma ?? this.readerSheetBlurSigma,
+      readerIconStyle: readerIconStyle ?? this.readerIconStyle,
+      readerIconItemsPerRow:
+          readerIconItemsPerRow ?? this.readerIconItemsPerRow,
+      readerIconRowCount: readerIconRowCount ?? this.readerIconRowCount,
+      readerIconShowText: readerIconShowText ?? this.readerIconShowText,
+      readerTopMergeButtons:
+          readerTopMergeButtons ?? this.readerTopMergeButtons,
+      readerTopTitlePill: readerTopTitlePill ?? this.readerTopTitlePill,
     );
   }
 }
@@ -485,6 +561,54 @@ class ShellSettingsNotifier extends Notifier<ShellSettings> {
   void setReaderChromeMode(String mode) {
     if (state.readerChromeMode == mode) return;
     _persist(state.copyWith(readerChromeMode: mode));
+  }
+
+  void setReaderSheetBlurOn(bool value) {
+    if (state.readerSheetBlurOn == value) return;
+    _persist(state.copyWith(readerSheetBlurOn: value));
+  }
+
+  void setReaderSheetBlurSigma(double value) {
+    final v = value.clamp(0.0, 16.0);
+    if ((state.readerSheetBlurSigma - v).abs() < 0.2) return;
+    _persist(state.copyWith(readerSheetBlurSigma: v));
+  }
+
+  void setReaderIconStyle(int style) {
+    final s = switch (style) {
+      0 => 0,
+      2 => 2,
+      _ => 1,
+    };
+    if (state.readerIconStyle == s) return;
+    _persist(state.copyWith(readerIconStyle: s));
+  }
+
+  void setReaderIconItemsPerRow(int v) {
+    final n = v.clamp(4, 6);
+    if (state.readerIconItemsPerRow == n) return;
+    _persist(state.copyWith(readerIconItemsPerRow: n));
+  }
+
+  void setReaderIconRowCount(int v) {
+    final n = v.clamp(1, 2);
+    if (state.readerIconRowCount == n) return;
+    _persist(state.copyWith(readerIconRowCount: n));
+  }
+
+  void setReaderIconShowText(bool v) {
+    if (state.readerIconShowText == v) return;
+    _persist(state.copyWith(readerIconShowText: v));
+  }
+
+  void setReaderTopMergeButtons(bool v) {
+    if (state.readerTopMergeButtons == v) return;
+    _persist(state.copyWith(readerTopMergeButtons: v));
+  }
+
+  void setReaderTopTitlePill(bool v) {
+    if (state.readerTopTitlePill == v) return;
+    _persist(state.copyWith(readerTopTitlePill: v));
   }
 }
 

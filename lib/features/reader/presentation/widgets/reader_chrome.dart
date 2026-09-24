@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../../../core/theme/app_theme.dart' show AppGlass;
+import '../../../../core/theme/reader_menu_icons.dart';
 import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import 'page_turn/page_turn_types.dart';
@@ -18,18 +19,21 @@ enum ReaderChromeMode { traditional, floating }
 ///
 /// 样式走 [shellFrostLiquidStyle]（唯一实现），blur/tint 跟壳层设置；
 /// 构造对齐 `ExpandableGlassNav` 的 `LiquidGlassTabBarAction`。
+/// 图标：Iconsax 线性/面性/双色（`readerIconStyle`）。
 /// 禁止：祖先 Clip≠none、ClipOval/saveLayer、另写折射参数。
 class ReaderGlassCircle extends ConsumerWidget {
   const ReaderGlassCircle({
     super.key,
-    required this.icon,
+    required this.line,
+    required this.fill,
     this.onTap,
     this.size = 52,
     this.selected = false,
     this.tooltip,
   });
 
-  final IconData icon;
+  final IconData line;
+  final IconData fill;
   final VoidCallback? onTap;
   final double size;
   final bool selected;
@@ -40,7 +44,19 @@ class ReaderGlassCircle extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final shell = ref.watch(shellSettingsProvider);
     final disable = MediaQuery.disableAnimationsOf(context);
-    final fg = selected ? scheme.primary : scheme.onSurface;
+    // 与壳层液态圆键一致：字形 **白色**（expandable_glass_nav /
+    // LiquidGlassTabBarAction 默认白）；选中仅提亮，不用 onSurface 系染色
+    final fg = selected
+        ? Colors.white
+        : Colors.white.withValues(alpha: 0.92);
+    final glyph = ReaderMenuGlyph(
+      line: line,
+      fill: fill,
+      style: shell.readerIconStyle,
+      size: size * 0.42,
+      color: fg,
+      duotoneAccent: Colors.white.withValues(alpha: 0.40),
+    );
 
     if (disable) {
       final solid = Material(
@@ -52,7 +68,7 @@ class ReaderGlassCircle extends ConsumerWidget {
           child: SizedBox(
             width: size,
             height: size,
-            child: Icon(icon, size: size * 0.42, color: fg),
+            child: Center(child: glyph),
           ),
         ),
       );
@@ -62,8 +78,11 @@ class ReaderGlassCircle extends ConsumerWidget {
     // 与 expandable_glass_nav 圆键同构：直接 Action + 壳层 frost 样式
     // 阅读页按钮：blur 强制 0（liquid_glass_lite 在 blur≠0 时挂 BF →
     // 页面挂载即触发 Impeller 缩放）。tint 跟随设置页保持颜色一致。
+    // 按压果冻：lgMotionOn → pronounced；关 → subtle（减弱动态另走 disable）
+    final flex = shell.lgMotionOn
+        ? const LiquidGlassFlex.pronounced()
+        : const LiquidGlassFlex.subtle();
     final glass = LiquidGlassTabBarAction(
-      icon: icon,
       size: size,
       foregroundColor: fg,
       style: shellFrostLiquidStyle(
@@ -78,10 +97,55 @@ class ReaderGlassCircle extends ConsumerWidget {
           shadow: null,
         ),
       ),
-      touch: const LiquidGlassTouch(flex: LiquidGlassFlex()),
+      touch: LiquidGlassTouch(flex: flex),
       onTap: onTap ?? () {},
+      child: glyph,
     );
     return tooltip == null ? glass : Tooltip(message: tooltip!, child: glass);
+  }
+}
+
+/// 菜单渐变雾垫（纯绘制，无 BF）。
+///
+/// **保留渐变**，末尾平滑收到**全透明**——过渡区无色块硬边，避免
+/// 在页码/进度区叠出「阴影」感与色差。固定贴边，不随 slide 平移。
+class ReaderMenuFog extends StatelessWidget {
+  const ReaderMenuFog({
+    super.key,
+    required this.fromTop,
+    required this.height,
+  });
+
+  final bool fromTop;
+  final double height;
+
+  /// 页码/进度组件区**保持浓度**，越过之后再向透明过渡。
+  /// stop0=贴边强端（底/顶）→ 中段盖住工具排+页码 → 末段 fade 到 0。
+  static const List<double> fogAlphas =
+      [0.90, 0.88, 0.86, 0.84, 0.80, 0.74, 0.50, 0.15, 0.0];
+  static const List<double> fogStops =
+      [0.0, 0.18, 0.36, 0.52, 0.64, 0.74, 0.84, 0.93, 1.0];
+
+  @override
+  Widget build(BuildContext context) {
+    final fog = AppGlass.topTint(Theme.of(context).colorScheme);
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: fromTop ? Alignment.topCenter : Alignment.bottomCenter,
+            end: fromTop ? Alignment.bottomCenter : Alignment.topCenter,
+            colors: [
+              for (final a in fogAlphas)
+                a <= 0 ? Colors.transparent : fog.withValues(alpha: a),
+            ],
+            stops: fogStops,
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -89,7 +153,6 @@ class ReaderGlassCircle extends ConsumerWidget {
 /// [fromTop] true=顶→底，false=底→顶。
 ///
 /// **纯渐变雾，禁止 BackdropFilter**：阅读页 Rust 文本画布 + BF = Impeller 缩放。
-/// 用 9 点平滑过渡消阴影（书架可用 BF，阅读页不行）。
 class ReaderBlurVeil extends StatelessWidget {
   const ReaderBlurVeil({
     super.key,
@@ -104,27 +167,19 @@ class ReaderBlurVeil extends StatelessWidget {
   final double extend;
   final double band;
 
-  /// 9 点平滑过渡：无硬边 = 无阴影；浓度高于书架（0.58）。
-  static const List<double> _fogAlphas =
-      [0.85, 0.82, 0.76, 0.66, 0.52, 0.36, 0.20, 0.08, 0.0];
-  static const List<double> _fogStops =
-      [0.0, 0.12, 0.25, 0.38, 0.52, 0.66, 0.80, 0.92, 1.0];
-
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final disable = MediaQuery.disableAnimationsOf(context);
     final pad = MediaQuery.paddingOf(context);
     final padV = fromTop ? pad.top : pad.bottom;
     final h = padV + band + extend;
-    final begin = fromTop ? Alignment.topCenter : Alignment.bottomCenter;
-    final end = fromTop ? Alignment.bottomCenter : Alignment.topCenter;
-    final fog = AppGlass.topTint(scheme);
+    final scheme = Theme.of(context).colorScheme;
 
     if (disable) {
       return ColoredBox(
-        color: fog.withValues(alpha: 0.96),
-        child: SizedBox(height: padV + band, width: double.infinity, child: child),
+        color: AppGlass.topTint(scheme).withValues(alpha: 0.92),
+        child:
+            SizedBox(height: padV + band, width: double.infinity, child: child),
       );
     }
 
@@ -138,21 +193,7 @@ class ReaderBlurVeil extends StatelessWidget {
         children: [
           Positioned.fill(
             child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: begin,
-                    end: end,
-                    colors: [
-                      for (final a in _fogAlphas)
-                        a == 0
-                            ? Colors.transparent
-                            : fog.withValues(alpha: a),
-                    ],
-                    stops: _fogStops,
-                  ),
-                ),
-              ),
+              child: ReaderMenuFog(fromTop: fromTop, height: h),
             ),
           ),
           Align(
@@ -171,13 +212,15 @@ class ReaderBlurVeil extends StatelessWidget {
 class ReaderToolBall extends StatelessWidget {
   const ReaderToolBall({
     super.key,
-    required this.icon,
+    required this.line,
+    required this.fill,
     required this.label,
     required this.onTap,
     this.showLabel = true,
   });
 
-  final IconData icon;
+  final IconData line;
+  final IconData fill;
   final String label;
   final VoidCallback onTap;
   final bool showLabel;
@@ -191,7 +234,7 @@ class ReaderToolBall extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ReaderGlassCircle(icon: icon, size: 52, onTap: onTap),
+          ReaderGlassCircle(line: line, fill: fill, size: 52, onTap: onTap),
           if (showLabel) ...[
             const SizedBox(height: 4),
             Text(
@@ -238,7 +281,8 @@ class ReaderTopChrome extends StatelessWidget {
         child: Row(
           children: [
             ReaderGlassCircle(
-              icon: Icons.arrow_back_rounded,
+              line: ReaderMenuIcons.lineBack,
+              fill: ReaderMenuIcons.fillBack,
               size: 52,
               tooltip: '返回',
               onTap: onBack,
@@ -267,7 +311,8 @@ class ReaderTopChrome extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             ReaderGlassCircle(
-              icon: Icons.more_horiz_rounded,
+              line: ReaderMenuIcons.lineMore,
+              fill: ReaderMenuIcons.fillMore,
               size: 52,
               tooltip: '更多',
               onTap: onMore,
@@ -331,6 +376,8 @@ class ReaderBottomChrome extends StatelessWidget {
     required this.onNotes,
     required this.onSettings,
     this.onMore,
+    this.embedVeil = true,
+    this.iconShowText = true,
   });
 
   final ReaderChromeMode mode;
@@ -355,28 +402,56 @@ class ReaderBottomChrome extends StatelessWidget {
   final VoidCallback onSettings;
   final VoidCallback? onMore;
 
+  /// false：外层已铺 [ReaderMenuFog]（固定贴底），此处只出内容。
+  /// 开合 slide 只平移内容，雾垫不跟走，避免底边空白。
+  final bool embedVeil;
+
+  /// 工具排文字标签（ShellSettings.readerIconShowText）
+  final bool iconShowText;
+
   Widget _tools() {
+    final showLabel = iconShowText;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        ReaderToolBall(icon: Icons.menu_book_rounded, label: '目录', onTap: onCatalog),
-        ReaderToolBall(icon: Icons.search_rounded, label: '搜索', onTap: onSearch),
-        ReaderToolBall(icon: Icons.bookmark_outline, label: '书签', onTap: onBookmark),
-        ReaderToolBall(icon: Icons.edit_note_rounded, label: '笔记', onTap: onNotes),
-        ReaderToolBall(icon: Icons.settings_outlined, label: '设置', onTap: onSettings),
-        // 第 6 个：溢出「更多」→ 下拉菜单收纳额外动作
         ReaderToolBall(
-          icon: Icons.more_horiz_rounded,
-          label: '更多',
-          onTap: () => _showOverflowMenu(),
+          line: ReaderMenuIcons.lineCatalog,
+          fill: ReaderMenuIcons.fillCatalog,
+          label: '目录',
+          showLabel: showLabel,
+          onTap: onCatalog,
         ),
+        ReaderToolBall(
+          line: ReaderMenuIcons.lineSearch,
+          fill: ReaderMenuIcons.fillSearch,
+          label: '搜索',
+          showLabel: showLabel,
+          onTap: onSearch,
+        ),
+        ReaderToolBall(
+          line: ReaderMenuIcons.lineBookmark,
+          fill: ReaderMenuIcons.fillBookmark,
+          label: '书签',
+          showLabel: showLabel,
+          onTap: onBookmark,
+        ),
+        ReaderToolBall(
+          line: ReaderMenuIcons.lineNotes,
+          fill: ReaderMenuIcons.fillNotes,
+          label: '笔记',
+          showLabel: showLabel,
+          onTap: onNotes,
+        ),
+        ReaderToolBall(
+          line: ReaderMenuIcons.lineSettings,
+          fill: ReaderMenuIcons.fillSettings,
+          label: '设置',
+          showLabel: showLabel,
+          onTap: onSettings,
+        ),
+        // 5 项收口：设置齿轮即“更多”，不再单独溢出键
       ],
     );
-  }
-
-  void _showOverflowMenu() {
-    // 溢出动作：上/下章、自动翻页、朗读（后续接线）
-    // 当前用 stub，与 onCatalog/onSearch 等同层
   }
 
   @override
@@ -467,7 +542,8 @@ class ReaderBottomChrome extends StatelessWidget {
                   child: Row(
                     children: [
                       ReaderGlassCircle(
-                        icon: Icons.remove_rounded,
+                        line: ReaderMenuIcons.lineMinus,
+                        fill: ReaderMenuIcons.fillMinus,
                         size: 52,
                         onTap: () => onFontSize((fontSize - 1).clamp(12, 28)),
                       ),
@@ -484,7 +560,8 @@ class ReaderBottomChrome extends StatelessWidget {
                         ),
                       ),
                       ReaderGlassCircle(
-                        icon: Icons.add_rounded,
+                        line: ReaderMenuIcons.linePlus,
+                        fill: ReaderMenuIcons.fillPlus,
                         size: 52,
                         onTap: () => onFontSize((fontSize + 1).clamp(12, 28)),
                       ),
@@ -622,23 +699,26 @@ class ReaderBottomChrome extends StatelessWidget {
             ),
           );
 
+    final body = Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.paddingOf(context).bottom * 0.4,
+      ),
+      child: content,
+    );
     return Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: (_) {},
       onPointerMove: (_) {},
       onPointerUp: (_) {},
-      child: ReaderBlurVeil(
-        fromTop: false,
-        band: mode == ReaderChromeMode.floating ? 220 : 330,
-        // 保持进度栏可读，但不再把整块菜单向正文方向撑高。
-        extend: 96,
-        child: Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.paddingOf(context).bottom * 0.4,
-          ),
-          child: content,
-        ),
-      ),
+      child: embedVeil
+          ? ReaderBlurVeil(
+              fromTop: false,
+              band: mode == ReaderChromeMode.floating ? 220 : 330,
+              // 保持进度栏可读，但不再把整块菜单向正文方向撑高。
+              extend: 96,
+              child: body,
+            )
+          : body,
     );
   }
 

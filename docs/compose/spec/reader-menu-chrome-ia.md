@@ -162,6 +162,30 @@ commits: c84cfa2..uncommitted
 | 底栏垫 | 菜单态：**底→顶**渐变模糊（壳滤镜镜像） |
 | BF 数量 | 垫各一层；圆键 Lens 由 ClipOval 收束 |
 
+### [S2.8] 图标三档 + 液态果冻动效（本轮细化）
+
+**图标**（`ReaderMenuIcons` / `ReaderMenuGlyph`，Iconsax 族，不混 Material）：
+
+| 档 | `readerIconStyle` | 渲染 |
+|----|-------------------|------|
+| 线性 | 0 | outline 字形 |
+| 面性（默认） | 1 | `_copy` 填充字形 |
+| 双色 | 2 | 填充垫 primary@0.38 + 线性主字叠色 |
+
+覆盖：顶栏返回/更多、工具排目录/搜索/书签/笔记/设置/更多、字号 ±、悬浮圆键。设置①「图标风格」三档切换即时生效（持久化 `readerIconStyle`）。
+
+**动效（液态果冻风）**：
+
+| 交互 | 契约 |
+|------|------|
+| 菜单开合 | 顶 `AnimatedSlide` 上/下 260ms、底 280ms；`easeOutBack` 回弹；**禁止 Fade/Opacity 包 LiquidGlass** |
+| A/B 形态切换 | `AnimatedSwitcher` 240ms；仅 `ScaleTransition`+`SlideTransition`（Transform） |
+| 按压果冻 | `lgMotionOn` → `LiquidGlassFlex.pronounced()`；关 → `subtle()` |
+| 减弱动态 | duration=0、无液态形变；布局瞬时（S2.6） |
+| 图标色 | 与壳层液态圆键同源：选中 `primary` / 未选 `onSurfaceVariant`；双色垫 `tertiary` |
+| 开合雾垫 | `ReaderMenuFog` **固定贴边**、不随 slide 平移（防弹出时顶/底空白） |
+| 工具排 | **5 项**（目录/搜索/书签/笔记/设置）；设置齿轮即更多，无第 6 溢出键 |
+
 ## [S3] Out of Scope
 
 - 本轮**零实现**（仅草稿）
@@ -182,6 +206,8 @@ commits: c84cfa2..uncommitted
 ### Phase 2：设置四页
 
 - [ ] T2.1: 形态与图标页：传统/悬浮切换、图标风格三档、每行个数、行数 — acceptance: 改后两套 chrome 同步生效 (covers: S2.4; depends: T1.1)
+- [x] T2.1a: Iconsax 图标三档（线性/面性/双色）+ `readerIconStyle` 持久化 — acceptance: 设置①切换后工具排/圆键/顶栏字形同步 (covers: S2.8)
+- [x] T2.1b: 液态果冻动效：菜单 Slide 开合 + A/B Scale 切换 + pronounced 按压 — acceptance: 开合有回弹；无 Fade 包玻璃；减弱动态瞬时 (covers: S2.8)
 - [ ] T2.2: 排版布局页：字体/字号/行距/段距/字距 + 标题 + 页眉页脚 + 边距 — acceptance: 参数持久化，正文实时刷新 (covers: S2.4)
 - [ ] T2.3: 背景主题页：日夜背景色/图/透明度 + 内置背景图网格 + 预设主题卡 — acceptance: 背景切换即时生效 (covers: S2.4)
 - [ ] T2.4: 材质与顶栏页：面板圆角/模糊档、悬浮键液态开关、合并顶栏按钮 — acceptance: 材质参数与设置页同源 (covers: S2.4)

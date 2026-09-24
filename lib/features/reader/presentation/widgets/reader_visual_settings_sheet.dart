@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/theme/app_theme.dart' show AppGlass;
+import '../../../../core/theme/reader_menu_icons.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../providers/reader_provider.dart';
 
@@ -13,6 +16,40 @@ class ReaderVisualSettingsSheet extends ConsumerStatefulWidget {
       _ReaderVisualSettingsSheetState();
 }
 
+class _SheetTabItem {
+  const _SheetTabItem({
+    required this.label,
+    required this.line,
+    required this.fill,
+  });
+  final String label;
+  final IconData line;
+  final IconData fill;
+}
+
+const _sheetTabs = <_SheetTabItem>[
+  _SheetTabItem(
+    label: '形态图标',
+    line: ReaderMenuIcons.lineForm,
+    fill: ReaderMenuIcons.fillForm,
+  ),
+  _SheetTabItem(
+    label: '排版布局',
+    line: ReaderMenuIcons.lineType,
+    fill: ReaderMenuIcons.fillType,
+  ),
+  _SheetTabItem(
+    label: '背景主题',
+    line: ReaderMenuIcons.lineBg,
+    fill: ReaderMenuIcons.fillBg,
+  ),
+  _SheetTabItem(
+    label: '材质顶栏',
+    line: ReaderMenuIcons.lineMaterial,
+    fill: ReaderMenuIcons.fillMaterial,
+  ),
+];
+
 class _ReaderVisualSettingsSheetState
     extends ConsumerState<ReaderVisualSettingsSheet>
     with SingleTickerProviderStateMixin {
@@ -21,7 +58,10 @@ class _ReaderVisualSettingsSheetState
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this)
+      ..addListener(() {
+        if (mounted) setState(() {});
+      });
   }
 
   @override
@@ -34,9 +74,8 @@ class _ReaderVisualSettingsSheetState
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final h = MediaQuery.sizeOf(context).height;
-    // 玻璃壳由外层 LiquidGlassSheet 提供（showLiquidGlassSheet）。
-    // 此处只负责内容高度与控件；禁止再挂一层不透明/半透明白底，
-    // 否则会盖住液态折射（观感像“没用到液态玻璃”）。
+    final iconStyle = ref.watch(shellSettingsProvider).readerIconStyle;
+    // 玻璃壳由外层 LiquidGlassSheet 提供。此处只负责内容。
     return SizedBox(
       height: h * 0.6,
       child: Column(
@@ -56,37 +95,162 @@ class _ReaderVisualSettingsSheetState
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.close, color: scheme.onSurface),
                   onPressed: () => Navigator.of(context).pop(),
+                  icon: ReaderMenuGlyph(
+                    line: ReaderMenuIcons.lineClose,
+                    fill: ReaderMenuIcons.fillClose,
+                    style: iconStyle,
+                    size: 22,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
           ),
-          TabBar(
-            controller: _tabCtrl,
-            labelColor: scheme.primary,
-            unselectedLabelColor: scheme.onSurfaceVariant,
-            indicatorColor: scheme.primary,
-            labelStyle: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600),
-            tabs: const [
-              Tab(text: '形态图标'),
-              Tab(text: '排版布局'),
-              Tab(text: '背景主题'),
-              Tab(text: '材质顶栏'),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+            child: _GlassTabBar(
+              controller: _tabCtrl,
+              tabs: _sheetTabs,
+              iconStyle: iconStyle,
+            ),
           ),
           Expanded(
             child: TabBarView(
               controller: _tabCtrl,
-              // 各页自持 ListView：TabBarView 滑动时邻页 keep-alive，
-              // 共享 ScrollController 会多重挂载断言。
               children: const [
                 _FormIconPage(),
                 _TypographyPage(),
                 _BackgroundPage(),
                 _MaterialPage(),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 液态色板顶栏：滑动 restPillTint 胶囊 + Iconsax 三档图标。
+/// 禁止 Material TabBar 的指示条/字色（与玻璃壳不搭）。
+class _GlassTabBar extends StatelessWidget {
+  const _GlassTabBar({
+    required this.controller,
+    required this.tabs,
+    required this.iconStyle,
+  });
+
+  final TabController controller;
+  final List<_SheetTabItem> tabs;
+  final int iconStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    final rim = Colors.white.withValues(alpha: light ? 0.45 : 0.24);
+    final t = tabs.length;
+    // 胶囊滑动：0.28s easeOutBack，选中态带轻微上浮
+    final offset = controller.animation ??
+        AlwaysStoppedAnimation<double>(controller.index.toDouble());
+
+    return SizedBox(
+      height: 56,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final w = constraints.maxWidth / t;
+          return Stack(
+            children: [
+              // 滑动胶囊（跟手）
+              AnimatedBuilder(
+                animation: offset,
+                builder: (context, _) {
+                  final i = offset.value.clamp(0.0, (t - 1).toDouble());
+                  return Positioned(
+                    left: i * w + 3,
+                    top: 4,
+                    bottom: 4,
+                    width: w - 6,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppGlass.restPillTint(scheme),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: rim, width: 1),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              Row(
+                children: [
+                  for (var i = 0; i < t; i++)
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => controller.animateTo(
+                          i,
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeOutBack,
+                        ),
+                        child: _TabCell(
+                          item: tabs[i],
+                          selected: controller.index == i,
+                          iconStyle: iconStyle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TabCell extends StatelessWidget {
+  const _TabCell({
+    required this.item,
+    required this.selected,
+    required this.iconStyle,
+  });
+
+  final _SheetTabItem item;
+  final bool selected;
+  final int iconStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // 与菜单圆键同一白字/主色语言
+    final fg = selected
+        ? scheme.primary
+        : scheme.onSurfaceVariant;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      transform: Matrix4.identity()
+        ..translateByDouble(0.0, selected ? -1.0 : 0.0, 0.0, 1.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ReaderMenuGlyph(
+            line: item.line,
+            fill: item.fill,
+            style: selected ? iconStyle : 0,
+            size: 20,
+            color: fg,
+            duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            item.label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: fg,
             ),
           ),
         ],
@@ -111,51 +275,55 @@ class _FormIconPage extends ConsumerWidget {
       children: [
         _SectionTitle('菜单形态', scheme),
         const SizedBox(height: 8),
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'traditional', label: Text('传统底栏')),
-            ButtonSegment(value: 'floating', label: Text('悬浮图标')),
+        _GlassSegmented<String>(
+          items: const [
+            ('traditional', '传统底栏'),
+            ('floating', '悬浮图标'),
           ],
-          selected: {shell.readerChromeMode},
-          onSelectionChanged: (v) => n.setReaderChromeMode(v.first),
+          value: shell.readerChromeMode,
+          onChanged: (v) => n.setReaderChromeMode(v),
         ),
         const SizedBox(height: 24),
         _SectionTitle('图标风格', scheme),
         const SizedBox(height: 8),
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 0, label: Text('线性')),
-            ButtonSegment(value: 1, label: Text('面性')),
-            ButtonSegment(value: 2, label: Text('双色')),
+        _GlassSegmented<int>(
+          items: const [
+            (0, '线性'),
+            (1, '面性'),
+            (2, '双色'),
           ],
-          selected: const {1},
-          onSelectionChanged: (v) {},
+          value: shell.readerIconStyle,
+          onChanged: (v) => n.setReaderIconStyle(v),
         ),
         const SizedBox(height: 24),
         _SectionTitle('每行个数', scheme),
-        Slider(
-          value: 5,
+        _LiveSlider(
+          label: '每行',
+          value: shell.readerIconItemsPerRow.toDouble(),
           min: 4,
           max: 6,
+          unit: '',
           divisions: 2,
-          label: '5',
-          onChanged: (v) {},
+          onChanged: (v) => n.setReaderIconItemsPerRow(v.round()),
+          onChangeEnd: (v) => n.setReaderIconItemsPerRow(v.round()),
         ),
         _SectionTitle('行数', scheme),
-        Slider(
-          value: 1,
+        _LiveSlider(
+          label: '行',
+          value: shell.readerIconRowCount.toDouble(),
           min: 1,
           max: 2,
+          unit: '',
           divisions: 1,
-          label: '1',
-          onChanged: (v) {},
+          onChanged: (v) => n.setReaderIconRowCount(v.round()),
+          onChangeEnd: (v) => n.setReaderIconRowCount(v.round()),
         ),
         const SizedBox(height: 8),
         SwitchListTile(
           title: const Text('显示文字标签'),
           subtitle: const Text('图标下方显示中文名称'),
-          value: true,
-          onChanged: (v) {},
+          value: shell.readerIconShowText,
+          onChanged: (v) => n.setReaderIconShowText(v),
         ),
       ],
     );
@@ -240,24 +408,33 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           max: 2.0,
           unit: 'x',
           onChanged: (v) => setState(() => _paraSpacing = v),
-          onChangeEnd: (v) {},
+          onChangeEnd: (v) => n.setParagraphSpacing(v),
         ),
         SwitchListTile(
           title: const Text('粗体'),
           value: _bold,
-          onChanged: (v) => setState(() => _bold = v),
+          onChanged: (v) {
+            setState(() => _bold = v);
+            n.setBoldEnabled(v);
+          },
         ),
         SwitchListTile(
           title: const Text('斜体'),
           value: _italic,
-          onChanged: (v) => setState(() => _italic = v),
+          onChanged: (v) {
+            setState(() => _italic = v);
+            n.setItalicEnabled(v);
+          },
         ),
         const SizedBox(height: 16),
         _SectionTitle('段落格式', scheme),
         SwitchListTile(
           title: const Text('首行缩进'),
           value: _indent,
-          onChanged: (v) => setState(() => _indent = v),
+          onChanged: (v) {
+            setState(() => _indent = v);
+            n.setEnableIndent(v);
+          },
         ),
         if (_indent)
           _LiveSlider(
@@ -267,55 +444,43 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
             max: 4,
             unit: '',
             onChanged: (v) => setState(() => _indentChars = v.round()),
-            onChangeEnd: (v) {},
+            onChangeEnd: (v) => n.setIndentSizeChars(v.round()),
           ),
         SwitchListTile(
           title: const Text('两端对齐'),
           value: _justify,
-          onChanged: (v) => setState(() => _justify = v),
+          onChanged: (v) {
+            setState(() => _justify = v);
+            n.setJustify(v);
+          },
         ),
         SwitchListTile(
           title: const Text('标点压缩'),
           value: _punctCompress,
-          onChanged: (v) => setState(() => _punctCompress = v),
+          onChanged: (v) {
+            setState(() => _punctCompress = v);
+            n.setPunctuationCompress(v);
+          },
         ),
         const SizedBox(height: 16),
         _SectionTitle('边距', scheme),
         _LiveSlider(
-          label: '上边距',
+          label: '上下边距',
           value: 24,
           min: 0,
           max: 64,
           unit: 'px',
           onChanged: (v) {},
-          onChangeEnd: (v) {},
+          onChangeEnd: (v) => n.setPadding(vertical: v),
         ),
         _LiveSlider(
-          label: '下边距',
-          value: 24,
-          min: 0,
-          max: 64,
-          unit: 'px',
-          onChanged: (v) {},
-          onChangeEnd: (v) {},
-        ),
-        _LiveSlider(
-          label: '左边距',
+          label: '左右边距',
           value: 20,
           min: 0,
           max: 48,
           unit: 'px',
           onChanged: (v) {},
-          onChangeEnd: (v) {},
-        ),
-        _LiveSlider(
-          label: '右边距',
-          value: 20,
-          min: 0,
-          max: 48,
-          unit: 'px',
-          onChanged: (v) {},
-          onChangeEnd: (v) {},
+          onChangeEnd: (v) => n.setPadding(horizontal: v),
         ),
       ],
     );
@@ -357,15 +522,15 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
       children: [
         _SectionTitle('日夜模式', scheme),
         const SizedBox(height: 8),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: false, label: Text('日间')),
-            ButtonSegment(value: true, label: Text('夜间')),
+        _GlassSegmented<bool>(
+          items: const [
+            (false, '日间'),
+            (true, '夜间'),
           ],
-          selected: {_dark},
-          onSelectionChanged: (v) {
-            setState(() => _dark = v.first);
-            n.setThemeDark(v.first);
+          value: _dark,
+          onChanged: (v) {
+            setState(() => _dark = v);
+            n.setThemeDark(v);
           },
         ),
         const SizedBox(height: 24),
@@ -458,13 +623,13 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
       children: [
         _SectionTitle('渲染材质', scheme),
         const SizedBox(height: 8),
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'liquid', label: Text('液态玻璃')),
-            ButtonSegment(value: 'lite', label: Text('毛玻璃')),
+        _GlassSegmented<String>(
+          items: const [
+            ('liquid', '液态玻璃'),
+            ('lite', '毛玻璃'),
           ],
-          selected: {shell.glassMode},
-          onSelectionChanged: (v) => n.setGlassMode(v.first),
+          value: shell.glassMode,
+          onChanged: (v) => n.setGlassMode(v),
         ),
         const SizedBox(height: 16),
         _LiveSlider(
@@ -495,18 +660,38 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
           },
         ),
         const SizedBox(height: 24),
+        _SectionTitle('设置 Sheet 材质', scheme),
+        const SizedBox(height: 4),
+        SwitchListTile(
+          title: const Text('轻模糊'),
+          subtitle: const Text('仅本设置弹层；若正文缩放/发虚请关掉'),
+          value: shell.readerSheetBlurOn,
+          onChanged: (v) => n.setReaderSheetBlurOn(v),
+        ),
+        if (shell.readerSheetBlurOn)
+          _LiveSlider(
+            label: '模糊强度',
+            value: shell.readerSheetBlurSigma,
+            min: 0,
+            max: 16,
+            unit: '',
+            // 拖动即写：Consumer 包着 GlassSheet，强度实时作用本弹层
+            onChanged: (v) => n.setReaderSheetBlurSigma(v),
+            onChangeEnd: (v) => n.setReaderSheetBlurSigma(v),
+          ),
+        const SizedBox(height: 24),
         _SectionTitle('顶栏', scheme),
         SwitchListTile(
           title: const Text('合并按钮'),
           subtitle: const Text('返回/更多合并为一个胶囊'),
-          value: false,
-          onChanged: (v) {},
+          value: shell.readerTopMergeButtons,
+          onChanged: (v) => n.setReaderTopMergeButtons(v),
         ),
         SwitchListTile(
           title: const Text('标题胶囊'),
           subtitle: const Text('书名显示在胶囊内'),
-          value: false,
-          onChanged: (v) {},
+          value: shell.readerTopTitlePill,
+          onChanged: (v) => n.setReaderTopTitlePill(v),
         ),
       ],
     );
@@ -599,6 +784,7 @@ class _LiveSlider extends StatelessWidget {
     required this.unit,
     required this.onChanged,
     required this.onChangeEnd,
+    this.divisions,
   });
   final String label;
   final double value;
@@ -607,9 +793,11 @@ class _LiveSlider extends StatelessWidget {
   final String unit;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
+  final int? divisions;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final display =
         unit == '%' ? '${(value * 100).round()}%' : '${value.toStringAsFixed(1)}$unit';
     return Padding(
@@ -618,15 +806,187 @@ class _LiveSlider extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('$label：$display'),
-          Slider(
+          // 纯绘制玻璃轨：与阅读 chrome / 设置页同一 AppGlass 色板
+          _GlassTrackSlider(
             value: value.clamp(min, max),
             min: min,
             max: max,
+            divisions: divisions,
             onChanged: onChanged,
-            onChangeEnd: onChangeEnd,
+            onChangedEnd: onChangeEnd,
+            activeColor: scheme.primary,
+            inactiveColor: AppGlass.sliderTrackInactive(scheme),
+            thumbColor: AppGlass.sliderThumb(scheme),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 液态色板分段（restPillTint 选中 + 白描边）。
+/// 阅读页禁 BF：纯 DecoratedBox，对齐壳层 pill / 传统形态切换钮。
+class _GlassSegmented<T> extends StatelessWidget {
+  const _GlassSegmented({
+    required this.items,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final List<(T, String)> items;
+  final T value;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    final rim = Colors.white.withValues(alpha: light ? 0.45 : 0.24);
+    return Row(
+      children: [
+        for (final (v, label) in items)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onChanged(v),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: v == value
+                        ? AppGlass.restPillTint(scheme)
+                        : scheme.surface.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: rim, width: 1.0),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    child: Center(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              v == value ? FontWeight.w600 : FontWeight.w500,
+                          // 与液态圆键同一白字语言
+                          color: v == value
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.78),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 纯绘制滑轨（禁止 LiquidGlassSlider：内挂 BF → 正文缩放）。
+class _GlassTrackSlider extends StatelessWidget {
+  const _GlassTrackSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    required this.onChangedEnd,
+    required this.activeColor,
+    required this.inactiveColor,
+    required this.thumbColor,
+    this.divisions,
+  });
+
+  final double value;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangedEnd;
+  final Color activeColor;
+  final Color inactiveColor;
+  final Color thumbColor;
+  final int? divisions;
+
+  @override
+  Widget build(BuildContext context) {
+    double emit(double t) {
+      var v = min + t.clamp(0.0, 1.0) * (max - min);
+      if (divisions != null && divisions! > 0) {
+        final step = (max - min) / divisions!;
+        v = min + ((v - min) / step).round() * step;
+      }
+      return v.clamp(min, max);
+    }
+
+    final t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth.isFinite ? constraints.maxWidth : 240.0;
+        const thumbW = 28.0;
+        const thumbH = 18.0;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (d) {
+            onChanged(emit(d.localPosition.dx / w));
+          },
+          onHorizontalDragEnd: (_) => onChangedEnd(value),
+          onTapDown: (d) {
+            final v = emit(d.localPosition.dx / w);
+            onChanged(v);
+            onChangedEnd(v);
+          },
+          child: SizedBox(
+            width: w,
+            height: 44,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                Positioned(
+                  left: thumbW / 2,
+                  right: thumbW / 2,
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: inactiveColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: thumbW / 2,
+                  child: Container(
+                    height: 4,
+                    width: ((w - thumbW) * t)
+                        .clamp(0.0, (w - thumbW).clamp(0.0, double.infinity)),
+                    decoration: BoxDecoration(
+                      color: activeColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: (thumbW / 2 + (w - thumbW) * t - thumbW / 2)
+                      .clamp(0.0, (w - thumbW).clamp(0.0, double.infinity)),
+                  child: Container(
+                    width: thumbW,
+                    height: thumbH,
+                    decoration: BoxDecoration(
+                      color: thumbColor,
+                      borderRadius: BorderRadius.circular(thumbH / 2),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
