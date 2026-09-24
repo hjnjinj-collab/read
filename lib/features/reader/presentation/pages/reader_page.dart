@@ -958,6 +958,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                   navBlur: 0,
                                   navTint: shell.navTintStrength,
                                   radius: 28,
+                                  // 大面板强档：折射带 + 光学描边（圆键保持 0）
+                                  strength: 1,
                                 ),
                                 foregroundColor: scheme.onSurface,
                                 builder: (context) =>
