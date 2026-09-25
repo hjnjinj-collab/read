@@ -146,6 +146,9 @@ class ReaderSettings {
   /// 正文字重：300 细 / 400 常规 / 500 中 / 700 粗
   final int bodyFontWeight;
 
+  /// 用户自定义主题预设（最近若干套，可命名）
+  final List<UserThemePreset> userThemes;
+
   const ReaderSettings({
     required this.fontSize,
     required this.lineHeight,
@@ -189,6 +192,7 @@ class ReaderSettings {
     required this.textColor,
     required this.accentColor,
     required this.bodyFontWeight,
+    required this.userThemes,
   });
 
   /// 默认设置 = 现行全部硬编码值
@@ -235,6 +239,7 @@ class ReaderSettings {
         textColor: null,
         accentColor: null,
         bodyFontWeight: 400,
+        userThemes: [],
       );
 
   /// 安全解析：损坏 JSON / 缺键 / 类型不符逐字段落默认，永不抛
@@ -300,6 +305,7 @@ class ReaderSettings {
           final v = _i(j, 'bodyFontWeight', 400);
           return (v == 300 || v == 500 || v == 700) ? v : 400;
         }(),
+        userThemes: _userThemes(j['userThemes']),
       );
     } catch (_) {
       return ReaderSettings.defaults();
@@ -364,5 +370,70 @@ class ReaderSettings {
       ));
     }
     return out;
+  }
+
+  static List<UserThemePreset> _userThemes(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <UserThemePreset>[];
+    for (final item in raw) {
+      if (item is! Map<String, dynamic>) continue;
+      final t = UserThemePreset.tryParse(item);
+      if (t != null) out.add(t);
+    }
+    return out;
+  }
+}
+
+/// 用户自定义阅读主题（可命名；日/夜纸色 + 文字/强调色 + 透明度）
+class UserThemePreset {
+  final String name;
+  final bool dark;
+  final int lightPaper;
+  final int darkPaper;
+  final int? textColor;
+  final int? accentColor;
+  final double bgOpacity;
+  final String bgPreset;
+
+  const UserThemePreset({
+    required this.name,
+    required this.dark,
+    required this.lightPaper,
+    required this.darkPaper,
+    this.textColor,
+    this.accentColor,
+    this.bgOpacity = 1.0,
+    this.bgPreset = '',
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'dark': dark,
+        'lightPaper': lightPaper,
+        'darkPaper': darkPaper,
+        'textColor': textColor,
+        'accentColor': accentColor,
+        'bgOpacity': bgOpacity,
+        'bgPreset': bgPreset,
+      };
+
+  static UserThemePreset? tryParse(Map<String, dynamic> j) {
+    final name = j['name'];
+    if (name is! String || name.isEmpty) return null;
+    final lp = j['lightPaper'];
+    final dp = j['darkPaper'];
+    if (lp is! int || dp is! int) return null;
+    return UserThemePreset(
+      name: name,
+      dark: j['dark'] == true,
+      lightPaper: lp,
+      darkPaper: dp,
+      textColor: j['textColor'] is int ? j['textColor'] as int : null,
+      accentColor: j['accentColor'] is int ? j['accentColor'] as int : null,
+      bgOpacity: j['bgOpacity'] is num
+          ? (j['bgOpacity'] as num).toDouble().clamp(0.15, 1.0)
+          : 1.0,
+      bgPreset: j['bgPreset'] is String ? j['bgPreset'] as String : '',
+    );
   }
 }

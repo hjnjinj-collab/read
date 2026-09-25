@@ -80,6 +80,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _textColor = persisted.textColor;
     _accentColor = persisted.accentColor;
     _bodyFontWeight = persisted.bodyFontWeight;
+    _userThemes = List.of(persisted.userThemes);
     PageContentRenderer.userLetterSpacing = _letterSpacing;
     PageContentRenderer.titleScale = _titleScale;
     PageContentRenderer.bodyFontWeight = _bodyFontWeight;
@@ -223,6 +224,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? _textColor;
   int? _accentColor;
   int _bodyFontWeight = 400;
+  List<UserThemePreset> _userThemes = const [];
 
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
   // key = 排版参数指纹，value = 该章总页数
@@ -284,6 +286,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? get textColor => _textColor;
   int? get accentColor => _accentColor;
   int get bodyFontWeight => _bodyFontWeight;
+  List<UserThemePreset> get userThemes => List.unmodifiable(_userThemes);
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
@@ -514,6 +517,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'textColor': _textColor,
         'accentColor': _accentColor,
         'bodyFontWeight': _bodyFontWeight,
+        'userThemes': [for (final t in _userThemes) t.toJson()],
       };
 
   /// 写穿落库（内存快照即时更新 + 100ms 防抖 upsert，fire-and-forget）
@@ -688,10 +692,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _reloadAfterLayoutChange('padding');
   }
 
-  /// 用户字距（px；绘制层叠加，不进 Rust 断行）
+  /// 用户字距（px；绘制层叠加，不进 Rust 断行；**不改 fontFamily**）
   void setLetterSpacing(double v) {
     final x = v.clamp(-2.0, 8.0);
-    if ((_letterSpacing - x).abs() < 0.01) return;
+    if ((_letterSpacing - x).abs() < 0.01) {
+      // 拖动中已写过 PageContentRenderer，这里只需落库
+      _persistSettings();
+      return;
+    }
     _letterSpacing = x;
     PageContentRenderer.userLetterSpacing = x;
     PageContentRenderer.themeRevision++;
@@ -799,6 +807,60 @@ class ReaderNotifier extends Notifier<ReadingState> {
     PageContentRenderer.themeRevision++;
     // 粗体档同时打开标题/行内合成粗；其余档关闭
     _boldEnabled = w >= 700;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 保存当前日/夜纸色与文字色为命名主题（最近 8 套，同名覆盖）
+  void saveUserTheme(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    final entry = UserThemePreset(
+      name: n,
+      dark: _themeDark,
+      lightPaper: _lightPaperColor ??
+          PageContentRenderer.theme.paperColor.toARGB32(),
+      darkPaper: _darkPaperColor ?? PageContentRenderer.theme.paperColor.toARGB32(),
+      textColor: _textColor,
+      accentColor: _accentColor,
+      bgOpacity: _bgOpacity,
+      bgPreset: _bgPreset,
+    );
+    _userThemes = [
+      entry,
+      ..._userThemes.where((t) => t.name != n),
+    ].take(8).toList();
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 应用命名主题（纸色/文字色/透明度 + 日夜）
+  void applyUserTheme(UserThemePreset t) {
+    _lightPaperColor = t.lightPaper;
+    _darkPaperColor = t.darkPaper;
+    _textColor = t.textColor;
+    _accentColor = t.accentColor;
+    _bgOpacity = t.bgOpacity;
+    _bgPreset = t.bgPreset;
+    _themeDark = t.dark;
+    PageContentRenderer.theme = t.dark ? ReaderTheme.dark : ReaderTheme.light;
+    PageContentRenderer.applyPaperOverrides(
+      light: _lightPaperColor,
+      dark: _darkPaperColor,
+      opacity: _bgOpacity,
+    );
+    PageContentRenderer.applyColorOverrides(
+      text: _textColor,
+      accent: _accentColor,
+    );
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 删除命名主题
+  void deleteUserTheme(String name) {
+    _userThemes = _userThemes.where((t) => t.name != name).toList();
     _persistSettings();
     state = state.copyWith();
   }

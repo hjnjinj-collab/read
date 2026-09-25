@@ -131,7 +131,7 @@ class PagePainter extends CustomPainter {
       ]),
       'summary': readerPageSummary(pageInfo.entries),
     });
-    canvas.drawRect(Offset.zero & size, Paint()..color = PageContentRenderer.paperColor);
+    PageContentRenderer.paintPaper(canvas, size);
     PageContentRenderer.paintPage(
       canvas,
       pageInfo,
@@ -303,6 +303,40 @@ class PageContentRenderer {
   /// 当前生效强调/注释色
   static Color get accentColor =>
       accentColorOverride ?? commentColor;
+
+  /// 纸面环境着色强度 0–1（对齐壳层 ShellAmbient 双息渐变语言）
+  static double paperAmbient = 1.0;
+
+  /// 纸面底：纸色 + 双息渐变着色（左上提亮 / 右下加深），与壳层 ambient 同语言。
+  static void paintPaper(Canvas canvas, Size size) {
+    final base = paperColor;
+    final rect = Offset.zero & size;
+    if (paperAmbient <= 0.01) {
+      canvas.drawRect(rect, Paint()..color = base);
+      return;
+    }
+    final dark = theme.name == 'dark';
+    final k = paperAmbient.clamp(0.0, 1.0);
+    // 左上：向亮侧抬；右下：向暗侧压——纯色纸也能读出层次（着色器观感）
+    final a = Color.lerp(
+      base,
+      dark ? const Color(0xFF3A3A3A) : const Color(0xFFFFF8EE),
+      (dark ? 0.10 : 0.55) * k,
+    )!;
+    final z = Color.lerp(
+      base,
+      dark ? const Color(0xFF0A0A0A) : const Color(0xFFD9CBB4),
+      (dark ? 0.22 : 0.28) * k,
+    )!;
+    final paint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [a, base, z],
+        stops: const [0, 0.45, 1],
+      ).createShader(rect);
+    canvas.drawRect(rect, paint);
+  }
 
   /// 纸色底（正式页面渲染与翻页快照共用，v16.9.3 公开化）
   /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）

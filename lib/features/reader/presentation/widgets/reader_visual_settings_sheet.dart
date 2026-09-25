@@ -9,6 +9,7 @@ import '../../../../core/theme/reader_menu_icons.dart';
 import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../providers/reader_provider.dart';
+import 'reader_page_widget.dart' show PageContentRenderer;
 
 /// 阅读视觉设置四页 sheet（对标 IA S2.4）
 /// ① 形态与图标 ② 排版布局 ③ 背景主题 ④ 材质与顶栏
@@ -650,7 +651,12 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           unit: 'px',
           iconLine: ReaderMenuIcons.lineLetter,
           iconFill: ReaderMenuIcons.fillLetter,
-          onChanged: (v) => setState(() => _letterSpacing = v),
+          // 拖动即生效（只改绘制 letterSpacing，不触碰 fontFamily）
+          onChanged: (v) {
+            setState(() => _letterSpacing = v);
+            PageContentRenderer.userLetterSpacing = v.clamp(-2.0, 8.0);
+            PageContentRenderer.themeRevision++;
+          },
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
         const SizedBox(height: 12),
@@ -788,7 +794,11 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           unit: 'x',
           iconLine: ReaderMenuIcons.lineTitle,
           iconFill: ReaderMenuIcons.fillTitle,
-          onChanged: (v) => setState(() => _titleScale = v),
+          onChanged: (v) {
+            setState(() => _titleScale = v);
+            PageContentRenderer.titleScale = v.clamp(1.0, 1.8);
+            PageContentRenderer.themeRevision++;
+          },
           onChangeEnd: (v) => n.setTitleScale(v),
         ),
         const SizedBox(height: 12),
@@ -968,6 +978,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   @override
   Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
+    ref.watch(readerProvider); // 我的主题列表/纸色变更后刷新
     final scheme = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1104,8 +1115,91 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
             ),
           ],
         ),
+        const SizedBox(height: 24),
+        _SectionTitle('我的主题', scheme,
+            line: ReaderMenuIcons.lineTheme, fill: ReaderMenuIcons.fillTheme),
+        const SizedBox(height: 8),
+        Text(
+          '把当前日/夜纸色与文字色存成命名主题（最多 8 套）',
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _saveThemeDialog(context, n),
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('保存当前为主题'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (n.userThemes.isEmpty)
+          Text(
+            '暂无自定义主题',
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final t in n.userThemes)
+                InputChip(
+                  label: Text(t.dark ? '${t.name} · 夜' : '${t.name} · 日'),
+                  onPressed: () {
+                    n.applyUserTheme(t);
+                    setState(() {
+                      _dark = t.dark;
+                      _lightPaper = Color(t.lightPaper);
+                      _darkPaper = Color(t.darkPaper);
+                      _opacity = t.bgOpacity;
+                      _preset = t.bgPreset;
+                    });
+                  },
+                  onDeleted: () {
+                    n.deleteUserTheme(t.name);
+                    setState(() {});
+                  },
+                ),
+            ],
+          ),
       ],
     );
+  }
+
+  Future<void> _saveThemeDialog(
+      BuildContext context, ReaderNotifier n) async {
+    final ctrl = TextEditingController(text: '主题${n.userThemes.length + 1}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('保存主题'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '主题名称',
+            hintText: '例如：羊皮纸夜读',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    n.saveUserTheme(name);
+    if (mounted) setState(() {});
   }
 }
 
