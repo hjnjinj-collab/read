@@ -1,14 +1,15 @@
-import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../../../core/services/font_provider.dart';
 import '../../../../core/services/reader_font.dart';
+import '../../../../core/theme/app_icons.dart';
 import '../../../../core/theme/app_theme.dart' show AppGlass;
 import '../../../../core/theme/reader_menu_icons.dart';
 import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
+import '../../../shell/settings/shell_color_picker.dart';
 import '../providers/reader_provider.dart';
 import 'reader_page_widget.dart' show PageContentRenderer;
 
@@ -976,7 +977,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         );
   }
 
-  /// 取色器：自定义日/夜纸色（flex_color_picker）
+  /// 取色器：复用壳层液态取色对话框
   Future<void> _pickPaperColor(
     BuildContext context,
     ReaderNotifier n, {
@@ -985,32 +986,24 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     final current = isDark
         ? (_darkPaper ?? const Color(0xFF1E1E1E))
         : (_lightPaper ?? const Color(0xFFF5F1E8));
-    final picked = await showColorPickerDialog(
+    await showShellColorPicker(
       context,
-      current,
-      pickersEnabled: const {
-        ColorPickerType.both: true,
-        ColorPickerType.primary: true,
-        ColorPickerType.accent: true,
-        ColorPickerType.bw: true,
-        ColorPickerType.custom: true,
-        ColorPickerType.wheel: true,
+      initialColor: current,
+      onPick: (picked) {
+        if (!mounted) return;
+        setState(() {
+          if (isDark) {
+            _darkPaper = picked;
+          } else {
+            _lightPaper = picked;
+          }
+          _preset = '';
+        });
+        n.setPaperColor(
+          light: (_lightPaper ?? const Color(0xFFF5F1E8)).toARGB32(),
+          dark: (_darkPaper ?? const Color(0xFF1E1E1E)).toARGB32(),
+        );
       },
-      enableShadesSelection: true,
-      enableTonalPalette: true,
-    );
-    if (!mounted) return;
-    setState(() {
-      if (isDark) {
-        _darkPaper = picked;
-      } else {
-        _lightPaper = picked;
-      }
-      _preset = '';
-    });
-    n.setPaperColor(
-      light: (_lightPaper ?? const Color(0xFFF5F1E8)).toARGB32(),
-      dark: (_darkPaper ?? const Color(0xFF1E1E1E)).toARGB32(),
     );
   }
 
@@ -1046,6 +1039,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               child: _ColorCard(
                 '日间 · 取色',
                 _lightPaper ?? const Color(0xFFF5F1E8),
+                showPickIcon: true,
                 onTap: () => _pickPaperColor(context, n, isDark: false),
               ),
             ),
@@ -1054,6 +1048,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               child: _ColorCard(
                 '夜间 · 取色',
                 _darkPaper ?? const Color(0xFF1E1E1E),
+                showPickIcon: true,
                 onTap: () => _pickPaperColor(context, n, isDark: true),
               ),
             ),
@@ -1981,41 +1976,71 @@ class _GlassTrackSlider extends StatelessWidget {
 }
 
 class _ColorCard extends StatelessWidget {
-  const _ColorCard(this.label, this.color, {this.onTap, this.selected = false});
+  const _ColorCard(this.label, this.color,
+      {this.onTap, this.selected = false, this.showPickIcon = false});
   final String label;
   final Color color;
   final VoidCallback? onTap;
   final bool selected;
 
+  /// true：右上角显示取色器角标，提示可自定义
+  final bool showPickIcon;
+
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: 64,
-          width: 88,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.white.withValues(alpha: 0.3),
-              width: selected ? 2.2 : 1,
-            ),
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: color.computeLuminance() > 0.5
-                    ? Colors.black87
-                    : Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 64,
+        width: 88,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? scheme.primary
+                : Colors.white.withValues(alpha: 0.3),
+            width: selected ? 2.2 : 1,
           ),
         ),
-      );
+        child: Stack(
+          children: [
+            Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: color.computeLuminance() > 0.5
+                      ? Colors.black87
+                      : Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (showPickIcon)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    AppIcons.colorPicker,
+                    size: 12,
+                    color: color.computeLuminance() > 0.5
+                        ? Colors.black87
+                        : Colors.white,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _BgGridItem extends StatelessWidget {
