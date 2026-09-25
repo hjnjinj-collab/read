@@ -76,6 +76,11 @@
 - 边距默认预设（窄/标准/宽），四向滑杆收进「精细调节」
 - `textColor`/`accentColor` 持久化 + `PageContentRenderer` 覆盖
 
+### 截图反馈（2026-09-23）
+- 子页签改**纯文字下划线**（不再与主 Tab 玻璃胶囊/图标重复）
+- 内容区 `ClipRect` + 只保留当前页滑入，杜绝叠影
+- 字体弹层改 `LiquidGlassSheet`（同 sheet 材质），去掉默认黑底
+
 ### 本轮已落地（2026-09-23）
 - 工具排网格：`readerIconItemsPerRow/RowCount` 真正切行，溢出进「更多」sheet
 - 排版：字距、标题倍率、页眉/页脚显隐、边距滑杆回显

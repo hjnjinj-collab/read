@@ -6,6 +6,7 @@ import '../../../../core/services/font_provider.dart';
 import '../../../../core/services/reader_font.dart';
 import '../../../../core/theme/app_theme.dart' show AppGlass;
 import '../../../../core/theme/reader_menu_icons.dart';
+import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../providers/reader_provider.dart';
 
@@ -435,6 +436,7 @@ class _TypographyPage extends ConsumerStatefulWidget {
 class _TypographyPageState extends ConsumerState<_TypographyPage> {
   /// 子页签：0 字体 / 1 正文 / 2 颜色 / 3 布局
   int _sub = 0;
+  static const _subLabels = ['字体', '正文', '颜色', '布局'];
   double _fontSize = 18;
   double _lineHeight = 1.5;
   double _paraSpacing = 1.0;
@@ -489,54 +491,83 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     final n = ref.read(readerProvider.notifier);
     ref.watch(readerProvider);
     final scheme = Theme.of(context).colorScheme;
+    final disable = MediaQuery.disableAnimationsOf(context);
     return Column(
       children: [
-        // 子页签胶囊（与主 Tab 同语言，轻量一行）
+        // 子页签：纯文字下划线（刻意不与主 Tab 玻璃胶囊撞脸，也不复用图标）
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: _GlassSegmented<int>(
-            items: const [
-              (0, '字体'),
-              (1, '正文'),
-              (2, '颜色'),
-              (3, '布局'),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              for (var i = 0; i < _subLabels.length; i++)
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _sub = i),
+                    child: AnimatedContainer(
+                      duration: Duration(milliseconds: disable ? 0 : 220),
+                      curve: Curves.easeOutCubic,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: _sub == i
+                                ? scheme.primary
+                                : Colors.transparent,
+                            width: 2.2,
+                          ),
+                        ),
+                      ),
+                      child: Text(
+                        _subLabels[i],
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              _sub == i ? FontWeight.w700 : FontWeight.w500,
+                          color: _sub == i
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
-            icons: const [
-              (ReaderMenuIcons.lineType, ReaderMenuIcons.fillType),
-              (ReaderMenuIcons.lineForm, ReaderMenuIcons.fillForm),
-              (ReaderMenuIcons.lineTextColor, ReaderMenuIcons.fillTextColor),
-              (ReaderMenuIcons.lineGrid, ReaderMenuIcons.fillGrid),
-            ],
-            value: _sub,
-            onChanged: (v) => setState(() => _sub = v),
           ),
         ),
+        // ClipRect：切换时新旧页只在内容区内滑移，禁止叠到页签/别的区
         Expanded(
-          child: AnimatedSwitcher(
-            duration: Duration(
-              milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 280,
-            ),
-            switchInCurve: Curves.easeOutCubic,
-            transitionBuilder: (child, anim) {
-              // 只 Transform：Fade 会隔离玻璃控件
-              return SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0.06, 0),
-                  end: Offset.zero,
-                ).animate(anim),
-                child: child,
-              );
-            },
-            child: KeyedSubtree(
-              key: ValueKey(_sub),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                children: switch (_sub) {
-                  0 => _fontSection(n, scheme),
-                  1 => _bodySection(n, scheme),
-                  2 => _colorSection(n, scheme),
-                  _ => _layoutSection(n, scheme),
-                },
+          child: ClipRect(
+            child: AnimatedSwitcher(
+              duration: Duration(milliseconds: disable ? 0 : 300),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, anim) {
+                // 只 Transform：Fade 会隔离玻璃控件
+                return SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.22, 0),
+                    end: Offset.zero,
+                  ).animate(anim),
+                  child: child,
+                );
+              },
+              layoutBuilder: (currentChild, previousChildren) {
+                // 只保留当前页：旧页立即卸载，避免叠影（ClipRect + 滑入）
+                return currentChild ?? const SizedBox.expand();
+              },
+              child: KeyedSubtree(
+                key: ValueKey(_sub),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  children: switch (_sub) {
+                    0 => _fontSection(n, scheme),
+                    1 => _bodySection(n, scheme),
+                    2 => _colorSection(n, scheme),
+                    _ => _layoutSection(n, scheme),
+                  },
+                ),
               ),
             ),
           ),
@@ -858,9 +889,33 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
       ];
 
   void _showFontSheet(BuildContext context) {
-    showModalBottomSheet(
+    // 与设置主 sheet 同源液态玻璃；禁止默认黑底 ModalBottomSheet
+    showModalBottomSheet<void>(
       context: context,
-      builder: (context) => const _FontSelectSheet(),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      clipBehavior: Clip.none,
+      builder: (sheetCtx) {
+        final scheme = Theme.of(sheetCtx).colorScheme;
+        final shell = ProviderScope.containerOf(sheetCtx)
+            .read(shellSettingsProvider);
+        final blur =
+            shell.readerSheetBlurOn ? shell.readerSheetBlurSigma : 0.0;
+        return LiquidGlassSheet(
+          anchor: LiquidGlassSheetAnchor.attached,
+          grabber: true,
+          style: shellFrostLiquidStyle(
+            scheme,
+            navBlur: blur,
+            navTint: shell.navTintStrength,
+            radius: 28,
+            strength: 1,
+          ),
+          foregroundColor: scheme.onSurface,
+          child: const _FontSelectSheet(),
+        );
+      },
     );
   }
 }
@@ -1248,7 +1303,15 @@ class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
     final current = n.customFontFamily;
     return Container(
       padding: const EdgeInsets.all(16),
-      child: Column(
+      child: Theme(
+        // 液态玻璃上不要 Material ListTile 默认色块
+        data: Theme.of(context).copyWith(
+          listTileTheme: const ListTileThemeData(
+            tileColor: Colors.transparent,
+            iconColor: null,
+          ),
+        ),
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
@@ -1274,6 +1337,7 @@ class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
               shrinkWrap: true,
               children: [
                 ListTile(
+                  tileColor: Colors.transparent,
                   leading: ReaderMenuGlyph(
                     line: ReaderMenuIcons.lineType,
                     fill: ReaderMenuIcons.fillType,
@@ -1365,6 +1429,7 @@ class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
