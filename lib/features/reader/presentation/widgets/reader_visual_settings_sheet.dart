@@ -436,7 +436,6 @@ class _TypographyPage extends ConsumerStatefulWidget {
 class _TypographyPageState extends ConsumerState<_TypographyPage> {
   /// 子页签：0 字体 / 1 正文 / 2 颜色 / 3 布局
   int _sub = 0;
-  static const _subLabels = ['字体', '正文', '颜色', '布局'];
   double _fontSize = 18;
   double _lineHeight = 1.5;
   double _paraSpacing = 1.0;
@@ -494,46 +493,24 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     final disable = MediaQuery.disableAnimationsOf(context);
     return Column(
       children: [
-        // 子页签：纯文字下划线（刻意不与主 Tab 玻璃胶囊撞脸，也不复用图标）
+        // 子页签：玻璃胶囊 + 独立图标；与主 Tab 拉开间距，避免贴在一起像重复
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          child: Row(
-            children: [
-              for (var i = 0; i < _subLabels.length; i++)
-                Expanded(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _sub = i),
-                    child: AnimatedContainer(
-                      duration: Duration(milliseconds: disable ? 0 : 220),
-                      curve: Curves.easeOutCubic,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(
-                            color: _sub == i
-                                ? scheme.primary
-                                : Colors.transparent,
-                            width: 2.2,
-                          ),
-                        ),
-                      ),
-                      child: Text(
-                        _subLabels[i],
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              _sub == i ? FontWeight.w700 : FontWeight.w500,
-                          color: _sub == i
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: _GlassSegmented<int>(
+            items: const [
+              (0, '字体'),
+              (1, '正文'),
+              (2, '颜色'),
+              (3, '布局'),
             ],
+            icons: const [
+              (ReaderMenuIcons.lineTabFont, ReaderMenuIcons.fillTabFont),
+              (ReaderMenuIcons.lineTabBody, ReaderMenuIcons.fillTabBody),
+              (ReaderMenuIcons.lineTabColor, ReaderMenuIcons.fillTabColor),
+              (ReaderMenuIcons.lineTabLayout, ReaderMenuIcons.fillTabLayout),
+            ],
+            value: _sub,
+            onChanged: (v) => setState(() => _sub = v),
           ),
         ),
         // ClipRect：切换时新旧页只在内容区内滑移，禁止叠到页签/别的区

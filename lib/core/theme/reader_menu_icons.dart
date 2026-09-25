@@ -94,6 +94,16 @@ class ReaderMenuIcons {
   static const lineAccent = Iconsax.brush_2;
   static const fillAccent = Iconsax.brush_2_copy;
 
+  // ── 排版子页签（与主 Tab 图标错开：主 Tab 用 category_2/document_text/colorfilter/glass_1）──
+  static const lineTabFont = Iconsax.text_block;
+  static const fillTabFont = Iconsax.text_block_copy;
+  static const lineTabBody = Iconsax.textalign_left;
+  static const fillTabBody = Iconsax.textalign_left_copy;
+  static const lineTabColor = Iconsax.color_swatch;
+  static const fillTabColor = Iconsax.color_swatch_copy;
+  static const lineTabLayout = Iconsax.element_4;
+  static const fillTabLayout = Iconsax.element_4_copy;
+
   /// 按风格解析成最终字形（线性/面性；双色由 [ReaderMenuGlyph] 叠色）。
   static IconData resolve({
     required IconData line,
