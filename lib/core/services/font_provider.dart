@@ -118,6 +118,60 @@ class FontProvider {
     return h;
   }
 
+  /// 扫描 `<appSupport>/fonts/` 下已导入字体（P6 持久化副本）。
+  /// 文件名格式：`user_<stem>_<hash><ext>`。
+  static Future<List<PickedFont>> listPersistedFonts() async {
+    final supportDir = await getApplicationSupportDirectory();
+    final fontsDir =
+        Directory('${supportDir.path}${Platform.pathSeparator}fonts');
+    if (!await fontsDir.exists()) return const [];
+    final out = <PickedFont>[];
+    await for (final entity in fontsDir.list()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      final lower = name.toLowerCase();
+      if (!(lower.endsWith('.ttf') ||
+          lower.endsWith('.otf') ||
+          lower.endsWith('.ttc'))) {
+        continue;
+      }
+      final dot = name.lastIndexOf('.');
+      final stemFull = dot >= 0 ? name.substring(0, dot) : name;
+      // user_<stem>_<hash> → display 用 stem（去掉 hash 后缀）
+      var display = stemFull;
+      if (stemFull.startsWith('user_')) {
+        display = stemFull.substring(5);
+        final last = display.lastIndexOf('_');
+        if (last > 0) display = display.substring(0, last);
+      }
+      out.add(PickedFont(
+        fontName: stemFull,
+        displayLabel: '用户字体：$display',
+        persistedPath: entity.path,
+      ));
+    }
+    out.sort((a, b) => a.displayLabel.compareTo(b.displayLabel));
+    return out;
+  }
+
+  /// 从持久化路径加载字体（列表点选已导入字体）。
+  static Future<PickedFont?> loadFromPersistedPath(PickedFont font) async {
+    try {
+      final file = File(font.persistedPath);
+      if (!await file.exists()) return null;
+      final bytes = await file.readAsBytes();
+      final ok = await ReaderFont.loadCustomFont(
+        name: font.fontName,
+        bytes: bytes,
+        displayLabel: font.displayLabel,
+      );
+      return ok ? font : null;
+    } catch (e) {
+      debugPrint('FontProvider.loadFromPersistedPath failed: $e');
+      return null;
+    }
+  }
+
   /// 简短 toast（不引 SnackBar 库避免额外依赖）
   static void _toast(BuildContext context, String message) {
     if (!context.mounted) return;

@@ -78,18 +78,15 @@ class _ReaderVisualSettingsSheetState
 
   void _goTab(int i) {
     if (_tabCtrl.index == i && _pageCtrl.page?.round() == i) return;
+    final ms = MediaQuery.disableAnimationsOf(context) ? 0 : 450;
     _tabCtrl.animateTo(
       i,
-      duration: Duration(
-        milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 320,
-      ),
+      duration: Duration(milliseconds: ms),
       curve: Curves.easeOutCubic,
     );
     _pageCtrl.animateToPage(
       i,
-      duration: Duration(
-        milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 320,
-      ),
+      duration: Duration(milliseconds: ms),
       curve: Curves.easeOutCubic,
     );
   }
@@ -141,25 +138,46 @@ class _ReaderVisualSettingsSheetState
             ),
           ),
           Expanded(
-            child: PageView(
+            child: PageView.builder(
               controller: _pageCtrl,
+              itemCount: 4,
               onPageChanged: (i) {
                 _tabCtrl.animateTo(
                   i,
                   duration: Duration(
                     milliseconds:
-                        MediaQuery.disableAnimationsOf(context) ? 0 : 240,
+                        MediaQuery.disableAnimationsOf(context) ? 0 : 280,
                   ),
                   curve: Curves.easeOutCubic,
                 );
                 setState(() {});
               },
-              children: const [
-                _FormIconPage(),
-                _TypographyPage(),
-                _BackgroundPage(),
-                _MaterialPage(),
-              ],
+              itemBuilder: (context, i) {
+                final pages = const [
+                  _FormIconPage(),
+                  _TypographyPage(),
+                  _BackgroundPage(),
+                  _MaterialPage(),
+                ];
+                // 视差滑移 + 轻微缩放（禁止 Opacity 包玻璃；只用 Transform）
+                return AnimatedBuilder(
+                  animation: _pageCtrl,
+                  builder: (context, child) {
+                    final page = _pageCtrl.hasClients
+                        ? (_pageCtrl.page ?? i.toDouble())
+                        : i.toDouble();
+                    final t = (page - i).clamp(-1.0, 1.0);
+                    return Transform.translate(
+                      offset: Offset(t * 28, 0),
+                      child: Transform.scale(
+                        scale: 1 - t.abs() * 0.05,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: pages[i],
+                );
+              },
             ),
           ),
         ],
@@ -484,6 +502,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 12,
           max: 32,
           unit: 'px',
+          iconLine: ReaderMenuIcons.lineSize,
+          iconFill: ReaderMenuIcons.fillSize,
           onChanged: (v) => setState(() => _fontSize = v),
           onChangeEnd: (v) => n.setFontSize(v),
         ),
@@ -493,6 +513,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 1.0,
           max: 2.0,
           unit: 'x',
+          iconLine: ReaderMenuIcons.lineRows,
+          iconFill: ReaderMenuIcons.fillRows,
           onChanged: (v) => setState(() => _lineHeight = v),
           onChangeEnd: (v) => n.setLineHeight(v),
         ),
@@ -502,6 +524,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 0.5,
           max: 2.0,
           unit: 'x',
+          iconLine: ReaderMenuIcons.lineForm,
+          iconFill: ReaderMenuIcons.fillForm,
           onChanged: (v) => setState(() => _paraSpacing = v),
           onChangeEnd: (v) => n.setParagraphSpacing(v),
         ),
@@ -511,6 +535,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: -2,
           max: 8,
           unit: 'px',
+          iconLine: ReaderMenuIcons.lineLetter,
+          iconFill: ReaderMenuIcons.fillLetter,
           onChanged: (v) => setState(() => _letterSpacing = v),
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
@@ -543,6 +569,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 1.0,
           max: 1.8,
           unit: 'x',
+          iconLine: ReaderMenuIcons.lineTitle,
+          iconFill: ReaderMenuIcons.fillTitle,
           onChanged: (v) => setState(() => _titleScale = v),
           onChangeEnd: (v) => n.setTitleScale(v),
         ),
@@ -623,6 +651,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 0,
           max: 64,
           unit: 'px',
+          iconLine: ReaderMenuIcons.lineHeader,
+          iconFill: ReaderMenuIcons.fillHeader,
           onChanged: (v) => setState(() => _padV = v),
           onChangeEnd: (v) => n.setPadding(vertical: v),
         ),
@@ -632,6 +662,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           min: 0,
           max: 48,
           unit: 'px',
+          iconLine: ReaderMenuIcons.lineGrid,
+          iconFill: ReaderMenuIcons.fillGrid,
           onChanged: (v) => setState(() => _padH = v),
           onChangeEnd: (v) => n.setPadding(horizontal: v),
         ),
@@ -971,13 +1003,63 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
 
 // ── 字体选择 sheet ──
 
-class _FontSelectSheet extends ConsumerWidget {
+class _FontSelectSheet extends ConsumerStatefulWidget {
   const _FontSelectSheet();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_FontSelectSheet> createState() => _FontSelectSheetState();
+}
+
+class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
+  List<PickedFont> _saved = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    setState(() => _loading = true);
+    final list = await FontProvider.listPersistedFonts();
+    if (!mounted) return;
+    setState(() {
+      _saved = list;
+      _loading = false;
+    });
+  }
+
+  Future<void> _apply(PickedFont font) async {
+    final n = ref.read(readerProvider.notifier);
+    final ok = await FontProvider.loadFromPersistedPath(font);
+    if (!mounted) return;
+    if (ok == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${font.displayLabel} 加载失败')),
+      );
+      return;
+    }
+    n.setCustomFont(
+      fontFamily: ok.fontName,
+      fontFilePath: ok.persistedPath,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${ok.displayLabel} 已切换'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
+    final iconStyle = refIconStyleOf(context);
+    final current = n.customFontFamily;
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1000,41 +1082,101 @@ class _FontSelectSheet extends ConsumerWidget {
               fontFamily: ReaderFont.family,
             ),
           ),
-          const SizedBox(height: 16),
-          ListTile(
-            leading: const Icon(Icons.text_fields),
-            title: const Text('Noto Sans CJK SC（内置）'),
-            trailing: n.customFontFamily.isEmpty
-                ? const Icon(Icons.check, color: Colors.green)
-                : null,
-            onTap: () async {
-              await n.resetToBuiltinFont();
-              if (context.mounted) Navigator.of(context).pop();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.folder_open),
-            title: const Text('选择本地字体文件'),
-            subtitle: const Text('支持 .ttf / .otf / .ttc'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final picked = await FontProvider.pickAndLoadCustomFont(context);
-              if (picked != null) {
-                n.setCustomFont(
-                  fontFamily: picked.fontName,
-                  fontFilePath: picked.persistedPath,
-                );
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('${picked.displayLabel} 已切换并持久化'),
-                      duration: const Duration(seconds: 2),
+          const SizedBox(height: 12),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                ListTile(
+                  leading: ReaderMenuGlyph(
+                    line: ReaderMenuIcons.lineType,
+                    fill: ReaderMenuIcons.fillType,
+                    style: iconStyle,
+                    size: 22,
+                    color: scheme.primary,
+                  ),
+                  title: const Text('Noto Sans CJK SC（内置）'),
+                  trailing: current.isEmpty
+                      ? Icon(Icons.check, color: scheme.primary)
+                      : null,
+                  onTap: () async {
+                    await n.resetToBuiltinFont();
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
+                ),
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_saved.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: Text(
+                      '暂无已导入字体，从下方选择文件',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
-                  );
-                  Navigator.of(context).pop();
-                }
-              }
-            },
+                  )
+                else
+                  for (final f in _saved)
+                    ListTile(
+                      leading: ReaderMenuGlyph(
+                        line: ReaderMenuIcons.lineLetter,
+                        fill: ReaderMenuIcons.fillLetter,
+                        style: iconStyle,
+                        size: 22,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      title: Text(f.displayLabel),
+                      subtitle: Text(
+                        f.fontName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: current == f.fontName
+                          ? Icon(Icons.check, color: scheme.primary)
+                          : null,
+                      onTap: () => _apply(f),
+                    ),
+                ListTile(
+                  leading: ReaderMenuGlyph(
+                    line: ReaderMenuIcons.lineGrid,
+                    fill: ReaderMenuIcons.fillGrid,
+                    style: iconStyle,
+                    size: 22,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  title: const Text('选择本地字体文件'),
+                  subtitle: const Text('支持 .ttf / .otf / .ttc'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final picked =
+                        await FontProvider.pickAndLoadCustomFont(context);
+                    if (picked != null) {
+                      n.setCustomFont(
+                        fontFamily: picked.fontName,
+                        fontFilePath: picked.persistedPath,
+                      );
+                      await _reload();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content:
+                                Text('${picked.displayLabel} 已切换并持久化'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                        Navigator.of(context).pop();
+                      }
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1184,6 +1326,8 @@ class _LiveSlider extends StatelessWidget {
     required this.onChanged,
     required this.onChangeEnd,
     this.divisions,
+    this.iconLine,
+    this.iconFill,
   });
   final String label;
   final double value;
@@ -1193,6 +1337,8 @@ class _LiveSlider extends StatelessWidget {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
   final int? divisions;
+  final IconData? iconLine;
+  final IconData? iconFill;
 
   @override
   Widget build(BuildContext context) {
@@ -1204,7 +1350,22 @@ class _LiveSlider extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$label：$display'),
+          Row(
+            children: [
+              if (iconLine != null && iconFill != null) ...[
+                ReaderMenuGlyph(
+                  line: iconLine!,
+                  fill: iconFill!,
+                  style: refIconStyleOf(context),
+                  size: 16,
+                  color: scheme.primary,
+                  duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text('$label：$display'),
+            ],
+          ),
           // 纯绘制玻璃轨：与阅读 chrome / 设置页同一 AppGlass 色板
           _GlassTrackSlider(
             value: value.clamp(min, max),

@@ -99,9 +99,10 @@ class ReaderFont {
         ..addFont(Future.value(ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes)));
       await loader.load();
 
+      // 注册成功即切换（探针仅告警）：CJK 字体字宽接近时探针会误判
+      // "未生效"，导致真机上选了字体却永远不生效。以 FontLoader 成功为准。
       if (!_isFontActive(name)) {
-        debugPrint('✗ $name 注册未生效（advance 与默认一致）');
-        return false;
+        debugPrint('! $name 宽度探针与默认接近（仍启用）');
       }
 
       family = name;
