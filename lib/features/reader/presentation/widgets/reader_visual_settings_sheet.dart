@@ -443,8 +443,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
   double _titleScale = 1.15;
   bool _showHeader = true;
   bool _showFooter = true;
-  bool _bold = true;
   bool _italic = true;
+  int _bodyWeight = 400;
   bool _indent = true;
   int _indentChars = 2;
   bool _justify = false;
@@ -460,8 +460,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     final n = ref.read(readerProvider.notifier);
     _fontSize = n.fontSize;
     _lineHeight = n.lineHeight;
-    _bold = n.boldEnabled;
     _italic = n.italicEnabled;
+    _bodyWeight = n.bodyFontWeight;
     _paraSpacing = n.paragraphSpacingMultiplier;
     _letterSpacing = n.letterSpacing;
     _titleScale = n.titleScale;
@@ -583,21 +583,31 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _fontSize = v),
           onChangeEnd: (v) => n.setFontSize(v),
         ),
-        const SizedBox(height: 8),
-        _GlassSwitchRow(
-          line: ReaderMenuIcons.lineType,
-          fill: ReaderMenuIcons.fillType,
-          title: '粗体',
-          value: _bold,
+        const SizedBox(height: 10),
+        _SectionTitle('字重', scheme,
+            line: ReaderMenuIcons.lineTitle, fill: ReaderMenuIcons.fillTitle),
+        const SizedBox(height: 6),
+        _GlassSegmented<int>(
+          items: const [
+            (300, '细体'),
+            (400, '常规'),
+            (500, '中等'),
+            (700, '粗体'),
+          ],
+          value: _bodyWeight,
           onChanged: (v) {
-            setState(() => _bold = v);
-            n.setBoldEnabled(v);
+            setState(() {
+              _bodyWeight = v;
+            });
+            n.setBodyFontWeight(v);
           },
         ),
+        const SizedBox(height: 8),
         _GlassSwitchRow(
           line: ReaderMenuIcons.lineTitle,
           fill: ReaderMenuIcons.fillTitle,
           title: '斜体',
+          subtitle: '倾斜正文与标题',
           value: _italic,
           onChanged: (v) {
             setState(() => _italic = v);
@@ -1646,7 +1656,7 @@ class _GlassSegmented<T> extends StatelessWidget {
                 : null;
             return Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => onChanged(v),

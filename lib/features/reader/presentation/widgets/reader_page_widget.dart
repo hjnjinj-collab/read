@@ -257,6 +257,9 @@ class PageContentRenderer {
   /// 章节标题字号倍率（isChapterStart 行再乘一次）
   static double titleScale = 1.15;
 
+  /// 正文字重（300/400/500/700）
+  static int bodyFontWeight = 400;
+
   /// 背景纸色覆盖（null = 主题默认）
   static Color? lightPaperOverride;
   static Color? darkPaperOverride;
@@ -499,7 +502,12 @@ class PageContentRenderer {
         fontFamily: ReaderFont.family,
         fontWeight: (applyTitleBold && entry.isChapterStart)
             ? FontWeight.w700
-            : null,
+            : switch (PageContentRenderer.bodyFontWeight) {
+                300 => FontWeight.w300,
+                500 => FontWeight.w500,
+                700 => FontWeight.w700,
+                _ => FontWeight.w400,
+              },
         // P2 两端对齐：行内字符间隙（0=无操作）。注意此处仅绘制样式——
         // MeasureTextService 测量样式恒不带 gap（否则带隙行宽灌入
         // Rust MeasureCache 会污染断行基准）

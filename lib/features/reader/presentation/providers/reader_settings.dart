@@ -143,6 +143,9 @@ class ReaderSettings {
   /// 强调/注释色（ARGB int；null = 主题默认）
   final int? accentColor;
 
+  /// 正文字重：300 细 / 400 常规 / 500 中 / 700 粗
+  final int bodyFontWeight;
+
   const ReaderSettings({
     required this.fontSize,
     required this.lineHeight,
@@ -185,6 +188,7 @@ class ReaderSettings {
     required this.bgPreset,
     required this.textColor,
     required this.accentColor,
+    required this.bodyFontWeight,
   });
 
   /// 默认设置 = 现行全部硬编码值
@@ -202,7 +206,7 @@ class ReaderSettings {
         reSegment: false, // A35-L1: 默认关闭，用户按需开启
         segmentRules: [], // A35-L2: 默认空规则列表
         boldEnabled: true,
-        italicEnabled: true,
+        italicEnabled: false,
         showComments: true,
         commentScale: 0.82,
         commentColorPreset: 'blueGray',
@@ -230,6 +234,7 @@ class ReaderSettings {
         bgPreset: '',
         textColor: null,
         accentColor: null,
+        bodyFontWeight: 400,
       );
 
   /// 安全解析：损坏 JSON / 缺键 / 类型不符逐字段落默认，永不抛
@@ -291,6 +296,10 @@ class ReaderSettings {
         bgPreset: _s(j, 'bgPreset', ''),
         textColor: j['textColor'] is int ? j['textColor'] as int : null,
         accentColor: j['accentColor'] is int ? j['accentColor'] as int : null,
+        bodyFontWeight: () {
+          final v = _i(j, 'bodyFontWeight', 400);
+          return (v == 300 || v == 500 || v == 700) ? v : 400;
+        }(),
       );
     } catch (_) {
       return ReaderSettings.defaults();

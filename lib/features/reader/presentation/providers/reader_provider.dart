@@ -79,8 +79,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _bgPreset = persisted.bgPreset;
     _textColor = persisted.textColor;
     _accentColor = persisted.accentColor;
+    _bodyFontWeight = persisted.bodyFontWeight;
     PageContentRenderer.userLetterSpacing = _letterSpacing;
     PageContentRenderer.titleScale = _titleScale;
+    PageContentRenderer.bodyFontWeight = _bodyFontWeight;
     PageContentRenderer.applyPaperOverrides(
       light: _lightPaperColor,
       dark: _darkPaperColor,
@@ -220,6 +222,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // 颜色：正文 / 强调
   int? _textColor;
   int? _accentColor;
+  int _bodyFontWeight = 400;
 
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
   // key = 排版参数指纹，value = 该章总页数
@@ -280,6 +283,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   String get bgPreset => _bgPreset;
   int? get textColor => _textColor;
   int? get accentColor => _accentColor;
+  int get bodyFontWeight => _bodyFontWeight;
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
@@ -509,6 +513,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'bgPreset': _bgPreset,
         'textColor': _textColor,
         'accentColor': _accentColor,
+        'bodyFontWeight': _bodyFontWeight,
       };
 
   /// 写穿落库（内存快照即时更新 + 100ms 防抖 upsert，fire-and-forget）
@@ -781,6 +786,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
       accent: _accentColor,
     );
     PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 正文字重 300/400/500/700（绘制层；同步 bold 开关语义）
+  void setBodyFontWeight(int weight) {
+    final w = (weight == 300 || weight == 500 || weight == 700) ? weight : 400;
+    if (_bodyFontWeight == w) return;
+    _bodyFontWeight = w;
+    PageContentRenderer.bodyFontWeight = w;
+    PageContentRenderer.themeRevision++;
+    // 粗体档同时打开标题/行内合成粗；其余档关闭
+    _boldEnabled = w >= 700;
     _persistSettings();
     state = state.copyWith();
   }
