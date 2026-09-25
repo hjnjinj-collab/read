@@ -7,11 +7,12 @@ import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.
 
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/shell_glass_style.dart';
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
 import 'settings_chrome.dart';
 
-/// 打开壳层液态取色对话框（外观页 / 阅读背景等共用）。
+/// 打开壳层液态取色对话框（外观页主题色）。
 Future<Color?> showShellColorPicker(
   BuildContext context, {
   required Color initialColor,
@@ -26,7 +27,181 @@ Future<Color?> showShellColorPicker(
   );
 }
 
-/// 取色对话框：flex_color_picker + 液态玻璃壳（与设置容器/底栏同语言）。
+/// 阅读背景取色：液态壳（同 sheet）+ 单色 + 背景/文字预览。
+Future<Color?> showPaperColorPicker(
+  BuildContext context, {
+  required Color initialColor,
+  required Color textColor,
+  required ValueChanged<Color> onPick,
+}) {
+  return showDialog<Color>(
+    context: context,
+    builder: (context) => PaperColorPickerDialog(
+      initialColor: initialColor,
+      textColor: textColor,
+      onPick: onPick,
+    ),
+  );
+}
+
+/// 背景取色对话框：液态玻璃壳 + 单色取色 + 背景/文字预览。
+class PaperColorPickerDialog extends ConsumerStatefulWidget {
+  const PaperColorPickerDialog({
+    super.key,
+    required this.initialColor,
+    required this.textColor,
+    required this.onPick,
+  });
+
+  final Color initialColor;
+
+  /// 仅用于预览正文观感，不修改
+  final Color textColor;
+  final ValueChanged<Color> onPick;
+
+  @override
+  ConsumerState<PaperColorPickerDialog> createState() =>
+      _PaperColorPickerDialogState();
+}
+
+class _PaperColorPickerDialogState
+    extends ConsumerState<PaperColorPickerDialog> {
+  late Color _color;
+
+  @override
+  void initState() {
+    super.initState();
+    _color = widget.initialColor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final shell = ref.watch(shellSettingsProvider);
+    final blur =
+        shell.readerSheetBlurOn ? shell.readerSheetBlurSigma : 0.0;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: LiquidGlassSheet(
+          anchor: LiquidGlassSheetAnchor.attached,
+          grabber: true,
+          // 与阅读设置 sheet 同源液态壳
+          style: shellFrostLiquidStyle(
+            scheme,
+            navBlur: blur,
+            navTint: shell.navTintStrength,
+            radius: 28,
+            strength: 1,
+          ),
+          foregroundColor: scheme.onSurface,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '背景取色',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${ColorTools.nameThatColor(_color)} · ${colorNameZh(_color)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 预览：当前背景色 + 正文观感
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _color,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '字有时是会骗人的',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: widget.textColor,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '预览 · 背景与正文色搭配',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: widget.textColor.withValues(alpha: 0.72),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Center(
+                      child: ColorPicker(
+                        color: _color,
+                        onColorChanged: (c) => setState(() => _color = c),
+                        pickersEnabled: const {
+                          ColorPickerType.primary: false,
+                          ColorPickerType.accent: false,
+                          ColorPickerType.wheel: true,
+                        },
+                        width: 40,
+                        height: 40,
+                        showColorName: false,
+                        showColorCode: false,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('取消'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () {
+                        widget.onPick(_color);
+                        Navigator.pop(context, _color);
+                      },
+                      child: const Text('确定'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 取色对话框：flex_color_picker + 液态玻璃壳（外观主题色）。
 class ShellColorPickerDialog extends ConsumerStatefulWidget {
   const ShellColorPickerDialog({
     super.key,

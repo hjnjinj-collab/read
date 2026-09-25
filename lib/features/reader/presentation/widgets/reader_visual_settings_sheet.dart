@@ -977,7 +977,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         );
   }
 
-  /// 取色器：复用壳层液态取色对话框
+  /// 背景取色：壳层液态壳 + 单色 + 背景/文字预览
   Future<void> _pickPaperColor(
     BuildContext context,
     ReaderNotifier n, {
@@ -986,9 +986,12 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     final current = isDark
         ? (_darkPaper ?? const Color(0xFF1E1E1E))
         : (_lightPaper ?? const Color(0xFFF5F1E8));
-    await showShellColorPicker(
+    // 预览用当前正文色（夜/日主题下的 text）
+    final text = PageContentRenderer.textColor;
+    await showPaperColorPicker(
       context,
       initialColor: current,
+      textColor: text,
       onPick: (picked) {
         if (!mounted) return;
         setState(() {
