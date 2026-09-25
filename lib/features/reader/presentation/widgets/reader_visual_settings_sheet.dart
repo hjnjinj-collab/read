@@ -275,18 +275,27 @@ class _FormIconPage extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _SectionTitle('菜单形态', scheme),
+        _SectionTitle('菜单形态', scheme,
+            line: ReaderMenuIcons.lineForm, fill: ReaderMenuIcons.fillForm),
         const SizedBox(height: 8),
         _GlassSegmented<String>(
           items: const [
             ('traditional', '传统底栏'),
             ('floating', '悬浮图标'),
           ],
+          icons: const [
+            (ReaderMenuIcons.lineModeTraditional,
+                ReaderMenuIcons.fillModeTraditional),
+            (ReaderMenuIcons.lineModeFloating,
+                ReaderMenuIcons.fillModeFloating),
+          ],
           value: shell.readerChromeMode,
           onChanged: (v) => n.setReaderChromeMode(v),
         ),
         const SizedBox(height: 24),
-        _SectionTitle('图标风格', scheme),
+        _SectionTitle('图标风格', scheme,
+            line: ReaderMenuIcons.lineIconStyle,
+            fill: ReaderMenuIcons.fillIconStyle),
         const SizedBox(height: 8),
         _GlassSegmented<int>(
           items: const [
@@ -294,11 +303,17 @@ class _FormIconPage extends ConsumerWidget {
             (1, '面性'),
             (2, '双色'),
           ],
+          icons: const [
+            (ReaderMenuIcons.lineIconStyle, ReaderMenuIcons.lineIconStyle),
+            (ReaderMenuIcons.fillIconStyle, ReaderMenuIcons.fillIconStyle),
+            (ReaderMenuIcons.lineIconStyle, ReaderMenuIcons.fillIconStyle),
+          ],
           value: shell.readerIconStyle,
           onChanged: (v) => n.setReaderIconStyle(v),
         ),
         const SizedBox(height: 24),
-        _SectionTitle('每行个数', scheme),
+        _SectionTitle('每行个数', scheme,
+            line: ReaderMenuIcons.lineGrid, fill: ReaderMenuIcons.fillGrid),
         _LiveSlider(
           label: '每行',
           value: shell.readerIconItemsPerRow.toDouble(),
@@ -309,7 +324,8 @@ class _FormIconPage extends ConsumerWidget {
           onChanged: (v) => n.setReaderIconItemsPerRow(v.round()),
           onChangeEnd: (v) => n.setReaderIconItemsPerRow(v.round()),
         ),
-        _SectionTitle('行数', scheme),
+        _SectionTitle('行数', scheme,
+            line: ReaderMenuIcons.lineRows, fill: ReaderMenuIcons.fillRows),
         _LiveSlider(
           label: '行',
           value: shell.readerIconRowCount.toDouble(),
@@ -322,6 +338,13 @@ class _FormIconPage extends ConsumerWidget {
         ),
         const SizedBox(height: 8),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineShowText,
+            fill: ReaderMenuIcons.fillShowText,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('显示文字标签'),
           subtitle: const Text('图标下方显示中文名称'),
           value: shell.readerIconShowText,
@@ -442,6 +465,13 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineType,
+            fill: ReaderMenuIcons.fillType,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('粗体'),
           value: _bold,
           onChanged: (v) {
@@ -450,6 +480,13 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           },
         ),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineTitle,
+            fill: ReaderMenuIcons.fillTitle,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('斜体'),
           value: _italic,
           onChanged: (v) {
@@ -459,7 +496,7 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
         ),
         const SizedBox(height: 16),
         _SectionTitle('标题', scheme,
-            line: ReaderMenuIcons.lineType, fill: ReaderMenuIcons.fillType),
+            line: ReaderMenuIcons.lineTitle, fill: ReaderMenuIcons.fillTitle),
         _LiveSlider(
           label: '标题字号',
           value: _titleScale,
@@ -471,8 +508,15 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
         ),
         const SizedBox(height: 16),
         _SectionTitle('页眉 / 页脚', scheme,
-            line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
+            line: ReaderMenuIcons.lineHeader, fill: ReaderMenuIcons.fillHeader),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineHeader,
+            fill: ReaderMenuIcons.fillHeader,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('页眉'),
           subtitle: const Text('顶栏显示书名'),
           value: _showHeader,
@@ -482,6 +526,13 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           },
         ),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineFooter,
+            fill: ReaderMenuIcons.fillFooter,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('页脚'),
           subtitle: const Text('底栏显示页码'),
           value: _showFooter,
@@ -625,7 +676,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _SectionTitle('日夜模式', scheme),
+        _SectionTitle('日夜模式', scheme,
+            line: ReaderMenuIcons.lineDay, fill: ReaderMenuIcons.fillDay),
         const SizedBox(height: 8),
         _GlassSegmented<bool>(
           items: const [
@@ -639,7 +691,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           },
         ),
         const SizedBox(height: 24),
-        _SectionTitle('背景色', scheme),
+        _SectionTitle('背景色', scheme,
+            line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -672,7 +725,9 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 24),
-        _SectionTitle('背景透明度', scheme),
+        _SectionTitle('背景透明度', scheme,
+            line: ReaderMenuIcons.lineOpacity,
+            fill: ReaderMenuIcons.fillOpacity),
         _LiveSlider(
           label: '透明度',
           value: _opacity,
@@ -683,7 +738,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           onChangeEnd: (v) => n.setBgOpacity(v),
         ),
         const SizedBox(height: 24),
-        _SectionTitle('内置背景图', scheme),
+        _SectionTitle('内置背景图', scheme,
+            line: ReaderMenuIcons.linePreset, fill: ReaderMenuIcons.fillPreset),
         const SizedBox(height: 8),
         GridView.count(
           crossAxisCount: 3,
@@ -702,7 +758,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           ],
         ),
         const SizedBox(height: 24),
-        _SectionTitle('预设主题', scheme),
+        _SectionTitle('预设主题', scheme,
+            line: ReaderMenuIcons.lineTheme, fill: ReaderMenuIcons.fillTheme),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -787,7 +844,9 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _SectionTitle('渲染材质', scheme),
+        _SectionTitle('渲染材质', scheme,
+            line: ReaderMenuIcons.lineMaterial,
+            fill: ReaderMenuIcons.fillMaterial),
         const SizedBox(height: 8),
         _GlassSegmented<String>(
           items: const [
@@ -817,6 +876,13 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
           onChangeEnd: (v) => n.setNavTintStrength(v),
         ),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineTheme,
+            fill: ReaderMenuIcons.fillTheme,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('果冻效应'),
           subtitle: const Text('滑杆/开关/分段形变鼓动'),
           value: _lgMotion,
@@ -826,9 +892,17 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
           },
         ),
         const SizedBox(height: 24),
-        _SectionTitle('设置 Sheet 材质', scheme),
+        _SectionTitle('设置 Sheet 材质', scheme,
+            line: ReaderMenuIcons.lineBlur, fill: ReaderMenuIcons.fillBlur),
         const SizedBox(height: 4),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineBlur,
+            fill: ReaderMenuIcons.fillBlur,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('轻模糊'),
           subtitle: const Text('仅本设置弹层；若正文缩放/发虚请关掉'),
           value: shell.readerSheetBlurOn,
@@ -846,14 +920,29 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
             onChangeEnd: (v) => n.setReaderSheetBlurSigma(v),
           ),
         const SizedBox(height: 24),
-        _SectionTitle('顶栏', scheme),
+        _SectionTitle('顶栏', scheme,
+            line: ReaderMenuIcons.lineBack, fill: ReaderMenuIcons.fillBack),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineMerge,
+            fill: ReaderMenuIcons.fillMerge,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('合并按钮'),
-          subtitle: const Text('返回/更多合并为一个胶囊'),
+          subtitle: const Text('页码与更多收进右侧胶囊（更多恒在右）'),
           value: shell.readerTopMergeButtons,
           onChanged: (v) => n.setReaderTopMergeButtons(v),
         ),
         SwitchListTile(
+          secondary: ReaderMenuGlyph(
+            line: ReaderMenuIcons.linePill,
+            fill: ReaderMenuIcons.fillPill,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('标题胶囊'),
           subtitle: const Text('书名显示在胶囊内'),
           value: shell.readerTopTitlePill,
@@ -1039,60 +1128,105 @@ class _GlassSegmented<T> extends StatelessWidget {
     required this.items,
     required this.value,
     required this.onChanged,
+    this.icons,
   });
 
   final List<(T, String)> items;
   final T value;
   final ValueChanged<T> onChanged;
 
+  /// 可选图标对 (line, fill)，与 [items] 等长
+  final List<(IconData, IconData)?>? icons;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final rim = Colors.white.withValues(alpha: light ? 0.45 : 0.24);
+    final iconStyle = refIconStyleOf(context);
     return Row(
       children: [
-        for (final (v, label) in items)
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onChanged(v),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: v == value
-                        ? scheme.primary.withValues(alpha: 0.38)
-                        : Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: v == value
-                          ? Colors.white.withValues(alpha: 0.65)
-                          : rim,
-                      width: v == value ? 1.3 : 1.0,
+        for (var i = 0; i < items.length; i++)
+          Builder(builder: (context) {
+            final (v, label) = items[i];
+            final selected = v == value;
+            final iconPair = (icons != null && i < icons!.length)
+                ? icons![i]
+                : null;
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onChanged(v),
+                  child: AnimatedContainer(
+                    duration: Duration(
+                      milliseconds: MediaQuery.disableAnimationsOf(context)
+                          ? 0
+                          : 220,
                     ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    child: Center(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              v == value ? FontWeight.w700 : FontWeight.w500,
-                          // 选中：亮字 + 描边加粗，暗玻璃上一眼可辨
-                          color: v == value
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.72),
+                    curve: Curves.easeOutCubic,
+                    transform: Matrix4.identity()
+                      ..translateByDouble(
+                        0.0,
+                        selected ? -1.0 : 0.0,
+                        0.0,
+                        1.0,
+                      ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? scheme.primary.withValues(alpha: 0.38)
+                          : Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selected
+                            ? Colors.white.withValues(alpha: 0.65)
+                            : rim,
+                        width: selected ? 1.3 : 1.0,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      child: Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (iconPair != null) ...[
+                              ReaderMenuGlyph(
+                                line: iconPair.$1,
+                                fill: iconPair.$2,
+                                style: selected ? iconStyle : 0,
+                                size: 16,
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.72),
+                                duotoneAccent:
+                                    Colors.white.withValues(alpha: 0.40),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                // 选中：亮字 + 描边加粗，暗玻璃上一眼可辨
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.72),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          }),
       ],
     );
   }

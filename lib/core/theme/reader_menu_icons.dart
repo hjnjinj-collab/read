@@ -44,6 +44,52 @@ class ReaderMenuIcons {
   static const lineMaterial = Iconsax.glass_1;
   static const fillMaterial = Iconsax.glass_1_copy;
 
+  // ── 形态与图标（栏目/分段）──
+  static const lineModeTraditional = Iconsax.row_horizontal;
+  static const fillModeTraditional = Iconsax.row_horizontal_copy;
+  static const lineModeFloating = Iconsax.airdrop;
+  static const fillModeFloating = Iconsax.airdrop_copy;
+  static const lineIconStyle = Iconsax.brush_1;
+  static const fillIconStyle = Iconsax.brush_1_copy;
+  static const lineGrid = Iconsax.element_3;
+  static const fillGrid = Iconsax.element_3_copy;
+  static const lineRows = Iconsax.row_vertical;
+  static const fillRows = Iconsax.row_vertical_copy;
+  static const lineShowText = Iconsax.text;
+  static const fillShowText = Iconsax.text_copy;
+
+  // ── 排版补充 ──
+  static const lineTitle = Iconsax.text_bold;
+  static const fillTitle = Iconsax.text_bold_copy;
+  static const lineLetter = Iconsax.textalign_center;
+  static const fillLetter = Iconsax.textalign_center_copy;
+  static const lineHeader = Iconsax.arrow_up;
+  static const fillHeader = Iconsax.arrow_up_copy;
+  static const lineFooter = Iconsax.arrow_down;
+  static const fillFooter = Iconsax.arrow_down_copy;
+
+  // ── 背景 / 材质补充 ──
+  static const lineDay = Iconsax.sun_1;
+  static const fillDay = Iconsax.sun_1_copy;
+  static const lineNight = Iconsax.moon;
+  static const fillNight = Iconsax.moon_copy;
+  static const lineOpacity = Iconsax.drop;
+  static const fillOpacity = Iconsax.glass;
+  static const linePreset = Iconsax.gallery;
+  static const fillPreset = Iconsax.gallery_copy;
+  static const lineTheme = Iconsax.magicpen;
+  static const fillTheme = Iconsax.magicpen_copy;
+  static const lineBlur = Iconsax.blur;
+  static const fillBlur = Iconsax.blur_copy;
+  static const lineMerge = Iconsax.hierarchy_2;
+  static const fillMerge = Iconsax.hierarchy_2_copy;
+  static const linePill = Iconsax.toggle_on;
+  static const fillPill = Iconsax.toggle_on_copy;
+  static const lineSize = Iconsax.size;
+  static const fillSize = Iconsax.size_copy;
+  static const lineRank = Iconsax.ranking;
+  static const fillRank = Iconsax.ranking_copy;
+
   /// 按风格解析成最终字形（线性/面性；双色由 [ReaderMenuGlyph] 叠色）。
   static IconData resolve({
     required IconData line,

@@ -300,9 +300,11 @@ class ReaderTopChrome extends StatelessWidget {
       onTap: onMore,
     );
 
-    // 合并按钮：返回 | 更多 贴在一个液态胶囊里
-    final Widget leading = mergeButtons
-        ? DecoratedBox(
+    // 更多恒在右侧（真机反馈）：合并只把「页码+更多」收进右侧胶囊，
+    // 不再把更多拉到返回旁。默认 mergeButtons=false → 更多独立右键。
+    final Widget trailing = !mergeButtons
+        ? moreBtn
+        : DecoratedBox(
             decoration: BoxDecoration(
               color: AppGlass.restPillTint(scheme),
               borderRadius: BorderRadius.circular(26),
@@ -314,23 +316,24 @@ class ReaderTopChrome extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  backBtn,
-                  Container(
-                    width: 1,
-                    height: 22,
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    color: Colors.white.withValues(alpha: 0.22),
+                  Text(
+                    pageLabel,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
+                  const SizedBox(width: 2),
                   moreBtn,
                 ],
               ),
             ),
-          )
-        : backBtn;
+          );
 
     Widget titleWidget;
     if (!showTitle) {
@@ -379,25 +382,24 @@ class ReaderTopChrome extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
         child: Row(
           children: [
-            leading,
+            backBtn,
             const SizedBox(width: 8),
             Expanded(
               child: Center(child: titleWidget),
             ),
-            Text(
-              pageLabel,
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+            if (!mergeButtons) ...[
+              Text(
+                pageLabel,
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            // 合并模式下 more 已进 leading 胶囊，右侧留空对称
-            if (mergeButtons)
-              const SizedBox(width: 52)
-            else
-              moreBtn,
+              const SizedBox(width: 8),
+            ] else
+              const SizedBox(width: 8),
+            trailing,
           ],
         ),
       ),
@@ -447,6 +449,112 @@ class _ToolAction {
   final IconData fill;
   final String label;
   final VoidCallback onTap;
+}
+
+/// A/B 形态切换胶囊：液态材质与圆键同源 + 图标 + 按压缩放。
+class _ModeTogglePill extends ConsumerStatefulWidget {
+  const _ModeTogglePill({
+    required this.label,
+    required this.line,
+    required this.fill,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData line;
+  final IconData fill;
+  final VoidCallback onTap;
+
+  @override
+  ConsumerState<_ModeTogglePill> createState() => _ModeTogglePillState();
+}
+
+class _ModeTogglePillState extends ConsumerState<_ModeTogglePill> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final shell = ref.watch(shellSettingsProvider);
+    final disable = MediaQuery.disableAnimationsOf(context);
+    final fg = scheme.primary;
+
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ReaderMenuGlyph(
+            line: widget.line,
+            fill: widget.fill,
+            style: shell.readerIconStyle,
+            size: 16,
+            color: fg,
+            duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            widget.label,
+            style: TextStyle(
+              fontSize: 13,
+              color: fg,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final scale = _pressed && !disable ? 0.94 : 1.0;
+
+    if (disable) {
+      return GestureDetector(
+        onTap: widget.onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppGlass.restPillTint(scheme),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.white.withValues(
+                alpha: scheme.brightness == Brightness.light ? 0.42 : 0.24,
+              ),
+            ),
+          ),
+          child: content,
+        ),
+      );
+    }
+
+    // 液态胶囊（与齿轮中心面同配方 blur0）；按压缩放果冻
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: scale,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+        child: IntrinsicWidth(
+          child: LiquidGlassLens(
+            style: shellFrostLiquidStyle(
+              scheme,
+              navBlur: 0,
+              navTint: shell.navTintStrength,
+              radius: 16,
+            ).copyWith(
+              appearance: LiquidGlassAppearance(
+                color: AppGlass.restPillTint(scheme),
+                blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
+                shadow: null,
+              ),
+            ),
+            child: content,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 底部 chrome：坐在**底→顶**渐变模糊垫上（菜单态）。
@@ -661,36 +769,11 @@ class ReaderBottomChrome extends StatelessWidget {
                 const SizedBox(height: 2),
                 _tools(context),
                 Center(
-                  child: GestureDetector(
+                  child: _ModeTogglePill(
+                    label: '传统形态',
+                    line: ReaderMenuIcons.lineModeTraditional,
+                    fill: ReaderMenuIcons.fillModeTraditional,
                     onTap: onToggleMode,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppGlass.restPillTint(scheme),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: Colors.white.withValues(
-                            alpha: scheme.brightness == Brightness.light
-                                ? 0.42
-                                : 0.24,
-                          ),
-                          width: 1.0,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: Text(
-                          '传统形态',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -753,36 +836,11 @@ class ReaderBottomChrome extends StatelessWidget {
                         onTap: () => onFontSize((fontSize + 1).clamp(12, 28)),
                       ),
                       const Spacer(),
-                      GestureDetector(
+                      _ModeTogglePill(
+                        label: '悬浮形态',
+                        line: ReaderMenuIcons.lineModeFloating,
+                        fill: ReaderMenuIcons.fillModeFloating,
                         onTap: onToggleMode,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: AppGlass.restPillTint(scheme),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withValues(
-                                alpha: scheme.brightness == Brightness.light
-                                    ? 0.42
-                                    : 0.24,
-                              ),
-                              width: 1.0,
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            child: Text(
-                              '悬浮形态',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: scheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
                       ),
                     ],
                   ),
