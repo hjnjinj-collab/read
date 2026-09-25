@@ -140,6 +140,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   Offset _pendingTouch = Offset.zero;
   Timer? _pendingTimer;
 
+  /// 挂起期间资源就绪轮询：图片解码完成即启动动画，避免死等到超时直翻
+  Timer? _pendingPollTimer;
+
   /// 挂起登记时刻（turn.wait 指标：注册 → 动画启动的实际等待）
   DateTime? _pendingSince;
 
@@ -593,6 +596,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     BookImageStore.instance.imageReadyTick.removeListener(_onImagesReady);
     _snapshotPendingDeps.clear();
     _pendingTimer?.cancel();
+    _pendingPollTimer?.cancel();
     _settledSafetyTimer?.cancel();
     _stuckWatchdog?.cancel();
     _imageTick.dispose();
@@ -887,19 +891,60 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
       return const TargetOutOfRange();
     }
     final frame = slot.frame;
-    if (frame == null || !frame.usableForAnimation) {
-      // 资源解码中 → 等待（不变量 4：就绪或稳定 failed 才启动）
+    if (frame == null) {
       readerTrace('turn.gate.wait', {
         'reason': 'frame not usable',
-        'frameNull': frame == null,
-        'usableForAnimation': frame?.usableForAnimation,
-        'resourceState': frame?.resourceState.toString(),
+        'frameNull': true,
+      });
+      return const TargetWait();
+    }
+    // 资源真相以 BookImageStore 实时状态为准（FrameSet.resourceState 可能滞后）
+    final live = _withLiveResources(frame);
+    if (!live.usableForAnimation) {
+      readerTrace('turn.gate.wait', {
+        'reason': 'frame not usable',
+        'frameNull': false,
+        'usableForAnimation': false,
+        'resourceState': live.resourceState.toString(),
       });
       return const TargetWait();
     }
     readerTrace('turn.gate.ready', {'direction': direction});
-    return TargetReady(frame);
+    return TargetReady(live);
   }
+
+  /// 用 BookImageStore 实时状态刷新帧的 resourceState（immutable 重建）。
+  PageFrame _withLiveResources(PageFrame f) {
+    if (f.usableForAnimation) return f;
+    final store = BookImageStore.instance;
+    if (f.manifest.hrefs.isEmpty) {
+      return _copyFrame(f, FrameResourceState.ready);
+    }
+    var allReady = true;
+    var anyFailed = false;
+    for (final h in f.manifest.hrefs) {
+      final s = store.getState(h);
+      if (s == BookImageState.failed) {
+        anyFailed = true;
+        allReady = false;
+      } else if (s != BookImageState.ready) {
+        allReady = false;
+      }
+    }
+    if (allReady) return _copyFrame(f, FrameResourceState.ready);
+    if (anyFailed) return _copyFrame(f, FrameResourceState.failed);
+    return f;
+  }
+
+  PageFrame _copyFrame(PageFrame f, FrameResourceState state) => PageFrame(
+        identity: f.identity,
+        configFingerprint: f.configFingerprint,
+        sessionEpoch: f.sessionEpoch,
+        requestGeneration: f.requestGeneration,
+        page: f.page,
+        manifest: f.manifest,
+        resourceState: state,
+      );
 
   /// 统一启动封装：同步置位 → 快照就绪门控 → 门控重查收场 → 启动动画
   ///
@@ -1040,9 +1085,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 未发布时是死循环（100ms × N），手感"动画消失"主因。
   static const int _pendingRetryLimit = 5;
 
-  /// tap 挂起重挂上限。资源 pending 时 550ms×N 再无动画直翻，用户会感觉
-  /// 「卡住」。压到 1 轮（~0.5s）仍不就绪就直翻保功能。
-  static const int _tapPendingRetryLimit = 1;
+  /// tap 挂起重挂上限（配合 120ms 资源轮询；真正超时才直翻保功能）。
+  /// 资源未就绪时**不要**过早无动画直翻——轮询命中就绪后补完整动画。
+  static const int _tapPendingRetryLimit = 12; // ~6.5s 兜底
+
+  /// 挂起期间资源轮询间隔
+  static const Duration _pendingPollInterval = Duration(milliseconds: 120);
 
   /// M9.5-J：当前挂起的 registerPending 调用次数（同手势累计）
   int _pendingRetryCount = 0;
@@ -1132,7 +1180,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         // ② 门控已就绪（挂起窗口内 FrameSet 发布/资源解码完成）→ 补跑
         //    完整动画，而非跳过动画直翻；
         // ③ 确实仍不就绪 → 重挂继续等（_tapWaitRounds 跨重挂累计，
-        //    3 轮 ~1.2s 后直翻保功能）。
+        //    资源轮询会抢先启动；真正超限才直翻保功能）。
         if (_isActive ||
             _holdingFinalFrame ||
             _commitInFlight ||
@@ -1159,8 +1207,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           _directFlip(d);
           return;
         }
-        // 仍未就绪：重挂继续等（轮次跨重挂累计——_clearPending 每轮重置
-        // _pendingRetryCount，故用独立 _tapWaitRounds），3 轮后直翻保功能
+        // 仍未就绪：重挂继续等 + 启动资源轮询
         _tapWaitRounds++;
         if (_tapWaitRounds >= _tapPendingRetryLimit) {
           _tapWaitRounds = 0;
@@ -1175,6 +1222,43 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         _registerPending(d, isTap: true, touch: touch);
       },
     );
+    _armPendingResourcePoll();
+  }
+
+  /// 挂起期间周期性探测资源：BookImageStore 就绪即门控启动完整动画。
+  void _armPendingResourcePoll() {
+    _pendingPollTimer?.cancel();
+    _pendingPollTimer = Timer.periodic(_pendingPollInterval, (_) {
+      if (!mounted || _pendingDirection == null) {
+        _pendingPollTimer?.cancel();
+        _pendingPollTimer = null;
+        return;
+      }
+      if (_isActive ||
+          _holdingFinalFrame ||
+          _commitInFlight ||
+          _turnController?.isAnimating == true) {
+        return;
+      }
+      final d = _pendingDirection!;
+      final result = _targetFrameFor(d);
+      if (result is! TargetReady) return;
+      _pendingPollTimer?.cancel();
+      _pendingPollTimer = null;
+      readerTrace('turn.pending.poll-ready', {'direction': d});
+      final isTap = _pendingIsTap;
+      final touch = _pendingTouch;
+      _pendingTimer?.cancel();
+      _pendingTimer = null;
+      _pendingDirection = null;
+      final size = _viewport;
+      final start = widget.mode == PageTurnMode.collapse && touch != Offset.zero
+          ? touch
+          : d == PageDirection.next
+              ? Offset(size.width * 0.92, size.height * 0.8)
+              : Offset(size.width * 0.08, size.height * 0.8);
+      unawaited(_startTurnAnimated(d, start, isTap: isTap, autoPlay: true));
+    });
   }
   
   /// 辅助方法：获取目标方向的 PageFrame（用于动态超时计算）
@@ -1196,6 +1280,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   void _clearPending({required String reason}) {
     _pendingTimer?.cancel();
     _pendingTimer = null;
+    _pendingPollTimer?.cancel();
+    _pendingPollTimer = null;
     _pendingDirection = null;
     _pendingSince = null;
     // M9.5-J：每次挂起生命周期结束重置重试计数
