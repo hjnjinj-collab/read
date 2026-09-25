@@ -1,11 +1,11 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/theme/app_theme.dart' show AppGlass;
 import '../../../../core/theme/reader_menu_icons.dart';
@@ -79,31 +79,39 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
   }
 
   Future<void> _export() async {
-    // 导出为日志文件（应用文档目录），并复制路径提示
+    // 系统保存对话框：用户选路径
     final text = await readTraceLogs() ??
         _rows.map((e) => '[${e.time.toIso8601String()}] ${e.line}').join('\n');
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .split('.')
+        .first;
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final stamp = DateTime.now()
-          .toIso8601String()
-          .replaceAll(':', '-')
-          .split('.')
-          .first;
-      final file = File('${dir.path}/bug_log_$stamp.log');
-      await file.writeAsString(text, flush: true);
+      final bytes = Uint8List.fromList(utf8.encode(text));
+      final uri = await FilePicker.saveFile(
+        dialogTitle: '导出日志',
+        fileName: 'bug_log_$stamp.log',
+        bytes: bytes,
+        mimeType: 'text/plain',
+      );
       if (!mounted) return;
+      if (uri == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消导出')),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已导出：${file.path}'),
+          content: Text('已导出：$uri'),
           duration: const Duration(seconds: 3),
         ),
       );
     } catch (e) {
-      // 退回剪贴板
-      await Clipboard.setData(ClipboardData(text: text));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('写文件失败，已复制到剪贴板：$e')),
+        SnackBar(content: Text('导出失败：$e')),
       );
     }
   }
@@ -175,9 +183,11 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
             ],
           ),
         ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        // 过滤区固定（不进 ListView）：液态分段滑动时保持纹理
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _FilterRow(
                 label: '时间',
@@ -200,7 +210,6 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                   onChanged: (i) {
                     setState(() {
                       _catIndex = i;
-                      // 错误分类：级别锁「错误」
                       if (_catKeys[i] == 'error') _levelIndex = 1;
                     });
                     _reload();
@@ -267,10 +276,17 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              const Divider(height: 1),
-              if (_rows.isEmpty)
-                Padding(
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            itemCount: _rows.isEmpty ? 1 : _rows.length,
+            itemBuilder: (context, i) {
+              if (_rows.isEmpty) {
+                return Padding(
                   padding: const EdgeInsets.all(32),
                   child: Center(
                     child: Text(
@@ -278,10 +294,10 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ),
-                )
-              else
-                for (final e in _rows) _LogTile(e: e),
-            ],
+                );
+              }
+              return _LogTile(e: _rows[i]);
+            },
           ),
         ),
       ],
