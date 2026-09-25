@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/services/font_provider.dart';
+import '../../../../core/services/reader_font.dart';
 import '../../../../core/theme/app_theme.dart' show AppGlass;
 import '../../../../core/theme/reader_menu_icons.dart';
 import '../../../shell/providers/shell_settings.dart';
@@ -368,18 +370,26 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
   @override
   Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
+    // watch 使字体/字号变更后标题区刷新
+    ref.watch(readerProvider);
     final scheme = Theme.of(context).colorScheme;
+    // 字体名用 ReaderFont.displayName（setCustomFont 后即时）
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _SectionTitle('正文', scheme),
+        _SectionTitle('正文', scheme,
+            line: ReaderMenuIcons.lineType, fill: ReaderMenuIcons.fillType),
         const SizedBox(height: 8),
         ListTile(
-          leading: const Icon(Icons.text_fields),
+          leading: ReaderMenuGlyph(
+            line: ReaderMenuIcons.lineType,
+            fill: ReaderMenuIcons.fillType,
+            style: refIconStyleOf(context),
+            size: 22,
+            color: scheme.onSurfaceVariant,
+          ),
           title: const Text('字体'),
-          subtitle: Text(n.customFontFamily.isEmpty
-              ? 'Noto Sans CJK SC'
-              : n.customFontFamily),
+          subtitle: Text(ReaderFont.displayName),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _showFontSheet(context),
         ),
@@ -427,7 +437,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           },
         ),
         const SizedBox(height: 16),
-        _SectionTitle('段落格式', scheme),
+        _SectionTitle('段落格式', scheme,
+            line: ReaderMenuIcons.lineForm, fill: ReaderMenuIcons.fillForm),
         SwitchListTile(
           title: const Text('首行缩进'),
           value: _indent,
@@ -463,7 +474,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           },
         ),
         const SizedBox(height: 16),
-        _SectionTitle('边距', scheme),
+        _SectionTitle('边距', scheme,
+            line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
         _LiveSlider(
           label: '上下边距',
           value: 24,
@@ -720,6 +732,15 @@ class _FontSelectSheet extends ConsumerWidget {
               color: scheme.onSurface,
             ),
           ),
+          const SizedBox(height: 8),
+          Text(
+            '当前：${ReaderFont.displayName}',
+            style: TextStyle(
+              fontSize: 12,
+              color: scheme.onSurfaceVariant,
+              fontFamily: ReaderFont.family,
+            ),
+          ),
           const SizedBox(height: 16),
           ListTile(
             leading: const Icon(Icons.text_fields),
@@ -738,9 +759,21 @@ class _FontSelectSheet extends ConsumerWidget {
             subtitle: const Text('支持 .ttf / .otf / .ttc'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () async {
-              final picked = await _pickFont(context);
-              if (picked != null && context.mounted) {
-                Navigator.of(context).pop();
+              final picked = await FontProvider.pickAndLoadCustomFont(context);
+              if (picked != null) {
+                n.setCustomFont(
+                  fontFamily: picked.fontName,
+                  fontFilePath: picked.persistedPath,
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('${picked.displayLabel} 已切换并持久化'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                  Navigator.of(context).pop();
+                }
               }
             },
           ),
@@ -748,31 +781,52 @@ class _FontSelectSheet extends ConsumerWidget {
       ),
     );
   }
-
-  Future<dynamic> _pickFont(BuildContext context) async {
-    // 复用 FontProvider 的字体选择逻辑
-    // ignore: avoid_print
-    print('[font-sheet] pick font');
-    return null;
-  }
 }
 
 // ── 共用组件 ──
 
+/// 分区标题：可选 Iconsax 图标 + 主色文案（与设置页 header 同语言）。
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title, this.scheme);
+  const _SectionTitle(this.title, this.scheme, {this.line, this.fill});
   final String title;
   final ColorScheme scheme;
+  final IconData? line;
+  final IconData? fill;
 
   @override
-  Widget build(BuildContext context) => Text(
-        title,
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    final iconStyle = refIconStyleOf(context);
+    final text = Text(
+      title,
+      style: TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        color: scheme.primary,
+      ),
+    );
+    if (line == null || fill == null) return text;
+    return Row(
+      children: [
+        ReaderMenuGlyph(
+          line: line!,
+          fill: fill!,
+          style: iconStyle,
+          size: 18,
           color: scheme.primary,
+          duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
         ),
-      );
+        const SizedBox(width: 6),
+        text,
+      ],
+    );
+  }
+}
+
+/// 分区头取当前图标风格（sheet 内轻量读取，避免每处传参）。
+int refIconStyleOf(BuildContext context) {
+  final container =
+      ProviderScope.containerOf(context, listen: true);
+  return container.read(shellSettingsProvider).readerIconStyle;
 }
 
 class _LiveSlider extends StatelessWidget {
@@ -854,10 +908,15 @@ class _GlassSegmented<T> extends StatelessWidget {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: v == value
-                        ? AppGlass.restPillTint(scheme)
-                        : scheme.surface.withValues(alpha: 0.16),
+                        ? scheme.primary.withValues(alpha: 0.38)
+                        : Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: rim, width: 1.0),
+                    border: Border.all(
+                      color: v == value
+                          ? Colors.white.withValues(alpha: 0.65)
+                          : rim,
+                      width: v == value ? 1.3 : 1.0,
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 11),
@@ -867,11 +926,11 @@ class _GlassSegmented<T> extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight:
-                              v == value ? FontWeight.w600 : FontWeight.w500,
-                          // 与液态圆键同一白字语言
+                              v == value ? FontWeight.w700 : FontWeight.w500,
+                          // 选中：亮字 + 描边加粗，暗玻璃上一眼可辨
                           color: v == value
                               ? Colors.white
-                              : Colors.white.withValues(alpha: 0.78),
+                              : Colors.white.withValues(alpha: 0.72),
                         ),
                       ),
                     ),

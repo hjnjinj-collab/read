@@ -1170,23 +1170,23 @@ class _GearScrollPickerState extends State<_GearScrollPicker> {
           // PageView 的 viewport/绘制层把窄槽邻项视觉上吞掉。
           Positioned.fill(child: _sideTrack(scheme)),
           // 中心液态胶囊：固定不动（面心留给选中值）
+          // 尺寸与 _sideTrack.capsuleWidth(72) 对齐；blur0 液态镜片（同圆键）
           Positioned(
             child: IgnorePointer(
               child: SizedBox(
-                width: 60,
-                height: 36,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    // 与设置页 LiquidValueSegmented pill 同色
-                    color: AppGlass.restPillTint(scheme),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(
-                        alpha: scheme.brightness == Brightness.light
-                            ? 0.42
-                            : 0.24,
-                      ),
-                      width: 1.0,
+                width: 72,
+                height: 44,
+                child: LiquidGlassLens(
+                  style: shellFrostLiquidStyle(
+                    scheme,
+                    navBlur: 0,
+                    navTint: 0.38,
+                    radius: 16,
+                  ).copyWith(
+                    appearance: LiquidGlassAppearance(
+                      color: AppGlass.restPillTint(scheme),
+                      blur: const LiquidGlassBlur(sigmaX: 0, sigmaY: 0),
+                      shadow: null,
                     ),
                   ),
                   child: const SizedBox.expand(),
@@ -1198,7 +1198,7 @@ class _GearScrollPickerState extends State<_GearScrollPicker> {
           Positioned(
             child: IgnorePointer(
               child: SizedBox(
-                width: 68,
+                width: 72,
                 height: 44,
                 child: Center(child: _capsuleSelected(scheme, _nearestIndex)),
               ),

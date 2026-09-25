@@ -199,8 +199,8 @@ commits: c84cfa2..uncommitted
 ### Phase 1：菜单完善
 
 - [x] T0: 外层壳子 — 顶栏液态圆键 + A 传统底板 + B 悬浮工具球排 (covers: S2.1,S2.2)
-- [ ] T1.1: 形态持久化：`_chromeMode` 写入 ShellSettings，重进阅读记住上次形态 — acceptance: 切换→退出→重进，形态不变 (covers: S2.1)
-- [ ] T1.2: 传统底栏工具排对齐 IA：5 均分、glyph 22–24、label 11–12 — acceptance: 与设置页图标排视觉一致 (covers: S2.2A)
+- [x] T1.1: 形态持久化：`_chromeMode` 写入 ShellSettings，重进阅读记住上次形态 — acceptance: 切换→退出→重进，形态不变 (covers: S2.1)
+- [x] T1.2: 传统底栏工具排对齐 IA：5 均分、glyph 22–24、label 11–12 — acceptance: 与设置页图标排视觉一致 (covers: S2.2A)
 - [ ] T1.3: 悬浮模式圆键排完善：间距 8、居中对齐、第 6 个进「更多」 — acceptance: ≥6 动作收纳进溢出菜单 (covers: S2.2B)
 
 ### Phase 2：设置四页
