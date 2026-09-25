@@ -77,12 +77,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _darkPaperColor = persisted.darkPaperColor;
     _bgOpacity = persisted.bgOpacity;
     _bgPreset = persisted.bgPreset;
+    _textColor = persisted.textColor;
+    _accentColor = persisted.accentColor;
     PageContentRenderer.userLetterSpacing = _letterSpacing;
     PageContentRenderer.titleScale = _titleScale;
     PageContentRenderer.applyPaperOverrides(
       light: _lightPaperColor,
       dark: _darkPaperColor,
       opacity: _bgOpacity,
+    );
+    PageContentRenderer.applyColorOverrides(
+      text: _textColor,
+      accent: _accentColor,
     );
     PageContentRenderer.theme =
         _themeDark ? ReaderTheme.dark : ReaderTheme.light;
@@ -211,6 +217,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _bgOpacity = 1.0;
   String _bgPreset = '';
 
+  // 颜色：正文 / 强调
+  int? _textColor;
+  int? _accentColor;
+
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
   // key = 排版参数指纹，value = 该章总页数
   final Map<String, int> _chapterPageCounts = {};
@@ -268,6 +278,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? get darkPaperColor => _darkPaperColor;
   double get bgOpacity => _bgOpacity;
   String get bgPreset => _bgPreset;
+  int? get textColor => _textColor;
+  int? get accentColor => _accentColor;
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
@@ -495,6 +507,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'darkPaperColor': _darkPaperColor,
         'bgOpacity': _bgOpacity,
         'bgPreset': _bgPreset,
+        'textColor': _textColor,
+        'accentColor': _accentColor,
       };
 
   /// 写穿落库（内存快照即时更新 + 100ms 防抖 upsert，fire-and-forget）
@@ -741,6 +755,30 @@ class ReaderNotifier extends Notifier<ReadingState> {
       light: _lightPaperColor,
       dark: _darkPaperColor,
       opacity: _bgOpacity,
+    );
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 正文文字色（null 恢复主题默认）
+  void setTextColor(int? argb) {
+    if (_textColor == argb) return;
+    _textColor = argb;
+    _applyColorAndPersist();
+  }
+
+  /// 强调/注释色（null 恢复主题默认）
+  void setAccentColor(int? argb) {
+    if (_accentColor == argb) return;
+    _accentColor = argb;
+    _applyColorAndPersist();
+  }
+
+  void _applyColorAndPersist() {
+    PageContentRenderer.applyColorOverrides(
+      text: _textColor,
+      accent: _accentColor,
     );
     PageContentRenderer.themeRevision++;
     _persistSettings();

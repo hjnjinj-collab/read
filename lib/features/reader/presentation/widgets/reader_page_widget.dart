@@ -262,6 +262,12 @@ class PageContentRenderer {
   static Color? darkPaperOverride;
   static double paperOpacity = 1.0;
 
+  /// 正文文字色覆盖（null = 主题默认）
+  static Color? textColorOverride;
+
+  /// 强调/注释色覆盖（null = 主题默认）
+  static Color? accentColorOverride;
+
   /// 应用背景主题覆盖（日/夜纸色 + 透明度）
   static void applyPaperOverrides({
     int? light,
@@ -273,6 +279,12 @@ class PageContentRenderer {
     paperOpacity = opacity.clamp(0.15, 1.0);
   }
 
+  /// 应用文字/强调色覆盖（ARGB int；null 恢复主题默认）
+  static void applyColorOverrides({int? text, int? accent}) {
+    textColorOverride = text != null ? Color(text) : null;
+    accentColorOverride = accent != null ? Color(accent) : null;
+  }
+
   /// 当前生效纸色（覆盖 + 透明度；scaffold 作淡出底）
   static Color get paperColor {
     final override =
@@ -281,6 +293,13 @@ class PageContentRenderer {
     if (paperOpacity >= 0.999) return base;
     return Color.lerp(theme.scaffoldColor, base, paperOpacity) ?? base;
   }
+
+  /// 当前生效正文色
+  static Color get textColor => textColorOverride ?? theme.textColor;
+
+  /// 当前生效强调/注释色
+  static Color get accentColor =>
+      accentColorOverride ?? commentColor;
 
   /// 纸色底（正式页面渲染与翻页快照共用，v16.9.3 公开化）
   /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）
@@ -466,7 +485,7 @@ class PageContentRenderer {
       if (text == null || text.isEmpty) continue;
       final baseColor = entry.isComment
           ? commentColor
-          : (_parseHexColor(entry.color) ?? theme.textColor);
+          : (_parseHexColor(entry.color) ?? PageContentRenderer.textColor);
       final baseScale = entry.fontScale ?? 1.0;
       // 章节标题：用户 titleScale 再乘一次（引擎 fontScale 已含 CSS 标题放大）
       final titleMul =

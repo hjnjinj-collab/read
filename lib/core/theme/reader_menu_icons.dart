@@ -89,6 +89,10 @@ class ReaderMenuIcons {
   static const fillSize = Iconsax.size_copy;
   static const lineRank = Iconsax.ranking;
   static const fillRank = Iconsax.ranking_copy;
+  static const lineTextColor = Iconsax.color_swatch;
+  static const fillTextColor = Iconsax.color_swatch_copy;
+  static const lineAccent = Iconsax.brush_2;
+  static const fillAccent = Iconsax.brush_2_copy;
 
   /// 按风格解析成最终字形（线性/面性；双色由 [ReaderMenuGlyph] 叠色）。
   static IconData resolve({

@@ -137,6 +137,12 @@ class ReaderSettings {
   /// 内置背景预设键（parchment/linen/xuan/night/deepBlue/warmGray/''）
   final String bgPreset;
 
+  /// 正文文字色（ARGB int；null = 主题默认）
+  final int? textColor;
+
+  /// 强调/注释色（ARGB int；null = 主题默认）
+  final int? accentColor;
+
   const ReaderSettings({
     required this.fontSize,
     required this.lineHeight,
@@ -177,6 +183,8 @@ class ReaderSettings {
     required this.darkPaperColor,
     required this.bgOpacity,
     required this.bgPreset,
+    required this.textColor,
+    required this.accentColor,
   });
 
   /// 默认设置 = 现行全部硬编码值
@@ -220,6 +228,8 @@ class ReaderSettings {
         darkPaperColor: null,
         bgOpacity: 1.0,
         bgPreset: '',
+        textColor: null,
+        accentColor: null,
       );
 
   /// 安全解析：损坏 JSON / 缺键 / 类型不符逐字段落默认，永不抛
@@ -279,6 +289,8 @@ class ReaderSettings {
             j['darkPaperColor'] is int ? j['darkPaperColor'] as int : null,
         bgOpacity: _d(j, 'bgOpacity', 1.0).clamp(0.15, 1.0),
         bgPreset: _s(j, 'bgPreset', ''),
+        textColor: j['textColor'] is int ? j['textColor'] as int : null,
+        accentColor: j['accentColor'] is int ? j['accentColor'] as int : null,
       );
     } catch (_) {
       return ReaderSettings.defaults();

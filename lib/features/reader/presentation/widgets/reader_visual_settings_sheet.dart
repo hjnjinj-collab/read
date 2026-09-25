@@ -433,6 +433,8 @@ class _TypographyPage extends ConsumerStatefulWidget {
 }
 
 class _TypographyPageState extends ConsumerState<_TypographyPage> {
+  /// 子页签：0 字体 / 1 正文 / 2 颜色 / 3 布局
+  int _sub = 0;
   double _fontSize = 18;
   double _lineHeight = 1.5;
   double _paraSpacing = 1.0;
@@ -448,6 +450,8 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
   bool _punctCompress = false;
   double _padH = 20;
   double _padV = 20;
+  int? _textColor;
+  int? _accentColor;
 
   @override
   void initState() {
@@ -468,28 +472,92 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     _punctCompress = n.punctuationCompress;
     _padH = n.paddingHorizontal;
     _padV = n.paddingVertical;
+    _textColor = n.textColor;
+    _accentColor = n.accentColor;
+  }
+
+  void _applyPadPreset(double v, double h) {
+    setState(() {
+      _padV = v;
+      _padH = h;
+    });
+    ref.read(readerProvider.notifier).setPadding(vertical: v, horizontal: h);
   }
 
   @override
   Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
-    // watch 使字体/字号变更后标题区刷新
     ref.watch(readerProvider);
     final scheme = Theme.of(context).colorScheme;
-    // 字体名用 ReaderFont.displayName（setCustomFont 后即时）
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
       children: [
-        _SectionTitle('正文', scheme,
+        // 子页签胶囊（与主 Tab 同语言，轻量一行）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: _GlassSegmented<int>(
+            items: const [
+              (0, '字体'),
+              (1, '正文'),
+              (2, '颜色'),
+              (3, '布局'),
+            ],
+            icons: const [
+              (ReaderMenuIcons.lineType, ReaderMenuIcons.fillType),
+              (ReaderMenuIcons.lineForm, ReaderMenuIcons.fillForm),
+              (ReaderMenuIcons.lineTextColor, ReaderMenuIcons.fillTextColor),
+              (ReaderMenuIcons.lineGrid, ReaderMenuIcons.fillGrid),
+            ],
+            value: _sub,
+            onChanged: (v) => setState(() => _sub = v),
+          ),
+        ),
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: Duration(
+              milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 280,
+            ),
+            switchInCurve: Curves.easeOutCubic,
+            transitionBuilder: (child, anim) {
+              // 只 Transform：Fade 会隔离玻璃控件
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.06, 0),
+                  end: Offset.zero,
+                ).animate(anim),
+                child: child,
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey(_sub),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                children: switch (_sub) {
+                  0 => _fontSection(n, scheme),
+                  1 => _bodySection(n, scheme),
+                  2 => _colorSection(n, scheme),
+                  _ => _layoutSection(n, scheme),
+                },
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 字体：字体 + 字号 + 粗斜体 ──
+  List<Widget> _fontSection(ReaderNotifier n, ColorScheme scheme) => [
+        _SectionTitle('字体', scheme,
             line: ReaderMenuIcons.lineType, fill: ReaderMenuIcons.fillType),
         const SizedBox(height: 8),
         ListTile(
+          contentPadding: EdgeInsets.zero,
           leading: ReaderMenuGlyph(
             line: ReaderMenuIcons.lineType,
             fill: ReaderMenuIcons.fillType,
             style: refIconStyleOf(context),
             size: 22,
-            color: scheme.onSurfaceVariant,
+            color: scheme.primary,
           ),
           title: const Text('字体'),
           subtitle: Text(ReaderFont.displayName),
@@ -507,6 +575,33 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _fontSize = v),
           onChangeEnd: (v) => n.setFontSize(v),
         ),
+        const SizedBox(height: 8),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineType,
+          fill: ReaderMenuIcons.fillType,
+          title: '粗体',
+          value: _bold,
+          onChanged: (v) {
+            setState(() => _bold = v);
+            n.setBoldEnabled(v);
+          },
+        ),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineTitle,
+          fill: ReaderMenuIcons.fillTitle,
+          title: '斜体',
+          value: _italic,
+          onChanged: (v) {
+            setState(() => _italic = v);
+            n.setItalicEnabled(v);
+          },
+        ),
+      ];
+
+  // ── 正文：间距 / 段落格式 ──
+  List<Widget> _bodySection(ReaderNotifier n, ColorScheme scheme) => [
+        _SectionTitle('间距', scheme,
+            line: ReaderMenuIcons.lineRows, fill: ReaderMenuIcons.fillRows),
         _LiveSlider(
           label: '行距',
           value: _lineHeight,
@@ -540,27 +635,131 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _letterSpacing = v),
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
+        const SizedBox(height: 12),
+        _SectionTitle('段落格式', scheme,
+            line: ReaderMenuIcons.lineForm, fill: ReaderMenuIcons.fillForm),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineForm,
+          fill: ReaderMenuIcons.fillForm,
+          title: '首行缩进',
+          value: _indent,
+          onChanged: (v) {
+            setState(() => _indent = v);
+            n.setEnableIndent(v);
+          },
+        ),
+        if (_indent)
+          _LiveSlider(
+            label: '缩进字符',
+            value: _indentChars.toDouble(),
+            min: 0,
+            max: 4,
+            unit: '',
+            iconLine: ReaderMenuIcons.lineLetter,
+            iconFill: ReaderMenuIcons.fillLetter,
+            onChanged: (v) => setState(() => _indentChars = v.round()),
+            onChangeEnd: (v) => n.setIndentSizeChars(v.round()),
+          ),
         _GlassSwitchRow(
           line: ReaderMenuIcons.lineType,
           fill: ReaderMenuIcons.fillType,
-          title: '粗体',
-          value: _bold,
+          title: '两端对齐',
+          value: _justify,
           onChanged: (v) {
-            setState(() => _bold = v);
-            n.setBoldEnabled(v);
+            setState(() => _justify = v);
+            n.setJustify(v);
           },
         ),
         _GlassSwitchRow(
-          line: ReaderMenuIcons.lineTitle,
-          fill: ReaderMenuIcons.fillTitle,
-          title: '斜体',
-          value: _italic,
+          line: ReaderMenuIcons.lineLetter,
+          fill: ReaderMenuIcons.fillLetter,
+          title: '标点压缩',
+          value: _punctCompress,
           onChanged: (v) {
-            setState(() => _italic = v);
-            n.setItalicEnabled(v);
+            setState(() => _punctCompress = v);
+            n.setPunctuationCompress(v);
           },
         ),
-        const SizedBox(height: 16),
+      ];
+
+  // ── 颜色：正文色 / 强调色 ──
+  List<Widget> _colorSection(ReaderNotifier n, ColorScheme scheme) {
+    const presets = <(String, Color)>[
+      ('默认', Color(0xFF000000)),
+      ('暖灰', Color(0xFF3E3A36)),
+      ('墨绿', Color(0xFF1F3D2B)),
+      ('深蓝', Color(0xFF1A2744)),
+      ('绛紫', Color(0xFF4A2545)),
+      ('夜白', Color(0xFFD8D4CC)),
+    ];
+    return [
+      _SectionTitle('正文颜色', scheme,
+          line: ReaderMenuIcons.lineTextColor,
+          fill: ReaderMenuIcons.fillTextColor),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final (label, color) in presets)
+            _ColorCard(
+              label,
+              color,
+              selected: _textColor == color.toARGB32(),
+              onTap: () {
+                setState(() => _textColor = color.toARGB32());
+                n.setTextColor(color.toARGB32());
+              },
+            ),
+          _ColorCard(
+            '主题默认',
+            scheme.onSurface,
+            selected: _textColor == null,
+            onTap: () {
+              setState(() => _textColor = null);
+              n.setTextColor(null);
+            },
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      _SectionTitle('强调 / 注释', scheme,
+          line: ReaderMenuIcons.lineAccent, fill: ReaderMenuIcons.fillAccent),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          _ColorCard('灰', const Color(0xFF888888),
+              selected: _accentColor == const Color(0xFF888888).toARGB32(),
+              onTap: () {
+            setState(() => _accentColor = const Color(0xFF888888).toARGB32());
+            n.setAccentColor(const Color(0xFF888888).toARGB32());
+          }),
+          _ColorCard('蓝灰', const Color(0xFF5A6B7A),
+              selected: _accentColor == const Color(0xFF5A6B7A).toARGB32(),
+              onTap: () {
+            setState(() => _accentColor = const Color(0xFF5A6B7A).toARGB32());
+            n.setAccentColor(const Color(0xFF5A6B7A).toARGB32());
+          }),
+          _ColorCard('茶褐', const Color(0xFF6B5A4A),
+              selected: _accentColor == const Color(0xFF6B5A4A).toARGB32(),
+              onTap: () {
+            setState(() => _accentColor = const Color(0xFF6B5A4A).toARGB32());
+            n.setAccentColor(const Color(0xFF6B5A4A).toARGB32());
+          }),
+          _ColorCard('主题默认', scheme.onSurfaceVariant,
+              selected: _accentColor == null, onTap: () {
+            setState(() => _accentColor = null);
+            n.setAccentColor(null);
+          }),
+        ],
+      ),
+    ];
+  }
+
+  // ── 布局：标题 / 页眉页脚 / 边距（预设收拢）──
+  List<Widget> _layoutSection(ReaderNotifier n, ColorScheme scheme) => [
         _SectionTitle('标题', scheme,
             line: ReaderMenuIcons.lineTitle, fill: ReaderMenuIcons.fillTitle),
         _LiveSlider(
@@ -574,7 +773,7 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _titleScale = v),
           onChangeEnd: (v) => n.setTitleScale(v),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         _SectionTitle('页眉 / 页脚', scheme,
             line: ReaderMenuIcons.lineHeader, fill: ReaderMenuIcons.fillHeader),
         _GlassSwitchRow(
@@ -599,77 +798,64 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
             n.setShowFooter(v);
           },
         ),
-        const SizedBox(height: 16),
-        _SectionTitle('段落格式', scheme,
-            line: ReaderMenuIcons.lineForm, fill: ReaderMenuIcons.fillForm),
-        _GlassSwitchRow(
-          line: ReaderMenuIcons.lineForm,
-          fill: ReaderMenuIcons.fillForm,
-          title: '首行缩进',
-          value: _indent,
-          onChanged: (v) {
-            setState(() => _indent = v);
-            n.setEnableIndent(v);
-          },
-        ),
-        if (_indent)
-          _LiveSlider(
-            label: '缩进字符',
-            value: _indentChars.toDouble(),
-            min: 0,
-            max: 4,
-            unit: '',
-            onChanged: (v) => setState(() => _indentChars = v.round()),
-            onChangeEnd: (v) => n.setIndentSizeChars(v.round()),
-          ),
-        _GlassSwitchRow(
-          line: ReaderMenuIcons.lineType,
-          fill: ReaderMenuIcons.fillType,
-          title: '两端对齐',
-          value: _justify,
-          onChanged: (v) {
-            setState(() => _justify = v);
-            n.setJustify(v);
-          },
-        ),
-        _GlassSwitchRow(
-          line: ReaderMenuIcons.lineLetter,
-          fill: ReaderMenuIcons.fillLetter,
-          title: '标点压缩',
-          value: _punctCompress,
-          onChanged: (v) {
-            setState(() => _punctCompress = v);
-            n.setPunctuationCompress(v);
-          },
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         _SectionTitle('边距', scheme,
-            line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
-        _LiveSlider(
-          label: '上下边距',
-          value: _padV,
-          min: 0,
-          max: 64,
-          unit: 'px',
-          iconLine: ReaderMenuIcons.lineHeader,
-          iconFill: ReaderMenuIcons.fillHeader,
-          onChanged: (v) => setState(() => _padV = v),
-          onChangeEnd: (v) => n.setPadding(vertical: v),
+            line: ReaderMenuIcons.lineGrid, fill: ReaderMenuIcons.fillGrid),
+        const SizedBox(height: 8),
+        // 预设优先，避免四向滑杆把页面撑爆
+        _GlassSegmented<String>(
+          items: const [
+            ('narrow', '窄'),
+            ('std', '标准'),
+            ('wide', '宽'),
+          ],
+          value: _padV <= 12
+              ? 'narrow'
+              : _padV >= 36
+                  ? 'wide'
+                  : 'std',
+          onChanged: (v) {
+            if (v == 'narrow') _applyPadPreset(8, 12);
+            if (v == 'std') _applyPadPreset(20, 20);
+            if (v == 'wide') _applyPadPreset(40, 28);
+          },
         ),
-        _LiveSlider(
-          label: '左右边距',
-          value: _padH,
-          min: 0,
-          max: 48,
-          unit: 'px',
-          iconLine: ReaderMenuIcons.lineGrid,
-          iconFill: ReaderMenuIcons.fillGrid,
-          onChanged: (v) => setState(() => _padH = v),
-          onChangeEnd: (v) => n.setPadding(horizontal: v),
+        const SizedBox(height: 8),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text(
+            '精细调节  ·  上下 ${_padV.round()} / 左右 ${_padH.round()}',
+            style: TextStyle(
+              fontSize: 13,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          children: [
+            _LiveSlider(
+              label: '上下边距',
+              value: _padV,
+              min: 0,
+              max: 64,
+              unit: 'px',
+              iconLine: ReaderMenuIcons.lineHeader,
+              iconFill: ReaderMenuIcons.fillHeader,
+              onChanged: (v) => setState(() => _padV = v),
+              onChangeEnd: (v) => n.setPadding(vertical: v),
+            ),
+            _LiveSlider(
+              label: '左右边距',
+              value: _padH,
+              min: 0,
+              max: 48,
+              unit: 'px',
+              iconLine: ReaderMenuIcons.lineGrid,
+              iconFill: ReaderMenuIcons.fillGrid,
+              onChanged: (v) => setState(() => _padH = v),
+              onChangeEnd: (v) => n.setPadding(horizontal: v),
+            ),
+          ],
         ),
-      ],
-    );
-  }
+      ];
 
   void _showFontSheet(BuildContext context) {
     showModalBottomSheet(
@@ -1616,22 +1802,26 @@ class _GlassTrackSlider extends StatelessWidget {
 }
 
 class _ColorCard extends StatelessWidget {
-  const _ColorCard(this.label, this.color, {this.onTap});
+  const _ColorCard(this.label, this.color, {this.onTap, this.selected = false});
   final String label;
   final Color color;
   final VoidCallback? onTap;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
           height: 64,
+          width: 88,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: Colors.white.withValues(alpha: 0.3),
-              width: 1,
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.white.withValues(alpha: 0.3),
+              width: selected ? 2.2 : 1,
             ),
           ),
           child: Center(
