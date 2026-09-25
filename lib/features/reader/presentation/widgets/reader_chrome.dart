@@ -300,10 +300,10 @@ class ReaderTopChrome extends StatelessWidget {
       onTap: onMore,
     );
 
-    // 更多恒在右侧（真机反馈）：合并只把「页码+更多」收进右侧胶囊，
-    // 不再把更多拉到返回旁。默认 mergeButtons=false → 更多独立右键。
-    final Widget trailing = !mergeButtons
-        ? moreBtn
+    // 合并=返回|更多 同一胶囊（原设计）；默认 mergeButtons=false → 左右分开。
+    // 页码独立，绝不与更多捆在一起。
+    final Widget leading = !mergeButtons
+        ? backBtn
         : DecoratedBox(
             decoration: BoxDecoration(
               color: AppGlass.restPillTint(scheme),
@@ -316,19 +316,17 @@ class ReaderTopChrome extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    pageLabel,
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  backBtn,
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    color: Colors.white.withValues(alpha: 0.22),
                   ),
-                  const SizedBox(width: 2),
                   moreBtn,
                 ],
               ),
@@ -382,24 +380,22 @@ class ReaderTopChrome extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
         child: Row(
           children: [
-            backBtn,
+            leading,
             const SizedBox(width: 8),
             Expanded(
               child: Center(child: titleWidget),
             ),
-            if (!mergeButtons) ...[
-              Text(
-                pageLabel,
-                style: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
+            // 页码恒独立；更多仅在未合并时居右
+            Text(
+              pageLabel,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
               ),
-              const SizedBox(width: 8),
-            ] else
-              const SizedBox(width: 8),
-            trailing,
+            ),
+            const SizedBox(width: 8),
+            if (!mergeButtons) moreBtn else const SizedBox(width: 52),
           ],
         ),
       ),
@@ -505,7 +501,9 @@ class _ModeTogglePillState extends ConsumerState<_ModeTogglePill> {
       ),
     );
 
-    final scale = _pressed && !disable ? 0.94 : 1.0;
+    final pressed = _pressed && !disable;
+    final scale = pressed ? 0.90 : 1.0;
+    final dy = pressed ? 2.0 : -1.0;
 
     if (disable) {
       return GestureDetector(
@@ -525,16 +523,28 @@ class _ModeTogglePillState extends ConsumerState<_ModeTogglePill> {
       );
     }
 
-    // 液态胶囊（与齿轮中心面同配方 blur0）；按压缩放果冻
+    // 液态胶囊（与齿轮中心面同配方 blur0）；按压：下沉+缩+影
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: scale,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutBack,
+        transform: Matrix4.identity()
+          ..translateByDouble(0.0, dy, 0.0, 1.0)
+          ..scaleByDouble(scale, scale, 1.0, 1.0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: pressed ? 0.18 : 0.10),
+              blurRadius: pressed ? 4 : 10,
+              offset: Offset(0, pressed ? 1 : 4),
+            ),
+          ],
+        ),
         child: IntrinsicWidth(
           child: LiquidGlassLens(
             style: shellFrostLiquidStyle(

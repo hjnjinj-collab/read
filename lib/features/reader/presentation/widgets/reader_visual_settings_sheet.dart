@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
 import '../../../../core/services/font_provider.dart';
 import '../../../../core/services/reader_font.dart';
@@ -56,20 +57,41 @@ class _ReaderVisualSettingsSheetState
     extends ConsumerState<ReaderVisualSettingsSheet>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
+  late final PageController _pageCtrl;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this)
       ..addListener(() {
-        if (mounted) setState(() {});
+        if (mounted && !_tabCtrl.indexIsChanging) setState(() {});
       });
+    _pageCtrl = PageController();
   }
 
   @override
   void dispose() {
     _tabCtrl.dispose();
+    _pageCtrl.dispose();
     super.dispose();
+  }
+
+  void _goTab(int i) {
+    if (_tabCtrl.index == i && _pageCtrl.page?.round() == i) return;
+    _tabCtrl.animateTo(
+      i,
+      duration: Duration(
+        milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 320,
+      ),
+      curve: Curves.easeOutCubic,
+    );
+    _pageCtrl.animateToPage(
+      i,
+      duration: Duration(
+        milliseconds: MediaQuery.disableAnimationsOf(context) ? 0 : 320,
+      ),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
@@ -115,11 +137,23 @@ class _ReaderVisualSettingsSheetState
               controller: _tabCtrl,
               tabs: _sheetTabs,
               iconStyle: iconStyle,
+              onTap: _goTab,
             ),
           ),
           Expanded(
-            child: TabBarView(
-              controller: _tabCtrl,
+            child: PageView(
+              controller: _pageCtrl,
+              onPageChanged: (i) {
+                _tabCtrl.animateTo(
+                  i,
+                  duration: Duration(
+                    milliseconds:
+                        MediaQuery.disableAnimationsOf(context) ? 0 : 240,
+                  ),
+                  curve: Curves.easeOutCubic,
+                );
+                setState(() {});
+              },
               children: const [
                 _FormIconPage(),
                 _TypographyPage(),
@@ -141,11 +175,13 @@ class _GlassTabBar extends StatelessWidget {
     required this.controller,
     required this.tabs,
     required this.iconStyle,
+    required this.onTap,
   });
 
   final TabController controller;
   final List<_SheetTabItem> tabs;
   final int iconStyle;
+  final ValueChanged<int> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -179,6 +215,13 @@ class _GlassTabBar extends StatelessWidget {
                         color: AppGlass.restPillTint(scheme),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: rim, width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: scheme.primary.withValues(alpha: 0.16),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
                     ),
                   );
@@ -190,15 +233,19 @@ class _GlassTabBar extends StatelessWidget {
                     Expanded(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTap: () => controller.animateTo(
-                          i,
-                          duration: const Duration(milliseconds: 280),
-                          curve: Curves.easeOutBack,
-                        ),
-                        child: _TabCell(
-                          item: tabs[i],
-                          selected: controller.index == i,
-                          iconStyle: iconStyle,
+                        onTap: () => onTap(i),
+                        child: AnimatedBuilder(
+                          animation: offset,
+                          builder: (context, _) {
+                            final sel = 1.0 -
+                                (offset.value - i).abs().clamp(0.0, 1.0);
+                            return _TabCell(
+                              item: tabs[i],
+                              selected: controller.index == i,
+                              selectT: sel,
+                              iconStyle: iconStyle,
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -217,32 +264,40 @@ class _TabCell extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.iconStyle,
+    this.selectT = 0,
   });
 
   final _SheetTabItem item;
   final bool selected;
   final int iconStyle;
 
+  /// 0–1 连续选中度（跟手插值）
+  final double selectT;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     // 与菜单圆键同一白字/主色语言
-    final fg = selected
-        ? scheme.primary
-        : scheme.onSurfaceVariant;
+    final t = selectT.clamp(0.0, 1.0);
+    final fg = Color.lerp(
+      scheme.onSurfaceVariant,
+      scheme.primary,
+      t,
+    )!;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutBack,
       transform: Matrix4.identity()
-        ..translateByDouble(0.0, selected ? -1.0 : 0.0, 0.0, 1.0),
+        ..translateByDouble(0.0, -2.0 * t, 0.0, 1.0)
+        ..scaleByDouble(1.0 + 0.06 * t, 1.0 + 0.06 * t, 1.0, 1.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           ReaderMenuGlyph(
             line: item.line,
             fill: item.fill,
-            style: selected ? iconStyle : 0,
-            size: 20,
+            style: t > 0.55 ? iconStyle : 0,
+            size: 20 + 2 * t,
             color: fg,
             duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
           ),
@@ -251,7 +306,7 @@ class _TabCell extends StatelessWidget {
             item.label,
             style: TextStyle(
               fontSize: 11,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              fontWeight: t > 0.55 ? FontWeight.w700 : FontWeight.w500,
               color: fg,
             ),
           ),
@@ -337,16 +392,11 @@ class _FormIconPage extends ConsumerWidget {
           onChangeEnd: (v) => n.setReaderIconRowCount(v.round()),
         ),
         const SizedBox(height: 8),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineShowText,
-            fill: ReaderMenuIcons.fillShowText,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('显示文字标签'),
-          subtitle: const Text('图标下方显示中文名称'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineShowText,
+          fill: ReaderMenuIcons.fillShowText,
+          title: '显示文字标签',
+          subtitle: '图标下方显示中文名称',
           value: shell.readerIconShowText,
           onChanged: (v) => n.setReaderIconShowText(v),
         ),
@@ -464,30 +514,20 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _letterSpacing = v),
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineType,
-            fill: ReaderMenuIcons.fillType,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('粗体'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineType,
+          fill: ReaderMenuIcons.fillType,
+          title: '粗体',
           value: _bold,
           onChanged: (v) {
             setState(() => _bold = v);
             n.setBoldEnabled(v);
           },
         ),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineTitle,
-            fill: ReaderMenuIcons.fillTitle,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('斜体'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineTitle,
+          fill: ReaderMenuIcons.fillTitle,
+          title: '斜体',
           value: _italic,
           onChanged: (v) {
             setState(() => _italic = v);
@@ -509,32 +549,22 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
         const SizedBox(height: 16),
         _SectionTitle('页眉 / 页脚', scheme,
             line: ReaderMenuIcons.lineHeader, fill: ReaderMenuIcons.fillHeader),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineHeader,
-            fill: ReaderMenuIcons.fillHeader,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('页眉'),
-          subtitle: const Text('顶栏显示书名'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineHeader,
+          fill: ReaderMenuIcons.fillHeader,
+          title: '页眉',
+          subtitle: '顶栏显示书名',
           value: _showHeader,
           onChanged: (v) {
             setState(() => _showHeader = v);
             n.setShowHeader(v);
           },
         ),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineFooter,
-            fill: ReaderMenuIcons.fillFooter,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('页脚'),
-          subtitle: const Text('底栏显示页码'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineFooter,
+          fill: ReaderMenuIcons.fillFooter,
+          title: '页脚',
+          subtitle: '底栏显示页码',
           value: _showFooter,
           onChanged: (v) {
             setState(() => _showFooter = v);
@@ -544,8 +574,10 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
         const SizedBox(height: 16),
         _SectionTitle('段落格式', scheme,
             line: ReaderMenuIcons.lineForm, fill: ReaderMenuIcons.fillForm),
-        SwitchListTile(
-          title: const Text('首行缩进'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineForm,
+          fill: ReaderMenuIcons.fillForm,
+          title: '首行缩进',
           value: _indent,
           onChanged: (v) {
             setState(() => _indent = v);
@@ -562,16 +594,20 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
             onChanged: (v) => setState(() => _indentChars = v.round()),
             onChangeEnd: (v) => n.setIndentSizeChars(v.round()),
           ),
-        SwitchListTile(
-          title: const Text('两端对齐'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineType,
+          fill: ReaderMenuIcons.fillType,
+          title: '两端对齐',
           value: _justify,
           onChanged: (v) {
             setState(() => _justify = v);
             n.setJustify(v);
           },
         ),
-        SwitchListTile(
-          title: const Text('标点压缩'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineLetter,
+          fill: ReaderMenuIcons.fillLetter,
+          title: '标点压缩',
           value: _punctCompress,
           onChanged: (v) {
             setState(() => _punctCompress = v);
@@ -875,16 +911,11 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
           onChanged: (v) => setState(() => _tint = v),
           onChangeEnd: (v) => n.setNavTintStrength(v),
         ),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineTheme,
-            fill: ReaderMenuIcons.fillTheme,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('果冻效应'),
-          subtitle: const Text('滑杆/开关/分段形变鼓动'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineTheme,
+          fill: ReaderMenuIcons.fillTheme,
+          title: '果冻效应',
+          subtitle: '滑杆/开关/分段形变鼓动',
           value: _lgMotion,
           onChanged: (v) {
             setState(() => _lgMotion = v);
@@ -895,16 +926,11 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
         _SectionTitle('设置 Sheet 材质', scheme,
             line: ReaderMenuIcons.lineBlur, fill: ReaderMenuIcons.fillBlur),
         const SizedBox(height: 4),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineBlur,
-            fill: ReaderMenuIcons.fillBlur,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('轻模糊'),
-          subtitle: const Text('仅本设置弹层；若正文缩放/发虚请关掉'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineBlur,
+          fill: ReaderMenuIcons.fillBlur,
+          title: '轻模糊',
+          subtitle: '仅本设置弹层；若正文缩放/发虚请关掉',
           value: shell.readerSheetBlurOn,
           onChanged: (v) => n.setReaderSheetBlurOn(v),
         ),
@@ -922,29 +948,19 @@ class _MaterialPageState extends ConsumerState<_MaterialPage> {
         const SizedBox(height: 24),
         _SectionTitle('顶栏', scheme,
             line: ReaderMenuIcons.lineBack, fill: ReaderMenuIcons.fillBack),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.lineMerge,
-            fill: ReaderMenuIcons.fillMerge,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('合并按钮'),
-          subtitle: const Text('页码与更多收进右侧胶囊（更多恒在右）'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.lineMerge,
+          fill: ReaderMenuIcons.fillMerge,
+          title: '合并按钮',
+          subtitle: '返回/更多合并为一个胶囊（默认分开）',
           value: shell.readerTopMergeButtons,
           onChanged: (v) => n.setReaderTopMergeButtons(v),
         ),
-        SwitchListTile(
-          secondary: ReaderMenuGlyph(
-            line: ReaderMenuIcons.linePill,
-            fill: ReaderMenuIcons.fillPill,
-            style: refIconStyleOf(context),
-            size: 22,
-            color: scheme.onSurfaceVariant,
-          ),
-          title: const Text('标题胶囊'),
-          subtitle: const Text('书名显示在胶囊内'),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.linePill,
+          fill: ReaderMenuIcons.fillPill,
+          title: '标题胶囊',
+          subtitle: '书名显示在胶囊内',
           value: shell.readerTopTitlePill,
           onChanged: (v) => n.setReaderTopTitlePill(v),
         ),
@@ -1072,6 +1088,92 @@ int refIconStyleOf(BuildContext context) {
   return container.read(shellSettingsProvider).readerIconStyle;
 }
 
+/// 玻璃开关行：图标 + 标题/副文案 + **液态开关**（与壳层 SettingSwitchRow 同源）。
+class _GlassSwitchRow extends ConsumerWidget {
+  const _GlassSwitchRow({
+    required this.title,
+    this.subtitle,
+    required this.line,
+    required this.fill,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String? subtitle;
+  final IconData line;
+  final IconData fill;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final shell = ref.read(shellSettingsProvider);
+    final iconStyle = refIconStyleOf(context);
+    final layout = shell.lgMotionOn
+        ? const LiquidGlassSwitchLayout()
+        : const LiquidGlassSwitchLayout(
+            thumbWidth: 37,
+            thumbHeight: 24,
+            expandedThumbWidth: 37,
+            expandedThumbHeight: 24,
+          );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      child: Row(
+        children: [
+          ReaderMenuGlyph(
+            line: line,
+            fill: fill,
+            style: iconStyle,
+            size: 22,
+            color: scheme.primary,
+            duotoneAccent: scheme.tertiary.withValues(alpha: 0.45),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          LiquidGlassSwitch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: value
+                ? AppGlass.switchTrackOn(scheme)
+                : AppGlass.switchTrackOff(scheme),
+            inactiveColor: AppGlass.switchTrackOff(scheme),
+            thumbColor: value
+                ? AppGlass.switchThumbOn(scheme)
+                : AppGlass.switchThumbOff(scheme),
+            layout: layout,
+            reserveSwellRoom: false,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LiveSlider extends StatelessWidget {
   const _LiveSlider({
     required this.label,
@@ -1163,27 +1265,41 @@ class _GlassSegmented<T> extends StatelessWidget {
                     duration: Duration(
                       milliseconds: MediaQuery.disableAnimationsOf(context)
                           ? 0
-                          : 220,
+                          : 280,
                     ),
-                    curve: Curves.easeOutCubic,
+                    curve: Curves.easeOutBack,
                     transform: Matrix4.identity()
                       ..translateByDouble(
                         0.0,
-                        selected ? -1.0 : 0.0,
+                        selected ? -3.0 : 0.0,
                         0.0,
+                        1.0,
+                      )
+                      ..scaleByDouble(
+                        selected ? 1.03 : 1.0,
+                        selected ? 1.03 : 1.0,
+                        1.0,
                         1.0,
                       ),
                     decoration: BoxDecoration(
                       color: selected
-                          ? scheme.primary.withValues(alpha: 0.38)
+                          ? scheme.primary.withValues(alpha: 0.42)
                           : Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: selected
-                            ? Colors.white.withValues(alpha: 0.65)
+                            ? Colors.white.withValues(alpha: 0.75)
                             : rim,
-                        width: selected ? 1.3 : 1.0,
+                        width: selected ? 1.5 : 1.0,
                       ),
+                      boxShadow: [
+                        if (selected)
+                          BoxShadow(
+                            color: scheme.primary.withValues(alpha: 0.28),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                      ],
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 11),

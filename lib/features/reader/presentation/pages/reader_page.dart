@@ -953,17 +953,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                 milliseconds: MediaQuery.disableAnimationsOf(
                                         context)
                                     ? 0
-                                    : 240,
+                                    : 320,
                               ),
                               switchInCurve: Curves.easeOutBack,
                               switchOutCurve: Curves.easeInCubic,
                               transitionBuilder: (child, anim) {
                                 // 仅 Transform：Fade 会隔离 LiquidGlass 背板
+                                // 抬升感：下入上出 + 0.88→1 缩放
                                 return ScaleTransition(
-                                  scale: anim,
+                                  scale: Tween<double>(begin: 0.88, end: 1.0)
+                                      .animate(anim),
                                   child: SlideTransition(
                                     position: Tween<Offset>(
-                                      begin: const Offset(0, 0.12),
+                                      begin: const Offset(0, 0.22),
                                       end: Offset.zero,
                                     ).animate(anim),
                                     child: child,
