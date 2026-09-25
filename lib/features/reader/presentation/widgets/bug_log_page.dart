@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/theme/app_theme.dart' show AppGlass;
 import '../../../../core/theme/reader_menu_icons.dart';
@@ -76,17 +79,33 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
   }
 
   Future<void> _export() async {
-    final text = await readTraceLogs();
-    final payload = text ??
+    // 导出为日志文件（应用文档目录），并复制路径提示
+    final text = await readTraceLogs() ??
         _rows.map((e) => '[${e.time.toIso8601String()}] ${e.line}').join('\n');
-    await Clipboard.setData(ClipboardData(text: payload));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已复制 ${_rows.length} 条（或全部文件日志）'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .split('.')
+          .first;
+      final file = File('${dir.path}/bug_log_$stamp.log');
+      await file.writeAsString(text, flush: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已导出：${file.path}'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      // 退回剪贴板
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('写文件失败，已复制到剪贴板：$e')),
+      );
+    }
   }
 
   @override

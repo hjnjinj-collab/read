@@ -79,21 +79,22 @@ const Set<String> _frameNoiseEvents = {
 };
 
 void readerTrace(String event, [Map<String, Object?> fields = const {}]) {
-  if (!readerTraceVerbose && _frameNoiseEvents.contains(event)) return;
+  final isNoise = !readerTraceVerbose && _frameNoiseEvents.contains(event);
   final timestamp = DateTime.now().toIso8601String();
   final details = fields.entries
       .map((entry) => '${entry.key}=${entry.value}')
       .join(' ');
   final line =
       '[READER][$timestamp] $event${details.isEmpty ? '' : ' $details'}';
-  print(line);
-  // 内存环形缓冲（Bug 收集页回溯最近 30–60 分钟）
+  // 控制台：噪声默认不打；文件/环形缓冲**始终记录**（导出/Bug 页可回溯）
+  if (!isNoise) {
+    print(line);
+  }
   TraceRingBuffer.instance.add(
     time: DateTime.now(),
     event: event,
     fields: fields,
   );
-  // 文件双写（异步，失败静默——诊断通道不得影响功能）
   unawaited(_TraceFileSink.instance.write(line));
 }
 

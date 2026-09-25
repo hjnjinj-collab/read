@@ -179,6 +179,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 避免永久悬挂在定格帧上。
   Timer? _settledSafetyTimer;
 
+  /// 动画/提交悬挂看门狗：_isActive 超时未播完则强制收场
+  Timer? _stuckWatchdog;
+  static const _stuckTimeout = Duration(milliseconds: 1200);
+
   /// 图片就绪重绘通道：与空闲页 PagePainter(repaint: _repaintTick)
   /// 同机制，直达 markNeedsPaint 绕过 shouldRepaint 字段比对。
   final ValueNotifier<int> _imageTick = ValueNotifier<int>(0);
@@ -590,6 +594,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _snapshotPendingDeps.clear();
     _pendingTimer?.cancel();
     _settledSafetyTimer?.cancel();
+    _stuckWatchdog?.cancel();
     _imageTick.dispose();
     _turnController?.stop();
     _turnController?.dispose();
@@ -996,6 +1001,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     _targetFrame = frame;
     _replaceController();
     setState(() {});
+    _armStuckWatchdog();
 
     // 快照等待窗口内手指已抬起 → 补跑收尾动画（否则手势被吞、冻结在 0 进度）
     final deferredEnd = _pendingDragEndShouldTurn;
@@ -1499,10 +1505,39 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         _releaseSettled('safety-timeout');
       }
     });
+    _armStuckWatchdog();
+  }
+
+  /// 动画启动后若既不在播也未提交 → 视为卡住，强制收场保功能。
+  void _armStuckWatchdog() {
+    _stuckWatchdog?.cancel();
+    _stuckWatchdog = Timer(_stuckTimeout, () {
+      if (!mounted) return;
+      final animating = _turnController?.isAnimating == true;
+      if (_holdingFinalFrame && !_commitInFlight) {
+        readerTrace('turn.stuck.recover', {'stage': 'holding-final'});
+        _releaseSettled('stuck-watchdog');
+        return;
+      }
+      if (_isActive && !animating && !_commitInFlight) {
+        final d = _turnDirection;
+        final progress = _turnController?.progress ?? 0;
+        readerTrace('turn.stuck.recover', {
+          'stage': 'active-idle',
+          'direction': d,
+          'progress': progress,
+        });
+        _resetState();
+        if (d != PageDirection.none) {
+          unawaited(_directFlip(d));
+        }
+      }
+    });
   }
 
   void _resetState({bool clearTarget = true, bool scheduleRebuild = true}) {
     _isActive = false;
+    _stuckWatchdog?.cancel();
     if (clearTarget) _targetFrame = null;
     _turnDirection = PageDirection.none;
     _turnController?.stop();
