@@ -134,13 +134,27 @@ class TraceEvent {
   }
 }
 
-/// 内存环形日志：保留最近 [window]（默认 60 分钟）且不超过 [maxEvents]。
+/// 内存环形日志：保留最近 [window]（默认 15 分钟）且不超过 [maxEvents]。
+/// 用户可手动清空；短窗 + 条数上限，避免长会话吃内存。
 class TraceRingBuffer {
   TraceRingBuffer._();
   static final TraceRingBuffer instance = TraceRingBuffer._();
 
-  static const int maxEvents = 4000;
-  static const Duration window = Duration(minutes: 60);
+  /// 安全上限（15 分钟内正常远低于此）
+  static const int maxEvents = 1500;
+
+  /// 最长回溯 15 分钟
+  static const Duration window = Duration(minutes: 15);
+
+  /// 内置过滤分类：关键字匹配事件名/字段
+  static const Map<String, String> categories = {
+    'all': '',
+    'read': 'openBook page.load page.paint render session',
+    'turn': 'turn frame.commit commit. curl ripple collapse',
+    'page': 'page.load page.next page.previous page.adopt layout fp-reload',
+    'image': 'image.',
+    'error': '', // 由 level 过滤
+  };
 
   final List<TraceEvent> _events = [];
   final List<void Function()> _listeners = [];
@@ -151,7 +165,6 @@ class TraceRingBuffer {
     Map<String, Object?> fields = const {},
   }) {
     _events.add(TraceEvent(time: time, event: event, fields: fields));
-    // 截断：先按条数，再按时间窗
     if (_events.length > maxEvents) {
       _events.removeRange(0, _events.length - maxEvents);
     }
@@ -167,18 +180,29 @@ class TraceRingBuffer {
   void addListener(void Function() fn) => _listeners.add(fn);
   void removeListener(void Function() fn) => _listeners.remove(fn);
 
-  /// 查询：时间窗 + 事件名/字段关键字 + 级别
+  /// 查询：时间窗 + 内置分类/关键字 + 级别
   List<TraceEvent> query({
     Duration? within,
+    String? category,
     String? keyword,
     String? level,
   }) {
-    final cutoff =
-        DateTime.now().subtract(within ?? window);
+    final cutoff = DateTime.now().subtract(within ?? window);
     final kw = keyword?.trim().toLowerCase();
+    final cat = category ?? 'all';
+    final catTokens = categories[cat]
+            ?.split(RegExp(r'\s+'))
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        const <String>[];
     return _events.where((e) {
       if (e.time.isBefore(cutoff)) return false;
       if (level != null && level != 'all' && e.level != level) return false;
+      // 内置分类：事件名前缀命中任一 token
+      if (cat != 'all' && cat != 'error' && catTokens.isNotEmpty) {
+        final ev = e.event.toLowerCase();
+        if (!catTokens.any(ev.contains)) return false;
+      }
       if (kw != null && kw.isNotEmpty) {
         final hay = '${e.event} ${e.line}'.toLowerCase();
         if (!hay.contains(kw)) return false;

@@ -19,13 +19,25 @@ class BugLogPage extends ConsumerStatefulWidget {
 
 class _BugLogPageState extends ConsumerState<BugLogPage> {
   static const _windows = <(String, Duration)>[
+    ('15 秒', Duration(seconds: 15)),
+    ('2 分', Duration(minutes: 2)),
     ('15 分', Duration(minutes: 15)),
-    ('30 分', Duration(minutes: 30)),
-    ('60 分', Duration(minutes: 60)),
   ];
+
+  /// 内置过滤分类（对应 TraceRingBuffer.categories）
+  static const _cats = <(String, String)>[
+    ('all', '全部'),
+    ('read', '阅读'),
+    ('turn', '翻页'),
+    ('page', '分页'),
+    ('image', '图片'),
+    ('error', '错误'),
+  ];
+
   static const _levels = ['all', 'error', 'warn', 'info'];
 
-  int _winIndex = 1; // 默认 30 分钟
+  int _winIndex = 1; // 默认 2 分钟
+  String _category = 'all';
   String _level = 'all';
   final _kwCtrl = TextEditingController();
   List<TraceEvent> _rows = const [];
@@ -47,19 +59,21 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
 
   void _onRing() {
     if (!mounted || !_autoRefresh) return;
-    // 节流：帧末刷新
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _reload();
     });
   }
 
   void _reload() {
+    // 分类=error 时自动走 error 级别
+    final level = _category == 'error' ? 'error' : _level;
     final rows = TraceRingBuffer.instance.query(
       within: _windows[_winIndex].$2,
+      category: _category,
       keyword: _kwCtrl.text,
-      level: _level,
+      level: level,
     );
-    setState(() => _rows = rows.reversed.toList()); // 新→旧
+    setState(() => _rows = rows.reversed.toList());
   }
 
   @override
@@ -123,7 +137,7 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                 ],
               ),
               const SizedBox(height: 6),
-              // 时间窗 + 级别
+              // 时间窗
               Wrap(
                 spacing: 8,
                 runSpacing: 6,
@@ -138,21 +152,45 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                         _reload();
                       },
                     ),
-                  const SizedBox(width: 4),
-                  for (final lv in _levels)
+                ],
+              ),
+              const SizedBox(height: 6),
+              // 内置分类：阅读 / 翻页 / 分页 / 图片 / 错误
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final (key, label) in _cats)
                     ChoiceChip(
-                      label: Text(switch (lv) {
-                        'all' => '全部',
-                        'error' => '错误',
-                        'warn' => '警告',
-                        _ => '信息',
-                      }),
-                      selected: _level == lv,
+                      label: Text(label),
+                      selected: _category == key,
                       onSelected: (_) {
-                        setState(() => _level = lv);
+                        setState(() {
+                          _category = key;
+                          // 错误分类锁定 error 级
+                          if (key == 'error') _level = 'error';
+                        });
                         _reload();
                       },
                     ),
+                  if (_category != 'error') ...[
+                    const SizedBox(width: 4),
+                    for (final lv in _levels)
+                      ChoiceChip(
+                        label: Text(switch (lv) {
+                          'all' => '级别·全部',
+                          'error' => '级别·错误',
+                          'warn' => '级别·警告',
+                          _ => '级别·信息',
+                        }),
+                        selected: _level == lv,
+                        onSelected: (_) {
+                          setState(() => _level = lv);
+                          _reload();
+                        },
+                      ),
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
@@ -160,7 +198,7 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                 controller: _kwCtrl,
                 decoration: InputDecoration(
                   isDense: true,
-                  hintText: '过滤关键字（事件名 / 字段）',
+                  hintText: '补充关键字（可选）',
                   prefixIcon: const Icon(Icons.search, size: 18),
                   suffixIcon: _kwCtrl.text.isEmpty
                       ? null
@@ -193,11 +231,20 @@ class _BugLogPageState extends ConsumerState<BugLogPage> {
                   ),
                   const Spacer(),
                   Text(
-                    '环形缓冲 · 最多 60 分钟 / 4000 条',
+                    '环形 · 最多 15 分钟',
                     style: TextStyle(
                       fontSize: 11,
                       color: scheme.onSurfaceVariant,
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: () {
+                      TraceRingBuffer.instance.clear();
+                      _reload();
+                    },
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('清空'),
                   ),
                 ],
               ),
