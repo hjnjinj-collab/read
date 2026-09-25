@@ -1847,7 +1847,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
     
     // 🔍 资源状态监控：如果资源仍在 loading，定期检查并在就绪时重新通知
     _startResourceMonitoring(set);
-    
+
+    // 邻居帧图片立刻预热（下一翻的动画门控依赖 usableForAnimation）
+    for (final frame in [set.next.frame, set.previous.frame]) {
+      if (frame != null && frame.manifest.hrefs.isNotEmpty) {
+        unawaited(BookImageStore.instance.prewarmManifest(frame.manifest.hrefs));
+      }
+    }
+
     // 🚀 投机性预热：假设用户会继续翻下一页
     unawaited(_speculativePrewarmNext());
   }
@@ -1900,16 +1907,39 @@ class ReaderNotifier extends Notifier<ReadingState> {
         if (BookImageStore.instance.isManifestReady(allHrefs)) {
           timer.cancel();
           _resourceMonitorTimer = null;
-          
-          // 资源已就绪！重新发布 FrameSet 触发监听器
+
           readerTrace('frame.resources.monitor.ready', {
             'set': set.id,
             'checkCount': checkCount,
             'timeMs': checkCount * 100,
           });
-          
+
+          // 关键：用**刷新后的 resourceState** 重建 FrameSet。
+          // 之前直接 publishFrameSet(set) 仍带着 pending →
+          // usableForAnimation 永远 false → 门控死等（真机日志根因）。
+          final store = BookImageStore.instance;
+          Map<String, BookImageState> statesOf(ResourceManifest m) => {
+                for (final h in m.hrefs)
+                  h: store.getState(h) ?? BookImageState.ready,
+              };
+          PageFrame refresh(PageFrame f) =>
+              _frameWithResources(f, statesOf(f.manifest));
+          FrameSlot refreshSlot(FrameSlot s) {
+            final f = s.frame;
+            if (f == null) return s;
+            return FrameSlot.ready(refresh(f));
+          }
+
+          final updated = FrameSet(
+            setRevision: set.setRevision,
+            current: refresh(set.current),
+            previous: refreshSlot(set.previous),
+            next: refreshSlot(set.next),
+            configFingerprint: set.configFingerprint,
+            sessionEpoch: set.sessionEpoch,
+          );
           // 重新发布会触发 _onModelPublished → _retryPendingTurn
-          _renderStore.publishFrameSet(set);
+          _renderStore.publishFrameSet(updated);
         }
       },
     );

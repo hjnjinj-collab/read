@@ -1040,11 +1040,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 未发布时是死循环（100ms × N），手感"动画消失"主因。
   static const int _pendingRetryLimit = 5;
 
-  /// 2026-09-04: tap 挂起重挂上限。tap 无 pointer-move 重试来源，此前
-  /// 单次超时（400ms）就无动画直翻 = "点击翻页动画直接消失"主因。
-  /// 现在超时先复查门控（就绪→补动画），仍未就绪重挂继续等（每轮
-  /// 重挂计数+1），3 轮（~1.2s）后才直翻保功能。
-  static const int _tapPendingRetryLimit = 3;
+  /// tap 挂起重挂上限。资源 pending 时 550ms×N 再无动画直翻，用户会感觉
+  /// 「卡住」。压到 1 轮（~0.5s）仍不就绪就直翻保功能。
+  static const int _tapPendingRetryLimit = 1;
 
   /// M9.5-J：当前挂起的 registerPending 调用次数（同手势累计）
   int _pendingRetryCount = 0;
