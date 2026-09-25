@@ -87,8 +87,112 @@ void readerTrace(String event, [Map<String, Object?> fields = const {}]) {
   final line =
       '[READER][$timestamp] $event${details.isEmpty ? '' : ' $details'}';
   print(line);
+  // 内存环形缓冲（Bug 收集页回溯最近 30–60 分钟）
+  TraceRingBuffer.instance.add(
+    time: DateTime.now(),
+    event: event,
+    fields: fields,
+  );
   // 文件双写（异步，失败静默——诊断通道不得影响功能）
   unawaited(_TraceFileSink.instance.write(line));
+}
+
+/// 日志事件（Bug 收集页）
+class TraceEvent {
+  TraceEvent({
+    required this.time,
+    required this.event,
+    required this.fields,
+  });
+
+  final DateTime time;
+  final String event;
+  final Map<String, Object?> fields;
+
+  String get line {
+    final details =
+        fields.entries.map((e) => '${e.key}=${e.value}').join(' ');
+    return details.isEmpty ? event : '$event $details';
+  }
+
+  /// 简单分级：error/exception/fail → error；warn → warn；其余 info
+  String get level {
+    final e = event.toLowerCase();
+    if (e.contains('error') ||
+        e.contains('exception') ||
+        e.contains('fail') ||
+        e.contains('reject')) {
+      return 'error';
+    }
+    if (e.contains('warn') ||
+        e.contains('drop') ||
+        e.contains('timeout') ||
+        e.contains('stale')) {
+      return 'warn';
+    }
+    return 'info';
+  }
+}
+
+/// 内存环形日志：保留最近 [window]（默认 60 分钟）且不超过 [maxEvents]。
+class TraceRingBuffer {
+  TraceRingBuffer._();
+  static final TraceRingBuffer instance = TraceRingBuffer._();
+
+  static const int maxEvents = 4000;
+  static const Duration window = Duration(minutes: 60);
+
+  final List<TraceEvent> _events = [];
+  final List<void Function()> _listeners = [];
+
+  void add({
+    required DateTime time,
+    required String event,
+    Map<String, Object?> fields = const {},
+  }) {
+    _events.add(TraceEvent(time: time, event: event, fields: fields));
+    // 截断：先按条数，再按时间窗
+    if (_events.length > maxEvents) {
+      _events.removeRange(0, _events.length - maxEvents);
+    }
+    final cutoff = DateTime.now().subtract(window);
+    while (_events.isNotEmpty && _events.first.time.isBefore(cutoff)) {
+      _events.removeAt(0);
+    }
+    for (final l in List.of(_listeners)) {
+      l();
+    }
+  }
+
+  void addListener(void Function() fn) => _listeners.add(fn);
+  void removeListener(void Function() fn) => _listeners.remove(fn);
+
+  /// 查询：时间窗 + 事件名/字段关键字 + 级别
+  List<TraceEvent> query({
+    Duration? within,
+    String? keyword,
+    String? level,
+  }) {
+    final cutoff =
+        DateTime.now().subtract(within ?? window);
+    final kw = keyword?.trim().toLowerCase();
+    return _events.where((e) {
+      if (e.time.isBefore(cutoff)) return false;
+      if (level != null && level != 'all' && e.level != level) return false;
+      if (kw != null && kw.isNotEmpty) {
+        final hay = '${e.event} ${e.line}'.toLowerCase();
+        if (!hay.contains(kw)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  void clear() {
+    _events.clear();
+    for (final l in List.of(_listeners)) {
+      l();
+    }
+  }
 }
 
 // ── 文件日志 sink（A28 真机排障）──────────────────────────────────

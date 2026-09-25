@@ -763,7 +763,21 @@ class ReaderNotifier extends Notifier<ReadingState> {
     PageContentRenderer.userLetterSpacing = x;
     PageContentRenderer.themeRevision++;
     _persistSettings();
-    state = state.copyWith();
+    // 字距改变行宽 → 必须重排分页（否则行溢出被硬裁）
+    _reloadAfterLayoutChange('letter-spacing');
+  }
+
+  /// 排版用水平边距：字距加宽字面后收窄内容区，让分页/折行重算。
+  /// （LayoutConfig.letter_spacing 仍为 0，用 padding 近似等效折行）
+  double get layoutPadH {
+    final ls = _letterSpacing;
+    if (ls.abs() < 0.05) return _paddingHorizontal;
+    final fontSize = _fontSize.clamp(12.0, 32.0);
+    final content =
+        (_screenWidth - 2 * _paddingHorizontal).clamp(80.0, _screenWidth);
+    // 每字加 ls → 约 content/fontSize 字/行，总加宽 ≈ ls * chars
+    final extra = (ls * (content / fontSize)).clamp(-24.0, 48.0);
+    return (_paddingHorizontal + extra / 2).clamp(0.0, 80.0);
   }
 
   /// 章节标题字号倍率（isChapterStart 行；纯绘制）
@@ -1340,9 +1354,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
           height: _screenHeight,
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
-          paddingLeft: _paddingHorizontal,
+          paddingLeft: layoutPadH,
           paddingTop: _padTop,
-          paddingRight: _paddingHorizontal,
+          paddingRight: layoutPadH,
           paddingBottom: _paddingVertical,
           fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
           anchorCharOffset: anchorCharOffset,
@@ -1373,9 +1387,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
             height: _screenHeight,
             fontSize: _fontSize,
             lineHeightMultiplier: _lineHeight,
-            paddingLeft: _paddingHorizontal,
+            paddingLeft: layoutPadH,
             paddingTop: _padTop,
-            paddingRight: _paddingHorizontal,
+            paddingRight: layoutPadH,
             paddingBottom: _paddingVertical,
             fontName: ReaderFont.family,
             anchorCharOffset: anchorCharOffset,
@@ -1406,9 +1420,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
           height: _screenHeight,
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
-          paddingLeft: _paddingHorizontal,
+          paddingLeft: layoutPadH,
           paddingTop: _padTop,
-          paddingRight: _paddingHorizontal,
+          paddingRight: layoutPadH,
           paddingBottom: _paddingVertical,
           fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
           removeDuplicateTitle: _removeDuplicateTitle,
@@ -2074,9 +2088,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
         height: _screenHeight,
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
-        paddingLeft: _paddingHorizontal,
+        paddingLeft: layoutPadH,
         paddingTop: _padTop,
-        paddingRight: _paddingHorizontal,
+        paddingRight: layoutPadH,
         paddingBottom: _paddingVertical,
         fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
         chineseConvert: chineseConvertCode,
@@ -2102,9 +2116,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
         height: _screenHeight,
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
-        paddingLeft: _paddingHorizontal,
+        paddingLeft: layoutPadH,
         paddingTop: _padTop,
-        paddingRight: _paddingHorizontal,
+        paddingRight: layoutPadH,
         paddingBottom: _paddingVertical,
         fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
         removeDuplicateTitle: _removeDuplicateTitle,
@@ -2142,9 +2156,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
         height: _screenHeight,
         fontSize: _fontSize,
         lineHeightMultiplier: _lineHeight,
-        paddingLeft: _paddingHorizontal,
+        paddingLeft: layoutPadH,
         paddingTop: _padTop,
-        paddingRight: _paddingHorizontal,
+        paddingRight: layoutPadH,
         paddingBottom: _paddingVertical,
         chineseConvert: convertCode,
         pageFillThreshold: _pageFillThreshold,
@@ -2235,9 +2249,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
               height: _screenHeight,
               fontSize: _fontSize,
               lineHeightMultiplier: _lineHeight,
-              paddingLeft: _paddingHorizontal,
+              paddingLeft: layoutPadH,
               paddingTop: _padTop,
-              paddingRight: _paddingHorizontal,
+              paddingRight: layoutPadH,
               paddingBottom: _paddingVertical,
               fontName: ReaderFont.family,
               removeDuplicateTitle: _removeDuplicateTitle,
@@ -2717,6 +2731,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     return '${_screenWidth}_${_screenHeight}_'
         '${_fontSize}_${_lineHeight}_'
         '${_paddingHorizontal}_${_padTop}_${_paddingVertical}_'
+        '${_letterSpacing}_'
         '${_pageFillThreshold}_${_showComments}_'
         '${_removeDuplicateTitle}_'
         '${_chineseConvert.index}_'
@@ -2780,7 +2795,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       height: _screenHeight,
       fontSize: _fontSize,
       lineHeight: _lineHeight,
-      padH: _paddingHorizontal,
+      padH: layoutPadH,
       padTop: _padTop,
       padBottom: _paddingVertical,
     );
@@ -3229,9 +3244,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
           height: _screenHeight,
           fontSize: _fontSize,
           lineHeightMultiplier: _lineHeight,
-          paddingLeft: _paddingHorizontal,
+          paddingLeft: layoutPadH,
           paddingTop: _padTop,
-          paddingRight: _paddingHorizontal,
+          paddingRight: layoutPadH,
           paddingBottom: _paddingVertical,
           fontName: _customFontFamily.isNotEmpty ? _customFontFamily : 'default',
           chineseConvert: convertCode,

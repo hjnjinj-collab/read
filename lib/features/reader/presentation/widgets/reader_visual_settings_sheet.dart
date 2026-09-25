@@ -11,6 +11,7 @@ import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../../../shell/settings/shell_color_picker.dart';
 import '../providers/reader_provider.dart';
+import 'bug_log_page.dart';
 import 'reader_page_widget.dart' show PageContentRenderer;
 
 /// 阅读视觉设置四页 sheet（对标 IA S2.4）
@@ -55,6 +56,11 @@ const _sheetTabs = <_SheetTabItem>[
     line: ReaderMenuIcons.lineMaterial,
     fill: ReaderMenuIcons.fillMaterial,
   ),
+  _SheetTabItem(
+    label: 'Bug 收集',
+    line: ReaderMenuIcons.lineRank,
+    fill: ReaderMenuIcons.fillRank,
+  ),
 ];
 
 class _ReaderVisualSettingsSheetState
@@ -66,7 +72,7 @@ class _ReaderVisualSettingsSheetState
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this)
+    _tabCtrl = TabController(length: 5, vsync: this)
       ..addListener(() {
         if (mounted && !_tabCtrl.indexIsChanging) setState(() {});
       });
@@ -144,7 +150,7 @@ class _ReaderVisualSettingsSheetState
           Expanded(
             child: PageView.builder(
               controller: _pageCtrl,
-              itemCount: 4,
+              itemCount: 5,
               onPageChanged: (i) {
                 _tabCtrl.animateTo(
                   i,
@@ -162,6 +168,7 @@ class _ReaderVisualSettingsSheetState
                   _TypographyPage(),
                   _BackgroundPage(),
                   _MaterialPage(),
+                  BugLogPage(),
                 ];
                 // 视差滑移 + 轻微缩放（禁止 Opacity 包玻璃；只用 Transform）
                 return AnimatedBuilder(
@@ -179,7 +186,8 @@ class _ReaderVisualSettingsSheetState
                       ),
                     );
                   },
-                  child: pages[i],
+                  // KeepAlive：切页不销毁重建，消除「形态→排版」闪烁
+                  child: _KeepAliveWrap(child: pages[i]),
                 );
               },
             ),
@@ -1594,6 +1602,27 @@ class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
 }
 
 // ── 共用组件 ──
+
+/// 切页保活：避免 PageView 销毁/重建导致的白闪
+class _KeepAliveWrap extends StatefulWidget {
+  const _KeepAliveWrap({required this.child});
+  final Widget child;
+
+  @override
+  State<_KeepAliveWrap> createState() => _KeepAliveWrapState();
+}
+
+class _KeepAliveWrapState extends State<_KeepAliveWrap>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
 
 /// 分区标题：可选 Iconsax 图标 + 主色文案（与设置页 header 同语言）。
 class _SectionTitle extends StatelessWidget {
