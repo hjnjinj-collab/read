@@ -869,6 +869,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                           child: Builder(builder: (context) {
                             return ReaderTopChrome(
                             withVeil: false,
+                            showTitle: ref
+                                .read(readerProvider.notifier)
+                                .showHeader,
+                            mergeButtons: ref
+                                .watch(shellSettingsProvider)
+                                .readerTopMergeButtons,
+                            titlePill: ref
+                                .watch(shellSettingsProvider)
+                                .readerTopTitlePill,
                             title: state.bookTitle ?? '',
                             pageLabel:
                                 '${state.currentChapterIndex + 1}/${state.chapters.length}',
@@ -967,6 +976,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                 iconShowText:
                                     ref.watch(shellSettingsProvider)
                                         .readerIconShowText,
+                                iconItemsPerRow:
+                                    ref.watch(shellSettingsProvider)
+                                        .readerIconItemsPerRow,
+                                iconRowCount:
+                                    ref.watch(shellSettingsProvider)
+                                        .readerIconRowCount,
                             mode: _chromeMode,
                             onToggleMode: () {
                               setState(() {
@@ -983,9 +998,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                               );
                             },
                             progress: progress.clamp(0, 1),
-                            progressLabel: pageCount <= 0
-                                ? '—'
-                                : '${state.currentPageIndex + 1}/$pageCount',
+                            progressLabel: !ref
+                                    .read(readerProvider.notifier)
+                                    .showFooter
+                                ? ''
+                                : pageCount <= 0
+                                    ? '—'
+                                    : '${state.currentPageIndex + 1}/$pageCount',
                             onSeek: (t) {
                               if (pageCount <= 0) return;
                               final idx =

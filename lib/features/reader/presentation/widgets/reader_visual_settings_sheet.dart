@@ -345,12 +345,18 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
   double _fontSize = 18;
   double _lineHeight = 1.5;
   double _paraSpacing = 1.0;
+  double _letterSpacing = 0.0;
+  double _titleScale = 1.15;
+  bool _showHeader = true;
+  bool _showFooter = true;
   bool _bold = true;
   bool _italic = true;
   bool _indent = true;
   int _indentChars = 2;
   bool _justify = false;
   bool _punctCompress = false;
+  double _padH = 20;
+  double _padV = 20;
 
   @override
   void initState() {
@@ -361,10 +367,16 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     _bold = n.boldEnabled;
     _italic = n.italicEnabled;
     _paraSpacing = n.paragraphSpacingMultiplier;
+    _letterSpacing = n.letterSpacing;
+    _titleScale = n.titleScale;
+    _showHeader = n.showHeader;
+    _showFooter = n.showFooter;
     _indent = n.enableIndent;
     _indentChars = n.indentSizeChars;
     _justify = n.justify;
     _punctCompress = n.punctuationCompress;
+    _padH = n.paddingHorizontal;
+    _padV = n.paddingVertical;
   }
 
   @override
@@ -420,6 +432,15 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) => setState(() => _paraSpacing = v),
           onChangeEnd: (v) => n.setParagraphSpacing(v),
         ),
+        _LiveSlider(
+          label: '字距',
+          value: _letterSpacing,
+          min: -2,
+          max: 8,
+          unit: 'px',
+          onChanged: (v) => setState(() => _letterSpacing = v),
+          onChangeEnd: (v) => n.setLetterSpacing(v),
+        ),
         SwitchListTile(
           title: const Text('粗体'),
           value: _bold,
@@ -434,6 +455,39 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           onChanged: (v) {
             setState(() => _italic = v);
             n.setItalicEnabled(v);
+          },
+        ),
+        const SizedBox(height: 16),
+        _SectionTitle('标题', scheme,
+            line: ReaderMenuIcons.lineType, fill: ReaderMenuIcons.fillType),
+        _LiveSlider(
+          label: '标题字号',
+          value: _titleScale,
+          min: 1.0,
+          max: 1.8,
+          unit: 'x',
+          onChanged: (v) => setState(() => _titleScale = v),
+          onChangeEnd: (v) => n.setTitleScale(v),
+        ),
+        const SizedBox(height: 16),
+        _SectionTitle('页眉 / 页脚', scheme,
+            line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
+        SwitchListTile(
+          title: const Text('页眉'),
+          subtitle: const Text('顶栏显示书名'),
+          value: _showHeader,
+          onChanged: (v) {
+            setState(() => _showHeader = v);
+            n.setShowHeader(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('页脚'),
+          subtitle: const Text('底栏显示页码'),
+          value: _showFooter,
+          onChanged: (v) {
+            setState(() => _showFooter = v);
+            n.setShowFooter(v);
           },
         ),
         const SizedBox(height: 16),
@@ -478,20 +532,20 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
             line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
         _LiveSlider(
           label: '上下边距',
-          value: 24,
+          value: _padV,
           min: 0,
           max: 64,
           unit: 'px',
-          onChanged: (v) {},
+          onChanged: (v) => setState(() => _padV = v),
           onChangeEnd: (v) => n.setPadding(vertical: v),
         ),
         _LiveSlider(
           label: '左右边距',
-          value: 20,
+          value: _padH,
           min: 0,
           max: 48,
           unit: 'px',
-          onChanged: (v) {},
+          onChanged: (v) => setState(() => _padH = v),
           onChangeEnd: (v) => n.setPadding(horizontal: v),
         ),
       ],
@@ -508,6 +562,24 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
 
 // ── ③ 背景主题 ──
 
+/// 内置背景预设（纸色对：日/夜）
+class _BgPreset {
+  const _BgPreset(this.key, this.label, this.light, this.dark);
+  final String key;
+  final String label;
+  final Color light;
+  final Color dark;
+}
+
+const _bgPresets = <_BgPreset>[
+  _BgPreset('parchment', '羊皮纸', Color(0xFFF5E6C8), Color(0xFF2A2418)),
+  _BgPreset('linen', '亚麻', Color(0xFFE8DCC8), Color(0xFF242018)),
+  _BgPreset('xuan', '宣纸', Color(0xFFF0EDE5), Color(0xFF1C1C1C)),
+  _BgPreset('night', '夜空', Color(0xFF1A2744), Color(0xFF0D1B2A)),
+  _BgPreset('deepBlue', '深蓝', Color(0xFF1B2838), Color(0xFF0B1520)),
+  _BgPreset('warmGray', '暖灰', Color(0xFFE8E0D8), Color(0xFF2A2A2A)),
+];
+
 class _BackgroundPage extends ConsumerStatefulWidget {
   const _BackgroundPage();
 
@@ -518,11 +590,32 @@ class _BackgroundPage extends ConsumerStatefulWidget {
 class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   double _opacity = 1.0;
   bool _dark = false;
+  Color? _lightPaper;
+  Color? _darkPaper;
+  String _preset = '';
 
   @override
   void initState() {
     super.initState();
-    _dark = ref.read(readerProvider.notifier).themeDark;
+    final n = ref.read(readerProvider.notifier);
+    _dark = n.themeDark;
+    _opacity = n.bgOpacity;
+    _lightPaper = n.lightPaperColor != null ? Color(n.lightPaperColor!) : null;
+    _darkPaper = n.darkPaperColor != null ? Color(n.darkPaperColor!) : null;
+    _preset = n.bgPreset;
+  }
+
+  void _applyPreset(_BgPreset p) {
+    setState(() {
+      _preset = p.key;
+      _lightPaper = p.light;
+      _darkPaper = p.dark;
+    });
+    ref.read(readerProvider.notifier).setBgPreset(
+          p.key,
+          light: p.light.toARGB32(),
+          dark: p.dark.toARGB32(),
+        );
   }
 
   @override
@@ -550,21 +643,44 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(child: _ColorCard('日间', const Color(0xFFF5F0E8))),
+            Expanded(
+              child: _ColorCard(
+                '日间',
+                _lightPaper ?? const Color(0xFFF5F1E8),
+                onTap: () => n.setPaperColor(
+                  light: _lightPaper?.toARGB32(),
+                  dark: _darkPaper?.toARGB32(),
+                ),
+              ),
+            ),
             const SizedBox(width: 12),
-            Expanded(child: _ColorCard('夜间', const Color(0xFF1A1A2E))),
+            Expanded(
+              child: _ColorCard(
+                '夜间',
+                _darkPaper ?? const Color(0xFF1E1E1E),
+                onTap: () => n.setPaperColor(
+                  light: _lightPaper?.toARGB32(),
+                  dark: _darkPaper?.toARGB32(),
+                ),
+              ),
+            ),
           ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '点预设格换纸色；再次点背景色卡可恢复默认',
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 24),
         _SectionTitle('背景透明度', scheme),
         _LiveSlider(
           label: '透明度',
           value: _opacity,
-          min: 0.0,
+          min: 0.15,
           max: 1.0,
           unit: '',
           onChanged: (v) => setState(() => _opacity = v),
-          onChangeEnd: (v) {},
+          onChangeEnd: (v) => n.setBgOpacity(v),
         ),
         const SizedBox(height: 24),
         _SectionTitle('内置背景图', scheme),
@@ -576,12 +692,13 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           mainAxisSpacing: 8,
           crossAxisSpacing: 8,
           children: [
-            _BgGridItem('羊皮纸', const Color(0xFFF5E6C8)),
-            _BgGridItem('亚麻', const Color(0xFFE8DCC8)),
-            _BgGridItem('宣纸', const Color(0xFFF0EDE5)),
-            _BgGridItem('夜空', const Color(0xFF0D1B2A)),
-            _BgGridItem('深蓝', const Color(0xFF1B2838)),
-            _BgGridItem('暖灰', const Color(0xFFE8E0D8)),
+            for (final p in _bgPresets)
+              _BgGridItem(
+                p.label,
+                _dark ? p.dark : p.light,
+                selected: _preset == p.key,
+                onTap: () => _applyPreset(p),
+              ),
           ],
         ),
         const SizedBox(height: 24),
@@ -590,11 +707,48 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: const [
-            _ThemeChip('默认', true),
-            _ThemeChip('护眼', false),
-            _ThemeChip('夜间', false),
-            _ThemeChip('羊皮纸', false),
+          children: [
+            _ThemeChip(
+              '默认',
+              _preset == '' && _lightPaper == null,
+              onSelected: (_) {
+                setState(() {
+                  _preset = '';
+                  _lightPaper = null;
+                  _darkPaper = null;
+                  _dark = false;
+                });
+                n.setPaperColor(light: null, dark: null);
+                n.setThemeDark(false);
+              },
+            ),
+            _ThemeChip(
+              '护眼',
+              _preset == 'parchment',
+              onSelected: (_) {
+                _applyPreset(_bgPresets[0]);
+                setState(() => _dark = false);
+                n.setThemeDark(false);
+              },
+            ),
+            _ThemeChip(
+              '夜间',
+              _preset == 'night',
+              onSelected: (_) {
+                _applyPreset(_bgPresets[3]);
+                setState(() => _dark = true);
+                n.setThemeDark(true);
+              },
+            ),
+            _ThemeChip(
+              '羊皮纸',
+              _preset == 'parchment' && _dark,
+              onSelected: (_) {
+                _applyPreset(_bgPresets[0]);
+                setState(() => _dark = true);
+                n.setThemeDark(true);
+              },
+            ),
           ],
         ),
       ],
@@ -1051,29 +1205,33 @@ class _GlassTrackSlider extends StatelessWidget {
 }
 
 class _ColorCard extends StatelessWidget {
-  const _ColorCard(this.label, this.color);
+  const _ColorCard(this.label, this.color, {this.onTap});
   final String label;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Container(
-        height: 64,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.3),
-            width: 1,
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 64,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.3),
+              width: 1,
+            ),
           ),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: color.computeLuminance() > 0.5
-                  ? Colors.black87
-                  : Colors.white,
-              fontWeight: FontWeight.w600,
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color.computeLuminance() > 0.5
+                    ? Colors.black87
+                    : Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -1081,28 +1239,36 @@ class _ColorCard extends StatelessWidget {
 }
 
 class _BgGridItem extends StatelessWidget {
-  const _BgGridItem(this.label, this.color);
+  const _BgGridItem(this.label, this.color,
+      {this.selected = false, this.onTap});
   final String label;
   final Color color;
+  final bool selected;
+  final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: Colors.grey.withValues(alpha: 0.3),
-            width: 1,
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey.withValues(alpha: 0.3),
+              width: selected ? 2 : 1,
+            ),
           ),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: color.computeLuminance() > 0.5
-                  ? Colors.black54
-                  : Colors.white70,
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: color.computeLuminance() > 0.5
+                    ? Colors.black54
+                    : Colors.white70,
+              ),
             ),
           ),
         ),
@@ -1110,14 +1276,15 @@ class _BgGridItem extends StatelessWidget {
 }
 
 class _ThemeChip extends StatelessWidget {
-  const _ThemeChip(this.label, this.selected);
+  const _ThemeChip(this.label, this.selected, {this.onSelected});
   final String label;
   final bool selected;
+  final ValueChanged<bool>? onSelected;
 
   @override
   Widget build(BuildContext context) => FilterChip(
         label: Text(label),
         selected: selected,
-        onSelected: (_) {},
+        onSelected: onSelected ?? (_) {},
       );
 }

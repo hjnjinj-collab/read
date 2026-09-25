@@ -205,12 +205,12 @@ commits: c84cfa2..uncommitted
 
 ### Phase 2：设置四页
 
-- [ ] T2.1: 形态与图标页：传统/悬浮切换、图标风格三档、每行个数、行数 — acceptance: 改后两套 chrome 同步生效 (covers: S2.4; depends: T1.1)
+- [x] T2.1: 形态与图标页：传统/悬浮切换、图标风格三档、每行个数、行数 — acceptance: 改后两套 chrome 同步生效 (covers: S2.4; depends: T1.1)
 - [x] T2.1a: Iconsax 图标三档（线性/面性/双色）+ `readerIconStyle` 持久化 — acceptance: 设置①切换后工具排/圆键/顶栏字形同步 (covers: S2.8)
 - [x] T2.1b: 液态果冻动效：菜单 Slide 开合 + A/B Scale 切换 + pronounced 按压 — acceptance: 开合有回弹；无 Fade 包玻璃；减弱动态瞬时 (covers: S2.8)
-- [ ] T2.2: 排版布局页：字体/字号/行距/段距/字距 + 标题 + 页眉页脚 + 边距 — acceptance: 参数持久化，正文实时刷新 (covers: S2.4)
-- [ ] T2.3: 背景主题页：日夜背景色/图/透明度 + 内置背景图网格 + 预设主题卡 — acceptance: 背景切换即时生效 (covers: S2.4)
-- [ ] T2.4: 材质与顶栏页：面板圆角/模糊档、悬浮键液态开关、合并顶栏按钮 — acceptance: 材质参数与设置页同源 (covers: S2.4)
+- [x] T2.2: 排版布局页：字体/字号/行距/段距/字距 + 标题 + 页眉页脚 + 边距 — acceptance: 参数持久化，正文实时刷新 (covers: S2.4)
+- [x] T2.3: 背景主题页：日夜背景色/图/透明度 + 内置背景图网格 + 预设主题卡 — acceptance: 背景切换即时生效 (covers: S2.4)
+- [x] T2.4: 材质与顶栏页：面板圆角/模糊档、悬浮键液态开关、合并顶栏按钮 — acceptance: 材质参数与设置页同源 (covers: S2.4)
 - [ ] T2.5: 字体选择 sheet：系统字体 + 字体文件夹 + 文件网格 + 选中高亮 — acceptance: 选字体后正文实时刷新 (covers: S2.4)
 
 ### Phase 3：验证与收尾

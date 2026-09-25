@@ -69,6 +69,21 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _pageTurnSpeed = persisted.pageTurnSpeed;
     _collapseStyle = persisted.collapse;
     _themeDark = persisted.theme == 'dark';
+    _letterSpacing = persisted.letterSpacing;
+    _titleScale = persisted.titleScale;
+    _showHeader = persisted.showHeader;
+    _showFooter = persisted.showFooter;
+    _lightPaperColor = persisted.lightPaperColor;
+    _darkPaperColor = persisted.darkPaperColor;
+    _bgOpacity = persisted.bgOpacity;
+    _bgPreset = persisted.bgPreset;
+    PageContentRenderer.userLetterSpacing = _letterSpacing;
+    PageContentRenderer.titleScale = _titleScale;
+    PageContentRenderer.applyPaperOverrides(
+      light: _lightPaperColor,
+      dark: _darkPaperColor,
+      opacity: _bgOpacity,
+    );
     PageContentRenderer.theme =
         _themeDark ? ReaderTheme.dark : ReaderTheme.light;
     PageContentRenderer.applyCommentColorPreset(
@@ -184,6 +199,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
   String _customFontPath = '';
   BigInt _paraFormatHash = BigInt.zero; // 段落格式设置哈希（FFI 缓存键）
 
+  // T2.2：字距 / 标题倍率 / 页眉页脚
+  double _letterSpacing = 0.0;
+  double _titleScale = 1.15;
+  bool _showHeader = true;
+  bool _showFooter = true;
+
+  // T2.3：背景主题
+  int? _lightPaperColor;
+  int? _darkPaperColor;
+  double _bgOpacity = 1.0;
+  String _bgPreset = '';
+
   // M8-P4：章节页数内存缓存（消除翻页双 FFI）
   // key = 排版参数指纹，value = 该章总页数
   final Map<String, int> _chapterPageCounts = {};
@@ -233,11 +260,21 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool get punctuationCompress => _punctuationCompress;
   String get customFontFamily => _customFontFamily;
   String get customFontPath => _customFontPath;
+  double get letterSpacing => _letterSpacing;
+  double get titleScale => _titleScale;
+  bool get showHeader => _showHeader;
+  bool get showFooter => _showFooter;
+  int? get lightPaperColor => _lightPaperColor;
+  int? get darkPaperColor => _darkPaperColor;
+  double get bgOpacity => _bgOpacity;
+  String get bgPreset => _bgPreset;
 
   /// 当前排版基准（M7：绘制端与 Rust 排版同源，替换 painter 硬编码 18/1.5）
   double get fontSize => _fontSize;
   double get lineHeight => _lineHeight;
   double get pageFillThreshold => _pageFillThreshold;
+  double get paddingHorizontal => _paddingHorizontal;
+  double get paddingVertical => _paddingVertical;
 
   /// 当前书是否按 EPUB 结构化路径渲染
   bool get renderAsEpub => _isEpub;
@@ -450,6 +487,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'pageTurnSpeed': _pageTurnSpeed.name,
         'collapse': _collapseStyle.toJson(),
         'theme': _themeDark ? 'dark' : 'light',
+        'letterSpacing': _letterSpacing,
+        'titleScale': _titleScale,
+        'showHeader': _showHeader,
+        'showFooter': _showFooter,
+        'lightPaperColor': _lightPaperColor,
+        'darkPaperColor': _darkPaperColor,
+        'bgOpacity': _bgOpacity,
+        'bgPreset': _bgPreset,
       };
 
   /// 写穿落库（内存快照即时更新 + 100ms 防抖 upsert，fire-and-forget）
@@ -622,6 +667,84 @@ class ReaderNotifier extends Notifier<ReadingState> {
     }
     if (!dirty) return;
     _reloadAfterLayoutChange('padding');
+  }
+
+  /// 用户字距（px；绘制层叠加，不进 Rust 断行）
+  void setLetterSpacing(double v) {
+    final x = v.clamp(-2.0, 8.0);
+    if ((_letterSpacing - x).abs() < 0.01) return;
+    _letterSpacing = x;
+    PageContentRenderer.userLetterSpacing = x;
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+  }
+
+  /// 章节标题字号倍率（isChapterStart 行；纯绘制）
+  void setTitleScale(double v) {
+    final x = v.clamp(1.0, 1.8);
+    if ((_titleScale - x).abs() < 0.01) return;
+    _titleScale = x;
+    PageContentRenderer.titleScale = x;
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+  }
+
+  /// 页眉（顶栏书名）显隐
+  void setShowHeader(bool v) {
+    if (_showHeader == v) return;
+    _showHeader = v;
+    _persistSettings();
+    state = state.copyWith(); // 通知 chrome 重建
+  }
+
+  /// 页脚（底栏页码）显隐
+  void setShowFooter(bool v) {
+    if (_showFooter == v) return;
+    _showFooter = v;
+    _persistSettings();
+    state = state.copyWith(); // 通知 chrome 重建
+  }
+
+  /// 背景纸色（ARGB；null 恢复主题默认）
+  void setPaperColor({int? light, int? dark}) {
+    var dirty = false;
+    if (light != _lightPaperColor) {
+      _lightPaperColor = light;
+      dirty = true;
+    }
+    if (dark != _darkPaperColor) {
+      _darkPaperColor = dark;
+      dirty = true;
+    }
+    if (!dirty) return;
+    _applyPaperAndPersist();
+  }
+
+  /// 背景透明度（纸色相对 scaffold）
+  void setBgOpacity(double v) {
+    final x = v.clamp(0.15, 1.0);
+    if ((_bgOpacity - x).abs() < 0.01) return;
+    _bgOpacity = x;
+    _applyPaperAndPersist();
+  }
+
+  /// 内置背景预设（羊皮纸/亚麻/宣纸/夜空/深蓝/暖灰）
+  void setBgPreset(String key, {required int light, required int dark}) {
+    _bgPreset = key;
+    _lightPaperColor = light;
+    _darkPaperColor = dark;
+    _applyPaperAndPersist();
+  }
+
+  void _applyPaperAndPersist() {
+    PageContentRenderer.applyPaperOverrides(
+      light: _lightPaperColor,
+      dark: _darkPaperColor,
+      opacity: _bgOpacity,
+    );
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
   }
 
   /// P6：自定义字体持久化（FontProvider 选择成功后调用）。

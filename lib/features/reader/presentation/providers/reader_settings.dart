@@ -113,6 +113,30 @@ class ReaderSettings {
   /// 阅读主题（'light' / 'dark'；色板定义在 ReaderTheme 预设）
   final String theme;
 
+  /// 用户字距（px；叠加在 justify letterGap 之上，绘制层）
+  final double letterSpacing;
+
+  /// 章节标题字号倍率（isChapterStart 行；1.0 = 跟随引擎 fontScale）
+  final double titleScale;
+
+  /// 顶栏书名显隐（页眉）
+  final bool showHeader;
+
+  /// 底栏页码/进度显隐（页脚）
+  final bool showFooter;
+
+  /// 日间纸色（ARGB int；null = 默认 ReaderTheme.light.paperColor）
+  final int? lightPaperColor;
+
+  /// 夜间纸色（ARGB int；null = 默认 ReaderTheme.dark.paperColor）
+  final int? darkPaperColor;
+
+  /// 背景透明度 0–1（纸色相对 scaffold 的不透明度）
+  final double bgOpacity;
+
+  /// 内置背景预设键（parchment/linen/xuan/night/deepBlue/warmGray/''）
+  final String bgPreset;
+
   const ReaderSettings({
     required this.fontSize,
     required this.lineHeight,
@@ -145,6 +169,14 @@ class ReaderSettings {
     required this.pageTurnSpeed,
     required this.collapse,
     required this.theme,
+    required this.letterSpacing,
+    required this.titleScale,
+    required this.showHeader,
+    required this.showFooter,
+    required this.lightPaperColor,
+    required this.darkPaperColor,
+    required this.bgOpacity,
+    required this.bgPreset,
   });
 
   /// 默认设置 = 现行全部硬编码值
@@ -160,7 +192,7 @@ class ReaderSettings {
         removeHtmlTags: true,
         removeAds: true,
         reSegment: false, // A35-L1: 默认关闭，用户按需开启
-        segmentRules: const [], // A35-L2: 默认空规则列表
+        segmentRules: [], // A35-L2: 默认空规则列表
         boldEnabled: true,
         italicEnabled: true,
         showComments: true,
@@ -180,6 +212,14 @@ class ReaderSettings {
         pageTurnSpeed: PageTurnSpeed.medium,
         collapse: CollapseStyle.defaults(),
         theme: 'light',
+        letterSpacing: 0.0,
+        titleScale: 1.15,
+        showHeader: true,
+        showFooter: true,
+        lightPaperColor: null,
+        darkPaperColor: null,
+        bgOpacity: 1.0,
+        bgPreset: '',
       );
 
   /// 安全解析：损坏 JSON / 缺键 / 类型不符逐字段落默认，永不抛
@@ -228,6 +268,17 @@ class ReaderSettings {
             _e(PageTurnSpeed.values, j['pageTurnSpeed'], PageTurnSpeed.medium),
         collapse: CollapseStyle.tryParse(j['collapse']),
         theme: j['theme'] == 'dark' ? 'dark' : 'light',
+        letterSpacing: _d(j, 'letterSpacing', 0.0).clamp(-2.0, 8.0),
+        titleScale: _d(j, 'titleScale', 1.15).clamp(1.0, 1.8),
+        showHeader: _b(j, 'showHeader', true),
+        showFooter: _b(j, 'showFooter', true),
+        lightPaperColor: j['lightPaperColor'] is int
+            ? j['lightPaperColor'] as int
+            : null,
+        darkPaperColor:
+            j['darkPaperColor'] is int ? j['darkPaperColor'] as int : null,
+        bgOpacity: _d(j, 'bgOpacity', 1.0).clamp(0.15, 1.0),
+        bgPreset: _s(j, 'bgPreset', ''),
       );
     } catch (_) {
       return ReaderSettings.defaults();

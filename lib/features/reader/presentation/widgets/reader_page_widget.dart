@@ -251,9 +251,41 @@ class PageContentRenderer {
   /// 静态主题变化（painter 无法监听静态字段，经构造期捕获值比对）
   static int themeRevision = 0;
 
+  /// 用户字距（px；叠加在 justify letterGap 上，纯绘制）
+  static double userLetterSpacing = 0.0;
+
+  /// 章节标题字号倍率（isChapterStart 行再乘一次）
+  static double titleScale = 1.15;
+
+  /// 背景纸色覆盖（null = 主题默认）
+  static Color? lightPaperOverride;
+  static Color? darkPaperOverride;
+  static double paperOpacity = 1.0;
+
+  /// 应用背景主题覆盖（日/夜纸色 + 透明度）
+  static void applyPaperOverrides({
+    int? light,
+    int? dark,
+    double opacity = 1.0,
+  }) {
+    lightPaperOverride = light != null ? Color(light) : null;
+    darkPaperOverride = dark != null ? Color(dark) : null;
+    paperOpacity = opacity.clamp(0.15, 1.0);
+  }
+
+  /// 当前生效纸色（覆盖 + 透明度；scaffold 作淡出底）
+  static Color get paperColor {
+    final override =
+        theme.name == 'dark' ? darkPaperOverride : lightPaperOverride;
+    final base = override ?? theme.paperColor;
+    if (paperOpacity >= 0.999) return base;
+    return Color.lerp(theme.scaffoldColor, base, paperOpacity) ?? base;
+  }
+
   /// 纸色底（正式页面渲染与翻页快照共用，v16.9.3 公开化）
   /// 2026-09-04 P1: const → getter，跟随当前主题（调用点无需改动）
-  static Color get paperColor => theme.paperColor;
+  /// T2.3: 支持用户纸色覆盖 + 透明度
+  // (paperColor getter defined above with overrides)
 
   /// A35：命中图片 entry（画廊/正文图点按放大）
   static String? hitImage(PageInfo page, Offset local) {
@@ -436,11 +468,14 @@ class PageContentRenderer {
           ? commentColor
           : (_parseHexColor(entry.color) ?? theme.textColor);
       final baseScale = entry.fontScale ?? 1.0;
+      // 章节标题：用户 titleScale 再乘一次（引擎 fontScale 已含 CSS 标题放大）
+      final titleMul =
+          entry.isChapterStart ? PageContentRenderer.titleScale : 1.0;
       // TXT 章节标题加粗（与 EPUB 行内粗体同一开关；TextSpan 子段
       // 未显式设置时继承父级，segments 分支无需重复判断）
       final baseStyle = TextStyle(
         color: baseColor,
-        fontSize: baseFontSize * baseScale,
+        fontSize: baseFontSize * baseScale * titleMul,
         height: baseLineHeight,
         fontFamily: ReaderFont.family,
         fontWeight: (applyTitleBold && entry.isChapterStart)
@@ -449,7 +484,7 @@ class PageContentRenderer {
         // P2 两端对齐：行内字符间隙（0=无操作）。注意此处仅绘制样式——
         // MeasureTextService 测量样式恒不带 gap（否则带隙行宽灌入
         // Rust MeasureCache 会污染断行基准）
-        letterSpacing: entry.letterGap,
+        letterSpacing: entry.letterGap + PageContentRenderer.userLetterSpacing,
       );
 
       final TextSpan textSpan;
@@ -486,7 +521,8 @@ class PageContentRenderer {
                   decoration: seg.underline ? TextDecoration.underline : null,
                   // P2 justify 拉丁词保护段：Some(0) 压制该区间拉伸；
                   // null 继承行级 letterGap
-                  letterSpacing: seg.letterSpacing ?? entry.letterGap,
+                  letterSpacing: (seg.letterSpacing ?? entry.letterGap) +
+                      PageContentRenderer.userLetterSpacing,
                   // A34：脚注引用上标（不参与 Rust 断行测量）
                   fontFeatures: isFn
                       ? const [FontFeature.superscripts()]

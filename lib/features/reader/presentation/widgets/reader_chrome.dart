@@ -262,6 +262,9 @@ class ReaderTopChrome extends StatelessWidget {
     required this.onBack,
     this.onMore,
     this.withVeil = false,
+    this.showTitle = true,
+    this.mergeButtons = false,
+    this.titlePill = false,
   });
 
   final String title;
@@ -269,37 +272,117 @@ class ReaderTopChrome extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback? onMore;
   final bool withVeil;
+  final bool showTitle;
+
+  /// 返回/更多合并为一个胶囊
+  final bool mergeButtons;
+
+  /// 书名显示在胶囊内
+  final bool titlePill;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
+
+    final backBtn = ReaderGlassCircle(
+      line: ReaderMenuIcons.lineBack,
+      fill: ReaderMenuIcons.fillBack,
+      size: 52,
+      tooltip: '返回',
+      onTap: onBack,
+    );
+    final moreBtn = ReaderGlassCircle(
+      line: ReaderMenuIcons.lineMore,
+      fill: ReaderMenuIcons.fillMore,
+      size: 52,
+      tooltip: '更多',
+      onTap: onMore,
+    );
+
+    // 合并按钮：返回 | 更多 贴在一个液态胶囊里
+    final Widget leading = mergeButtons
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppGlass.restPillTint(scheme),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: Colors.white.withValues(
+                  alpha: light ? 0.42 : 0.24,
+                ),
+                width: 1.0,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  backBtn,
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    color: Colors.white.withValues(alpha: 0.22),
+                  ),
+                  moreBtn,
+                ],
+              ),
+            ),
+          )
+        : backBtn;
+
+    Widget titleWidget;
+    if (!showTitle) {
+      titleWidget = const SizedBox.shrink();
+    } else if (titlePill) {
+      titleWidget = DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppGlass.restPillTint(scheme),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: light ? 0.42 : 0.24),
+            width: 1.0,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Text(
+            title,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: scheme.onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+            ),
+          ),
+        ),
+      );
+    } else {
+      titleWidget = Text(
+        title,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: scheme.onSurface,
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+        ),
+      );
+    }
+
     final row = SizedBox(
       height: 60,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
         child: Row(
           children: [
-            ReaderGlassCircle(
-              line: ReaderMenuIcons.lineBack,
-              fill: ReaderMenuIcons.fillBack,
-              size: 52,
-              tooltip: '返回',
-              onTap: onBack,
-            ),
+            leading,
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                title,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: scheme.onSurface,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
-                ),
-              ),
+              child: Center(child: titleWidget),
             ),
             Text(
               pageLabel,
@@ -310,13 +393,11 @@ class ReaderTopChrome extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            ReaderGlassCircle(
-              line: ReaderMenuIcons.lineMore,
-              fill: ReaderMenuIcons.fillMore,
-              size: 52,
-              tooltip: '更多',
-              onTap: onMore,
-            ),
+            // 合并模式下 more 已进 leading 胶囊，右侧留空对称
+            if (mergeButtons)
+              const SizedBox(width: 52)
+            else
+              moreBtn,
           ],
         ),
       ),
@@ -353,6 +434,21 @@ class ReaderTopChrome extends StatelessWidget {
   }
 }
 
+/// 工具排动作（网格切分用的轻量描述）
+class _ToolAction {
+  const _ToolAction({
+    required this.line,
+    required this.fill,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData line;
+  final IconData fill;
+  final String label;
+  final VoidCallback onTap;
+}
+
 /// 底部 chrome：坐在**底→顶**渐变模糊垫上（菜单态）。
 class ReaderBottomChrome extends StatelessWidget {
   const ReaderBottomChrome({
@@ -378,6 +474,8 @@ class ReaderBottomChrome extends StatelessWidget {
     this.onMore,
     this.embedVeil = true,
     this.iconShowText = true,
+    this.iconItemsPerRow = 5,
+    this.iconRowCount = 1,
   });
 
   final ReaderChromeMode mode;
@@ -409,48 +507,137 @@ class ReaderBottomChrome extends StatelessWidget {
   /// 工具排文字标签（ShellSettings.readerIconShowText）
   final bool iconShowText;
 
-  Widget _tools() {
+  /// 每行个数 4–6（ShellSettings.readerIconItemsPerRow）
+  final int iconItemsPerRow;
+
+  /// 行数 1–2（ShellSettings.readerIconRowCount）
+  final int iconRowCount;
+
+  Widget _tools(BuildContext context) {
     final showLabel = iconShowText;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    final perRow = iconItemsPerRow.clamp(4, 6);
+    final rowCount = iconRowCount.clamp(1, 2);
+    final capacity = perRow * rowCount;
+
+    final actions = <_ToolAction>[
+      _ToolAction(
+        line: ReaderMenuIcons.lineCatalog,
+        fill: ReaderMenuIcons.fillCatalog,
+        label: '目录',
+        onTap: onCatalog,
+      ),
+      _ToolAction(
+        line: ReaderMenuIcons.lineSearch,
+        fill: ReaderMenuIcons.fillSearch,
+        label: '搜索',
+        onTap: onSearch,
+      ),
+      _ToolAction(
+        line: ReaderMenuIcons.lineBookmark,
+        fill: ReaderMenuIcons.fillBookmark,
+        label: '书签',
+        onTap: onBookmark,
+      ),
+      _ToolAction(
+        line: ReaderMenuIcons.lineNotes,
+        fill: ReaderMenuIcons.fillNotes,
+        label: '笔记',
+        onTap: onNotes,
+      ),
+      _ToolAction(
+        line: ReaderMenuIcons.lineSettings,
+        fill: ReaderMenuIcons.fillSettings,
+        label: '设置',
+        onTap: onSettings,
+      ),
+    ];
+
+    // 容量不够：末位让给「更多」，溢出动作进弹出菜单
+    final bool needMore = actions.length > capacity;
+    final int visibleCount = needMore ? capacity - 1 : actions.length;
+    final visible = actions.sublist(0, visibleCount.clamp(0, actions.length));
+    final overflow = actions.sublist(visibleCount.clamp(0, actions.length));
+
+    final cells = <Widget>[
+      for (final a in visible)
+        ReaderToolBall(
+          line: a.line,
+          fill: a.fill,
+          label: a.label,
+          showLabel: showLabel,
+          onTap: a.onTap,
+        ),
+      if (needMore)
+        ReaderToolBall(
+          line: ReaderMenuIcons.lineMore,
+          fill: ReaderMenuIcons.fillMore,
+          label: '更多',
+          showLabel: showLabel,
+          onTap: () => _showOverflowMenu(context, overflow),
+        ),
+    ];
+
+    // 按 perRow 切行；末行 spaceEvenly 拉开
+    final rows = <Widget>[];
+    for (var i = 0; i < cells.length; i += perRow) {
+      final end = (i + perRow).clamp(0, cells.length);
+      rows.add(
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: cells.sublist(i, end),
+        ),
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        ReaderToolBall(
-          line: ReaderMenuIcons.lineCatalog,
-          fill: ReaderMenuIcons.fillCatalog,
-          label: '目录',
-          showLabel: showLabel,
-          onTap: onCatalog,
-        ),
-        ReaderToolBall(
-          line: ReaderMenuIcons.lineSearch,
-          fill: ReaderMenuIcons.fillSearch,
-          label: '搜索',
-          showLabel: showLabel,
-          onTap: onSearch,
-        ),
-        ReaderToolBall(
-          line: ReaderMenuIcons.lineBookmark,
-          fill: ReaderMenuIcons.fillBookmark,
-          label: '书签',
-          showLabel: showLabel,
-          onTap: onBookmark,
-        ),
-        ReaderToolBall(
-          line: ReaderMenuIcons.lineNotes,
-          fill: ReaderMenuIcons.fillNotes,
-          label: '笔记',
-          showLabel: showLabel,
-          onTap: onNotes,
-        ),
-        ReaderToolBall(
-          line: ReaderMenuIcons.lineSettings,
-          fill: ReaderMenuIcons.fillSettings,
-          label: '设置',
-          showLabel: showLabel,
-          onTap: onSettings,
-        ),
-        // 5 项收口：设置齿轮即“更多”，不再单独溢出键
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: 2),
+          rows[r],
+        ],
       ],
+    );
+  }
+
+  void _showOverflowMenu(BuildContext context, List<_ToolAction> overflow) {
+    if (overflow.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final a in overflow)
+                    ListTile(
+                      leading: Icon(
+                        // 溢出菜单用线性字形，避免与圆键双重命中
+                        a.line,
+                        size: 22,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      title: Text(a.label),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        a.onTap();
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -472,7 +659,7 @@ class ReaderBottomChrome extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
-                _tools(),
+                _tools(context),
                 Center(
                   child: GestureDetector(
                     onTap: onToggleMode,
@@ -694,7 +881,7 @@ class ReaderBottomChrome extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                _tools(),
+                _tools(context),
               ],
             ),
           );
