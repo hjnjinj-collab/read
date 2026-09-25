@@ -1,3 +1,4 @@
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
@@ -975,6 +976,44 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         );
   }
 
+  /// 取色器：自定义日/夜纸色（flex_color_picker）
+  Future<void> _pickPaperColor(
+    BuildContext context,
+    ReaderNotifier n, {
+    required bool isDark,
+  }) async {
+    final current = isDark
+        ? (_darkPaper ?? const Color(0xFF1E1E1E))
+        : (_lightPaper ?? const Color(0xFFF5F1E8));
+    final picked = await showColorPickerDialog(
+      context,
+      current,
+      pickersEnabled: const {
+        ColorPickerType.both: true,
+        ColorPickerType.primary: true,
+        ColorPickerType.accent: true,
+        ColorPickerType.bw: true,
+        ColorPickerType.custom: true,
+        ColorPickerType.wheel: true,
+      },
+      enableShadesSelection: true,
+      enableTonalPalette: true,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (isDark) {
+        _darkPaper = picked;
+      } else {
+        _lightPaper = picked;
+      }
+      _preset = '';
+    });
+    n.setPaperColor(
+      light: (_lightPaper ?? const Color(0xFFF5F1E8)).toARGB32(),
+      dark: (_darkPaper ?? const Color(0xFF1E1E1E)).toARGB32(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
@@ -1005,30 +1044,24 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           children: [
             Expanded(
               child: _ColorCard(
-                '日间',
+                '日间 · 取色',
                 _lightPaper ?? const Color(0xFFF5F1E8),
-                onTap: () => n.setPaperColor(
-                  light: _lightPaper?.toARGB32(),
-                  dark: _darkPaper?.toARGB32(),
-                ),
+                onTap: () => _pickPaperColor(context, n, isDark: false),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _ColorCard(
-                '夜间',
+                '夜间 · 取色',
                 _darkPaper ?? const Color(0xFF1E1E1E),
-                onTap: () => n.setPaperColor(
-                  light: _lightPaper?.toARGB32(),
-                  dark: _darkPaper?.toARGB32(),
-                ),
+                onTap: () => _pickPaperColor(context, n, isDark: true),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
         Text(
-          '点预设格换纸色；再次点背景色卡可恢复默认',
+          '点色卡打开取色器；预设格快速换纸色',
           style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 24),
