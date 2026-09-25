@@ -614,6 +614,10 @@ class PageContentRenderer {
         // 正常或轻微超宽（≤2%，epsilon 已把概率压到极低）：原样绘制，
         // 几 px 渗入右 padding 无感知，保字形保真
         textPainter.paint(canvas, Offset(entry.x, entry.y));
+      } else if (PageContentRenderer.userLetterSpacing.abs() > 0.05) {
+        // 字距导致的超宽：**禁止缩放**——缩放会让字形变小，看起来像改字号。
+        // 字距语义 = 字与字间距，允许略溢出行盒。
+        textPainter.paint(canvas, Offset(entry.x, entry.y));
       } else {
         // 显著超宽（粗体合成/窄列等残余场景）：该行整体等比缩放，
         // 宁可字形略小也不丢字

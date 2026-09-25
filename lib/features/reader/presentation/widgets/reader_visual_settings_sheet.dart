@@ -454,7 +454,6 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
   bool _punctCompress = false;
   double _padH = 20;
   double _padV = 20;
-  int? _textColor;
   int? _accentColor;
 
   @override
@@ -476,7 +475,6 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
     _punctCompress = n.punctuationCompress;
     _padH = n.paddingHorizontal;
     _padV = n.paddingVertical;
-    _textColor = n.textColor;
     _accentColor = n.accentColor;
   }
 
@@ -653,11 +651,10 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           unit: 'px',
           iconLine: ReaderMenuIcons.lineLetter,
           iconFill: ReaderMenuIcons.fillLetter,
-          // 拖动即生效（只改绘制 letterSpacing，不触碰 fontFamily）
+          // 拖动即生效：previewLetterSpacing 会通知 reader 重建绘制
           onChanged: (v) {
             setState(() => _letterSpacing = v);
-            PageContentRenderer.userLetterSpacing = v.clamp(-2.0, 8.0);
-            PageContentRenderer.themeRevision++;
+            n.previewLetterSpacing(v);
           },
           onChangeEnd: (v) => n.setLetterSpacing(v),
         ),
@@ -708,50 +705,17 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
         ),
       ];
 
-  // ── 颜色：正文色 / 强调色 ──
+  // ── 颜色：强调/注释（正文色已移到「背景」页按日/夜配置）──
   List<Widget> _colorSection(ReaderNotifier n, ColorScheme scheme) {
-    const presets = <(String, Color)>[
-      ('默认', Color(0xFF000000)),
-      ('暖灰', Color(0xFF3E3A36)),
-      ('墨绿', Color(0xFF1F3D2B)),
-      ('深蓝', Color(0xFF1A2744)),
-      ('绛紫', Color(0xFF4A2545)),
-      ('夜白', Color(0xFFD8D4CC)),
-    ];
     return [
-      _SectionTitle('正文颜色', scheme,
-          line: ReaderMenuIcons.lineTextColor,
-          fill: ReaderMenuIcons.fillTextColor),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final (label, color) in presets)
-            _ColorCard(
-              label,
-              color,
-              selected: _textColor == color.toARGB32(),
-              onTap: () {
-                setState(() => _textColor = color.toARGB32());
-                n.setTextColor(color.toARGB32());
-              },
-            ),
-          _ColorCard(
-            '主题默认',
-            scheme.onSurface,
-            selected: _textColor == null,
-            onTap: () {
-              setState(() => _textColor = null);
-              n.setTextColor(null);
-            },
-          ),
-        ],
-      ),
-      const SizedBox(height: 20),
       _SectionTitle('强调 / 注释', scheme,
           line: ReaderMenuIcons.lineAccent, fill: ReaderMenuIcons.fillAccent),
       const SizedBox(height: 8),
+      Text(
+        '正文颜色请到「背景」页，按日间/夜间分别设置',
+        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 12),
       Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -798,8 +762,7 @@ class _TypographyPageState extends ConsumerState<_TypographyPage> {
           iconFill: ReaderMenuIcons.fillTitle,
           onChanged: (v) {
             setState(() => _titleScale = v);
-            PageContentRenderer.titleScale = v.clamp(1.0, 1.8);
-            PageContentRenderer.themeRevision++;
+            n.previewTitleScale(v);
           },
           onChangeEnd: (v) => n.setTitleScale(v),
         ),
@@ -948,19 +911,23 @@ class _BackgroundPage extends ConsumerStatefulWidget {
 
 class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   double _opacity = 1.0;
-  bool _dark = false;
+  String _themeMode = 'auto';
   Color? _lightPaper;
   Color? _darkPaper;
+  Color? _lightText;
+  Color? _darkText;
   String _preset = '';
 
   @override
   void initState() {
     super.initState();
     final n = ref.read(readerProvider.notifier);
-    _dark = n.themeDark;
+    _themeMode = n.themeMode;
     _opacity = n.bgOpacity;
     _lightPaper = n.lightPaperColor != null ? Color(n.lightPaperColor!) : null;
     _darkPaper = n.darkPaperColor != null ? Color(n.darkPaperColor!) : null;
+    _lightText = n.lightTextColor != null ? Color(n.lightTextColor!) : null;
+    _darkText = n.darkTextColor != null ? Color(n.darkTextColor!) : null;
     _preset = n.bgPreset;
   }
 
@@ -977,35 +944,60 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
         );
   }
 
-  /// 背景取色：壳层液态壳 + 单色 + 背景/文字预览
-  Future<void> _pickPaperColor(
+  /// 背景/文字取色：壳层液态壳 + 单色 + 预览
+  Future<void> _pickColor(
     BuildContext context,
     ReaderNotifier n, {
     required bool isDark,
+    required bool isText,
   }) async {
-    final current = isDark
-        ? (_darkPaper ?? const Color(0xFF1E1E1E))
-        : (_lightPaper ?? const Color(0xFFF5F1E8));
-    // 预览用当前正文色（夜/日主题下的 text）
-    final text = PageContentRenderer.textColor;
+    final current = isText
+        ? (isDark
+            ? (_darkText ?? const Color(0xFFCCCCCC))
+            : (_lightText ?? Colors.black))
+        : (isDark
+            ? (_darkPaper ?? const Color(0xFF1E1E1E))
+            : (_lightPaper ?? const Color(0xFFF5F1E8)));
+    final previewText = isText
+        ? (isDark
+            ? (_darkPaper ?? const Color(0xFF1E1E1E))
+            : (_lightPaper ?? const Color(0xFFF5F1E8)))
+        : PageContentRenderer.textColor;
+    // 文字取色：预览区用纸色为底、当前色为字
     await showPaperColorPicker(
       context,
       initialColor: current,
-      textColor: text,
+      textColor: isText ? current : previewText,
+      previewBg: isText ? previewText : current,
       onPick: (picked) {
         if (!mounted) return;
         setState(() {
-          if (isDark) {
-            _darkPaper = picked;
+          if (isText) {
+            if (isDark) {
+              _darkText = picked;
+            } else {
+              _lightText = picked;
+            }
           } else {
-            _lightPaper = picked;
+            if (isDark) {
+              _darkPaper = picked;
+            } else {
+              _lightPaper = picked;
+            }
+            _preset = '';
           }
-          _preset = '';
         });
-        n.setPaperColor(
-          light: (_lightPaper ?? const Color(0xFFF5F1E8)).toARGB32(),
-          dark: (_darkPaper ?? const Color(0xFF1E1E1E)).toARGB32(),
-        );
+        if (isText) {
+          if (isDark) {
+            n.setDarkTextColor(picked.toARGB32());
+          } else {
+            n.setLightTextColor(picked.toARGB32());
+          }
+        } else if (isDark) {
+          n.setPaperColor(dark: picked.toARGB32());
+        } else {
+          n.setPaperColor(light: picked.toARGB32());
+        }
       },
     );
   }
@@ -1013,54 +1005,100 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   @override
   Widget build(BuildContext context) {
     final n = ref.read(readerProvider.notifier);
-    ref.watch(readerProvider); // 我的主题列表/纸色变更后刷新
+    ref.watch(readerProvider);
     final scheme = Theme.of(context).colorScheme;
+    final sysDark =
+        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
+    // 跟随系统：把系统亮度同步给 notifier（仅 auto 模式会切换）
+    if (n.themeMode == 'auto') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) n.updateSystemBrightness(sysDark);
+      });
+    }
+    // 跟随系统时：预设预览按系统亮度取色
+    final previewDark =
+        _themeMode == 'auto' ? sysDark : _themeMode == 'dark';
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         _SectionTitle('日夜模式', scheme,
             line: ReaderMenuIcons.lineDay, fill: ReaderMenuIcons.fillDay),
         const SizedBox(height: 8),
-        _GlassSegmented<bool>(
+        _GlassSegmented<String>(
           items: const [
-            (false, '日间'),
-            (true, '夜间'),
+            ('light', '日间'),
+            ('auto', '自动'),
+            ('dark', '夜间'),
           ],
-          value: _dark,
+          value: _themeMode,
           onChanged: (v) {
-            setState(() => _dark = v);
-            n.setThemeDark(v);
+            setState(() => _themeMode = v);
+            n.setThemeMode(v);
           },
         ),
-        const SizedBox(height: 24),
-        _SectionTitle('背景色', scheme,
+        if (_themeMode == 'auto')
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              sysDark ? '当前跟随系统：夜间' : '当前跟随系统：日间',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        const SizedBox(height: 20),
+        _SectionTitle('背景色 · 文字色', scheme,
             line: ReaderMenuIcons.lineBg, fill: ReaderMenuIcons.fillBg),
+        const SizedBox(height: 8),
+        Text(
+          '日间 / 夜间独立配色，切换模式自动套用',
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
               child: _ColorCard(
-                '日间 · 取色',
+                '日间背景',
                 _lightPaper ?? const Color(0xFFF5F1E8),
                 showPickIcon: true,
-                onTap: () => _pickPaperColor(context, n, isDark: false),
+                onTap: () => _pickColor(context, n,
+                    isDark: false, isText: false),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _ColorCard(
-                '夜间 · 取色',
-                _darkPaper ?? const Color(0xFF1E1E1E),
+                '日间文字',
+                _lightText ?? Colors.black,
                 showPickIcon: true,
-                onTap: () => _pickPaperColor(context, n, isDark: true),
+                onTap: () =>
+                    _pickColor(context, n, isDark: false, isText: true),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        Text(
-          '点色卡打开取色器；预设格快速换纸色',
-          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        Row(
+          children: [
+            Expanded(
+              child: _ColorCard(
+                '夜间背景',
+                _darkPaper ?? const Color(0xFF1E1E1E),
+                showPickIcon: true,
+                onTap: () =>
+                    _pickColor(context, n, isDark: true, isText: false),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ColorCard(
+                '夜间文字',
+                _darkText ?? const Color(0xFFCCCCCC),
+                showPickIcon: true,
+                onTap: () =>
+                    _pickColor(context, n, isDark: true, isText: true),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 24),
         _SectionTitle('背景透明度', scheme,
@@ -1089,7 +1127,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
             for (final p in _bgPresets)
               _BgGridItem(
                 p.label,
-                _dark ? p.dark : p.light,
+                previewDark ? p.dark : p.light,
                 selected: _preset == p.key,
                 onTap: () => _applyPreset(p),
               ),
@@ -1111,10 +1149,14 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                   _preset = '';
                   _lightPaper = null;
                   _darkPaper = null;
-                  _dark = false;
+                  _lightText = null;
+                  _darkText = null;
+                  _themeMode = 'auto';
                 });
-                n.setPaperColor(light: null, dark: null);
-                n.setThemeDark(false);
+                n.setPaperColor(clearLight: true, clearDark: true);
+                n.setLightTextColor(null);
+                n.setDarkTextColor(null);
+                n.setThemeMode('auto');
               },
             ),
             _ThemeChip(
@@ -1122,8 +1164,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               _preset == 'parchment',
               onSelected: (_) {
                 _applyPreset(_bgPresets[0]);
-                setState(() => _dark = false);
-                n.setThemeDark(false);
+                setState(() => _themeMode = 'light');
+                n.setThemeMode('light');
               },
             ),
             _ThemeChip(
@@ -1131,17 +1173,17 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               _preset == 'night',
               onSelected: (_) {
                 _applyPreset(_bgPresets[3]);
-                setState(() => _dark = true);
-                n.setThemeDark(true);
+                setState(() => _themeMode = 'dark');
+                n.setThemeMode('dark');
               },
             ),
             _ThemeChip(
               '羊皮纸',
-              _preset == 'parchment' && _dark,
+              _preset == 'parchment' && _themeMode == 'dark',
               onSelected: (_) {
                 _applyPreset(_bgPresets[0]);
-                setState(() => _dark = true);
-                n.setThemeDark(true);
+                setState(() => _themeMode = 'dark');
+                n.setThemeMode('dark');
               },
             ),
           ],
@@ -1183,9 +1225,13 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                   onPressed: () {
                     n.applyUserTheme(t);
                     setState(() {
-                      _dark = t.dark;
+                      _themeMode = t.dark ? 'dark' : 'light';
                       _lightPaper = Color(t.lightPaper);
                       _darkPaper = Color(t.darkPaper);
+                      _lightText =
+                          t.lightTextColor != null ? Color(t.lightTextColor!) : null;
+                      _darkText =
+                          t.darkTextColor != null ? Color(t.darkTextColor!) : null;
                       _opacity = t.bgOpacity;
                       _preset = t.bgPreset;
                     });

@@ -77,7 +77,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _darkPaperColor = persisted.darkPaperColor;
     _bgOpacity = persisted.bgOpacity;
     _bgPreset = persisted.bgPreset;
-    _textColor = persisted.textColor;
+    _themeMode = persisted.themeMode;
+    _systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    _themeDark = _resolveDark(_themeMode, _systemDark);
+    _lightTextColor = persisted.lightTextColor;
+    _darkTextColor = persisted.darkTextColor;
     _accentColor = persisted.accentColor;
     _bodyFontWeight = persisted.bodyFontWeight;
     _userThemes = List.of(persisted.userThemes);
@@ -90,7 +95,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       opacity: _bgOpacity,
     );
     PageContentRenderer.applyColorOverrides(
-      text: _textColor,
+      text: _effectiveTextColor,
       accent: _accentColor,
     );
     PageContentRenderer.theme =
@@ -185,8 +190,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
   // 2026-09-04 P1: 坍塌动画样式（方块大小/向心滑移/阴影色）
   CollapseStyle _collapseStyle = CollapseStyle.defaults();
 
-  // 2026-09-04 P1: 暗黑主题（false=light）
+  // 2026-09-04 P1: 暗黑主题（false=light）；themeMode=auto 时跟随系统
   bool _themeDark = false;
+  String _themeMode = 'auto';
+  bool _systemDark = false;
 
   // M9-P4：段落格式设置（首行缩进/段间距/重新分段）
   bool _enableIndent = true;
@@ -220,8 +227,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _bgOpacity = 1.0;
   String _bgPreset = '';
 
-  // 颜色：正文 / 强调
-  int? _textColor;
+  // 颜色：日/夜正文 + 强调
+  int? _lightTextColor;
+  int? _darkTextColor;
   int? _accentColor;
   int _bodyFontWeight = 400;
   List<UserThemePreset> _userThemes = const [];
@@ -283,8 +291,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? get darkPaperColor => _darkPaperColor;
   double get bgOpacity => _bgOpacity;
   String get bgPreset => _bgPreset;
-  int? get textColor => _textColor;
+  int? get lightTextColor => _lightTextColor;
+  int? get darkTextColor => _darkTextColor;
   int? get accentColor => _accentColor;
+
+  /// 当前主题下生效的正文色（日/夜各自覆盖）
+  int? get _effectiveTextColor => _themeDark ? _darkTextColor : _lightTextColor;
+
+  /// 明暗模式：light / dark / auto
+  String get themeMode => _themeMode;
+
+  /// 当前是否夜间（auto 时跟随系统）
+  bool get themeDark => _themeDark;
   int get bodyFontWeight => _bodyFontWeight;
   List<UserThemePreset> get userThemes => List.unmodifiable(_userThemes);
 
@@ -437,21 +455,57 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _persistSettings();
   }
 
-  bool get themeDark => _themeDark;
+  /// 明暗模式：light / dark / auto（跟随系统）
+  void setThemeMode(String mode) {
+    final m = switch (mode) {
+      'light' || 'dark' || 'auto' => mode,
+      _ => 'auto',
+    };
+    _themeMode = m;
+    _themeDark = _resolveDark(m, _systemDark);
+    _syncThemeToRenderer();
+    _persistSettings();
+    state = state.copyWith();
+  }
 
-  /// 切换暗黑主题：更新 PageContentRenderer 静态主题并递增 revision
-  /// （PagePainter.shouldRepaint 以构造期捕获的 revision 比对触发重绘；
-  /// 快照缓存键含主题分量，翻页门控自动生成新主题快照，旧条目由 LRU 淘汰）
-  void setThemeDark(bool dark) {
-    if (_themeDark == dark) return;
-    _themeDark = dark;
-    PageContentRenderer.theme = dark ? ReaderTheme.dark : ReaderTheme.light;
+  /// 系统亮度变化（仅 themeMode=auto 时生效）
+  void updateSystemBrightness(bool systemDark) {
+    if (_systemDark == systemDark) return;
+    _systemDark = systemDark;
+    if (_themeMode != 'auto') return;
+    _themeDark = _resolveDark(_themeMode, _systemDark);
+    _syncThemeToRenderer();
+    state = state.copyWith();
+  }
+
+  bool _resolveDark(String mode, bool systemDark) => switch (mode) {
+        'dark' => true,
+        'light' => false,
+        _ => systemDark,
+      };
+
+  void _syncThemeToRenderer() {
+    PageContentRenderer.theme =
+        _themeDark ? ReaderTheme.dark : ReaderTheme.light;
     PageContentRenderer.applyCommentColorPreset(
       _commentColorPreset,
-      dark: dark,
+      dark: _themeDark,
+    );
+    PageContentRenderer.applyPaperOverrides(
+      light: _lightPaperColor,
+      dark: _darkPaperColor,
+      opacity: _bgOpacity,
+    );
+    PageContentRenderer.applyColorOverrides(
+      text: _effectiveTextColor,
+      accent: _accentColor,
     );
     PageContentRenderer.themeRevision++;
-    _persistSettings();
+  }
+
+  /// 显式切换日/夜间（兼容旧调用；内部走 themeMode）
+  void setThemeDark(bool dark) {
+    setThemeMode(dark ? 'dark' : 'light');
   }
 
   /// 组装设置 JSON（单一来源 = 内存字段；解析侧在 ReaderSettings.tryParse）
@@ -506,6 +560,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'pageTurnSpeed': _pageTurnSpeed.name,
         'collapse': _collapseStyle.toJson(),
         'theme': _themeDark ? 'dark' : 'light',
+        'themeMode': _themeMode,
         'letterSpacing': _letterSpacing,
         'titleScale': _titleScale,
         'showHeader': _showHeader,
@@ -514,7 +569,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'darkPaperColor': _darkPaperColor,
         'bgOpacity': _bgOpacity,
         'bgPreset': _bgPreset,
-        'textColor': _textColor,
+        'lightTextColor': _lightTextColor,
+        'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,
         'bodyFontWeight': _bodyFontWeight,
         'userThemes': [for (final t in _userThemes) t.toJson()],
@@ -692,28 +748,44 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _reloadAfterLayoutChange('padding');
   }
 
+  /// 拖动中的字距预览：只改绘制层 + 强制重建（不落库）
+  void previewLetterSpacing(double v) {
+    final x = v.clamp(-2.0, 8.0);
+    PageContentRenderer.userLetterSpacing = x;
+    PageContentRenderer.themeRevision++;
+    state = state.copyWith(); // 触发 reader 页重建 → 新 painter 读到新字距
+  }
+
   /// 用户字距（px；绘制层叠加，不进 Rust 断行；**不改 fontFamily**）
   void setLetterSpacing(double v) {
     final x = v.clamp(-2.0, 8.0);
-    if ((_letterSpacing - x).abs() < 0.01) {
-      // 拖动中已写过 PageContentRenderer，这里只需落库
-      _persistSettings();
-      return;
-    }
     _letterSpacing = x;
     PageContentRenderer.userLetterSpacing = x;
     PageContentRenderer.themeRevision++;
     _persistSettings();
+    state = state.copyWith();
   }
 
   /// 章节标题字号倍率（isChapterStart 行；纯绘制）
   void setTitleScale(double v) {
     final x = v.clamp(1.0, 1.8);
-    if ((_titleScale - x).abs() < 0.01) return;
+    if ((_titleScale - x).abs() < 0.01) {
+      _persistSettings();
+      return;
+    }
     _titleScale = x;
     PageContentRenderer.titleScale = x;
     PageContentRenderer.themeRevision++;
     _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 标题倍率拖动预览
+  void previewTitleScale(double v) {
+    final x = v.clamp(1.0, 1.8);
+    PageContentRenderer.titleScale = x;
+    PageContentRenderer.themeRevision++;
+    state = state.copyWith();
   }
 
   /// 页眉（顶栏书名）显隐
@@ -732,14 +804,25 @@ class ReaderNotifier extends Notifier<ReadingState> {
     state = state.copyWith(); // 通知 chrome 重建
   }
 
-  /// 背景纸色（ARGB；null 恢复主题默认）
-  void setPaperColor({int? light, int? dark}) {
+  /// 背景纸色（ARGB；null = 该模式恢复主题默认）
+  /// 只改传入的那一侧，另一侧保持不动——日/夜纸色相互独立。
+  void setPaperColor({int? light, int? dark, bool clearLight = false, bool clearDark = false}) {
     var dirty = false;
-    if (light != _lightPaperColor) {
+    if (clearLight) {
+      if (_lightPaperColor != null) {
+        _lightPaperColor = null;
+        dirty = true;
+      }
+    } else if (light != null && light != _lightPaperColor) {
       _lightPaperColor = light;
       dirty = true;
     }
-    if (dark != _darkPaperColor) {
+    if (clearDark) {
+      if (_darkPaperColor != null) {
+        _darkPaperColor = null;
+        dirty = true;
+      }
+    } else if (dark != null && dark != _darkPaperColor) {
       _darkPaperColor = dark;
       dirty = true;
     }
@@ -774,11 +857,27 @@ class ReaderNotifier extends Notifier<ReadingState> {
     state = state.copyWith();
   }
 
-  /// 正文文字色（null 恢复主题默认）
-  void setTextColor(int? argb) {
-    if (_textColor == argb) return;
-    _textColor = argb;
+  /// 日间正文色（null 恢复主题默认）
+  void setLightTextColor(int? argb) {
+    if (_lightTextColor == argb) return;
+    _lightTextColor = argb;
     _applyColorAndPersist();
+  }
+
+  /// 夜间正文色（null 恢复主题默认）
+  void setDarkTextColor(int? argb) {
+    if (_darkTextColor == argb) return;
+    _darkTextColor = argb;
+    _applyColorAndPersist();
+  }
+
+  /// 兼容旧调用：写到当前主题对应的正文色
+  void setTextColor(int? argb) {
+    if (_themeDark) {
+      setDarkTextColor(argb);
+    } else {
+      setLightTextColor(argb);
+    }
   }
 
   /// 强调/注释色（null 恢复主题默认）
@@ -790,7 +889,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   void _applyColorAndPersist() {
     PageContentRenderer.applyColorOverrides(
-      text: _textColor,
+      text: _effectiveTextColor,
       accent: _accentColor,
     );
     PageContentRenderer.themeRevision++;
@@ -820,8 +919,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       dark: _themeDark,
       lightPaper: _lightPaperColor ??
           PageContentRenderer.theme.paperColor.toARGB32(),
-      darkPaper: _darkPaperColor ?? PageContentRenderer.theme.paperColor.toARGB32(),
-      textColor: _textColor,
+      darkPaper: _darkPaperColor ??
+          PageContentRenderer.theme.paperColor.toARGB32(),
+      lightTextColor: _lightTextColor,
+      darkTextColor: _darkTextColor,
       accentColor: _accentColor,
       bgOpacity: _bgOpacity,
       bgPreset: _bgPreset,
@@ -838,22 +939,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
   void applyUserTheme(UserThemePreset t) {
     _lightPaperColor = t.lightPaper;
     _darkPaperColor = t.darkPaper;
-    _textColor = t.textColor;
+    _lightTextColor = t.lightTextColor;
+    _darkTextColor = t.darkTextColor;
     _accentColor = t.accentColor;
     _bgOpacity = t.bgOpacity;
     _bgPreset = t.bgPreset;
+    _themeMode = t.dark ? 'dark' : 'light';
     _themeDark = t.dark;
-    PageContentRenderer.theme = t.dark ? ReaderTheme.dark : ReaderTheme.light;
-    PageContentRenderer.applyPaperOverrides(
-      light: _lightPaperColor,
-      dark: _darkPaperColor,
-      opacity: _bgOpacity,
-    );
-    PageContentRenderer.applyColorOverrides(
-      text: _textColor,
-      accent: _accentColor,
-    );
-    PageContentRenderer.themeRevision++;
+    _syncThemeToRenderer();
     _persistSettings();
     state = state.copyWith();
   }

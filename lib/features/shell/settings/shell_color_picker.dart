@@ -32,6 +32,7 @@ Future<Color?> showPaperColorPicker(
   BuildContext context, {
   required Color initialColor,
   required Color textColor,
+  Color? previewBg,
   required ValueChanged<Color> onPick,
 }) {
   return showDialog<Color>(
@@ -39,6 +40,7 @@ Future<Color?> showPaperColorPicker(
     builder: (context) => PaperColorPickerDialog(
       initialColor: initialColor,
       textColor: textColor,
+      previewBg: previewBg ?? initialColor,
       onPick: onPick,
     ),
   );
@@ -50,13 +52,17 @@ class PaperColorPickerDialog extends ConsumerStatefulWidget {
     super.key,
     required this.initialColor,
     required this.textColor,
+    this.previewBg,
     required this.onPick,
   });
 
   final Color initialColor;
 
-  /// 仅用于预览正文观感，不修改
+  /// 预览文字色（挑背景时=正文色；挑文字时=当前文字色）
   final Color textColor;
+
+  /// 预览底色（挑背景时=所选背景；挑文字时=对应纸色）
+  final Color? previewBg;
   final ValueChanged<Color> onPick;
 
   @override
@@ -125,7 +131,7 @@ class _PaperColorPickerDialogState
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: _color,
+                    color: widget.previewBg ?? _color,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.22),
@@ -139,7 +145,10 @@ class _PaperColorPickerDialogState
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
-                          color: widget.textColor,
+                          // 挑背景：字=正文色；挑文字：字=当前选中色
+                          color: widget.previewBg == null
+                              ? widget.textColor
+                              : _color,
                           height: 1.5,
                         ),
                       ),
@@ -148,7 +157,10 @@ class _PaperColorPickerDialogState
                         '预览 · 背景与正文色搭配',
                         style: TextStyle(
                           fontSize: 12,
-                          color: widget.textColor.withValues(alpha: 0.72),
+                          color: (widget.previewBg == null
+                                  ? widget.textColor
+                                  : _color)
+                              .withValues(alpha: 0.72),
                         ),
                       ),
                     ],

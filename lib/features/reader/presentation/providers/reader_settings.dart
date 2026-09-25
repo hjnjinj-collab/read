@@ -138,10 +138,15 @@ class ReaderSettings {
   final String bgPreset;
 
   /// 正文文字色（ARGB int；null = 主题默认）
-  final int? textColor;
+  /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
+  final int? lightTextColor;
+  final int? darkTextColor;
 
   /// 强调/注释色（ARGB int；null = 主题默认）
   final int? accentColor;
+
+  /// 明暗：light / dark / auto（跟随系统）
+  final String themeMode;
 
   /// 正文字重：300 细 / 400 常规 / 500 中 / 700 粗
   final int bodyFontWeight;
@@ -189,8 +194,10 @@ class ReaderSettings {
     required this.darkPaperColor,
     required this.bgOpacity,
     required this.bgPreset,
-    required this.textColor,
+    required this.lightTextColor,
+    required this.darkTextColor,
     required this.accentColor,
+    required this.themeMode,
     required this.bodyFontWeight,
     required this.userThemes,
   });
@@ -236,8 +243,10 @@ class ReaderSettings {
         darkPaperColor: null,
         bgOpacity: 1.0,
         bgPreset: '',
-        textColor: null,
+        lightTextColor: null,
+        darkTextColor: null,
         accentColor: null,
+        themeMode: 'auto',
         bodyFontWeight: 400,
         userThemes: [],
       );
@@ -299,8 +308,22 @@ class ReaderSettings {
             j['darkPaperColor'] is int ? j['darkPaperColor'] as int : null,
         bgOpacity: _d(j, 'bgOpacity', 1.0).clamp(0.15, 1.0),
         bgPreset: _s(j, 'bgPreset', ''),
-        textColor: j['textColor'] is int ? j['textColor'] as int : null,
+        lightTextColor: j['lightTextColor'] is int
+            ? j['lightTextColor'] as int
+            : (j['textColor'] is int ? j['textColor'] as int : null),
+        darkTextColor: j['darkTextColor'] is int
+            ? j['darkTextColor'] as int
+            : (j['textColor'] is int ? j['textColor'] as int : null),
         accentColor: j['accentColor'] is int ? j['accentColor'] as int : null,
+        themeMode: switch (j['themeMode']) {
+          'light' || 'dark' || 'auto' => j['themeMode'] as String,
+          // 旧字段 theme 迁移
+          _ => j['theme'] == 'dark'
+              ? 'dark'
+              : j['theme'] == 'light'
+                  ? 'light'
+                  : 'auto',
+        },
         bodyFontWeight: () {
           final v = _i(j, 'bodyFontWeight', 400);
           return (v == 300 || v == 500 || v == 700) ? v : 400;
@@ -390,7 +413,8 @@ class UserThemePreset {
   final bool dark;
   final int lightPaper;
   final int darkPaper;
-  final int? textColor;
+  final int? lightTextColor;
+  final int? darkTextColor;
   final int? accentColor;
   final double bgOpacity;
   final String bgPreset;
@@ -400,7 +424,8 @@ class UserThemePreset {
     required this.dark,
     required this.lightPaper,
     required this.darkPaper,
-    this.textColor,
+    this.lightTextColor,
+    this.darkTextColor,
     this.accentColor,
     this.bgOpacity = 1.0,
     this.bgPreset = '',
@@ -411,7 +436,8 @@ class UserThemePreset {
         'dark': dark,
         'lightPaper': lightPaper,
         'darkPaper': darkPaper,
-        'textColor': textColor,
+        'lightTextColor': lightTextColor,
+        'darkTextColor': darkTextColor,
         'accentColor': accentColor,
         'bgOpacity': bgOpacity,
         'bgPreset': bgPreset,
@@ -428,7 +454,12 @@ class UserThemePreset {
       dark: j['dark'] == true,
       lightPaper: lp,
       darkPaper: dp,
-      textColor: j['textColor'] is int ? j['textColor'] as int : null,
+      lightTextColor: j['lightTextColor'] is int
+          ? j['lightTextColor'] as int
+          : (j['textColor'] is int ? j['textColor'] as int : null),
+      darkTextColor: j['darkTextColor'] is int
+          ? j['darkTextColor'] as int
+          : (j['textColor'] is int ? j['textColor'] as int : null),
       accentColor: j['accentColor'] is int ? j['accentColor'] as int : null,
       bgOpacity: j['bgOpacity'] is num
           ? (j['bgOpacity'] as num).toDouble().clamp(0.15, 1.0)
