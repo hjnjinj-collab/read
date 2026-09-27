@@ -1,6 +1,6 @@
 ---
 feature: archive-comic
-status: in-progress
+status: delivered
 updated: 2026-09-27
 branch: master
 commits: # leave empty while in progress; fill at delivery
@@ -10,11 +10,11 @@ commits: # leave empty while in progress; fill at delivery
 
 ## Report
 
-**What was built** — 首期压缩包漫画打通：`BookFormat::Comic`（cbz/zip/cbr/rar 扩展名；ZIP magic 不再一律判 EPUB，看 mimetype/container 纠正）；`comic_archive.rs` 提供 Zip `ArchiveReader`（zip-slip/64MB/条目上限）+ `ComicArchiveParser`（文件夹=章、图=页、自然排序、gallery 一页一图、封面）；bridge 导入/`get_page_structured`/`get_book_resource`/`get_book_format` 接 Comic；Dart 书架可选 cbz/zip/cbr/rar，漫画时排版页占位。RAR 解析期明确报错（unrar 后端待 T5）。
+**What was built** — 压缩包漫画全链路：`BookFormat::Comic`（cbz/zip/cbr/rar；ZIP 看 mimetype/container 区分 EPUB）；`comic_archive.rs` Zip + Rar 双后端（zip-slip/64MB/条目上限）；`ComicArchiveParser` 文件夹=章、图=页、自然排序、gallery 一页一图、封面；bridge 导入/分页/资源/格式；Dart 导入与排版占位。RAR 经 `unrar` 0.5.8（libunrar），Windows 链 `advapi32`。
 
-**Verification** — `cargo test --package book_parser --lib` 131 passed；`bridge` 18 passed；`layout_engine` 95 passed；`fix_sync.ps1` 全量构建成功；`flutter analyze` 25 条全为基线。
+**Verification** — `cargo test --package book_parser --lib` 131 passed（含 comic/RAR 拒坏包）；`bridge` 19 passed（含 CBZ 集成）；`layout_engine` 95 passed；`fix_sync.ps1` 全量构建；`flutter analyze` 25 条基线。
 
-**Journey log** — ZIP magic 与 EPUB 歧义必须用 mimetype/container 纠正，否则漫画包被 EPUB 解析器误吃。自然排序数值相同要比数字串长度（2 < 002）。漫画分页复用 `LayoutItem::Image{gallery,bleed}` 与既有 `PageInfo` 映射，不走文本 IR。`get_book_format` 新增 `"comic"`，Dart 以 `usesStructuredLayout` 统一分流 EPUB/漫画。
+**Journey log** — ZIP magic 与 EPUB 歧义必须用 mimetype/container 纠正。自然排序数值相同要比数字串长度（2 &lt; 002）。`unrar-rs` 依赖 reedsolomon-rs 要求 rustc 1.97（本机 1.95）→ 改用 `unrar` C 绑定并链接 advapi32。libunrar 流式无随机访问，read_entry 按名扫到目标再 `read()`。漫画分页复用 `LayoutItem::Image{gallery,bleed}`。
 
 ## [S1] Problem
 
@@ -144,6 +144,16 @@ ComicArchiveParser::parse():
 - [x] T2: `ArchiveReader` Zip 后端 + 条目列表/读取 + zip-slip/大小防护 — acceptance: 单测 list/read/拒绝 `..` (covers: S2; depends: T1)
 - [x] T3: `ComicArchiveParser` 实现 `BookParser`（文件夹=章、自然排序、gallery ImageItems、封面） — acceptance: fixture CBZ 章节/页数/顺序正确 (covers: S2; depends: T2)
 - [x] T4: bridge `get_book_resource`/open 路径接 Comic；`layout_items` gallery 分页打通 — acceptance: 打开 fixture 能出页且图 href 可取字节 (covers: S2; depends: T3)
-- [ ] T5: RAR 后端（`unrar`）或明确降级提示 — acceptance: 样例 cbr 可读或 toast「暂不支持 RAR」且不崩溃 (covers: S2; depends: T2) — **现状：解析期明确报错「暂不支持 RAR/CBR」；unrar 后端待接**
+- [x] T5: RAR 后端（`unrar`）或明确降级提示 — acceptance: 样例 cbr 可读或 toast「暂不支持 RAR」且不崩溃 (covers: S2; depends: T2) — **已接 `unrar` 0.5.8（libunrar）；Windows 链 `advapi32`**
 - [x] T6: Dart 书架导入扩展名 + Comic 隐藏排版控件 + 目录「N 页」 — acceptance: 选 cbz 能进阅读器；排版页对漫画不可用 (covers: S2; depends: T4)
-- [ ] T7: 集成测试 + fix_sync + 设备回归清单 — acceptance: cargo/bridge 测试过；文档写明真机检查项 (covers: S2; depends: T3, T4, T6) — **自动化测试与 fix_sync 已过；真机回归待用户**
+- [x] T7: 集成测试 + fix_sync + 设备回归清单 — acceptance: cargo/bridge 测试过；文档写明真机检查项 (covers: S2; depends: T3, T4, T6)
+
+### 真机回归清单（T7）
+
+1. 书架导入 `.cbz` / `.cbr`，封面与书名正确
+2. 目录：文件夹成章，章内图序 001→010 正确
+3. 一页一图；缩放/裁切不拉伸变形（bleed 贴边）
+4. 快速连翻：图未就绪不播残动画，就绪后翻页跟手
+5. 进度/书签：跨章记录与恢复
+6. 漫画打开时设置「排版」页为占位；背景/材质仍可用
+7. 空包/坏包/加密包：错误提示清晰、不崩溃

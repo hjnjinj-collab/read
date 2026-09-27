@@ -161,12 +161,93 @@ impl ArchiveReader for ZipArchiveReader {
     }
 }
 
-// ── Rar 后端（T5：可选） ──
+// ── Rar 后端（unrar crate / libunrar） ──
 
-/// RAR 是否可在本机解析（链接/依赖可用）。
-/// 首期未接 unrar 时恒 false，调用方给出「暂不支持 RAR」。
+/// RAR 是否可在本机解析
 pub fn rar_supported() -> bool {
-    cfg!(feature = "rar")
+    true
+}
+
+pub struct RarArchiveReader {
+    path: PathBuf,
+    /// libunrar 流式句柄不可随机访问；每次 list/read 重开，用互斥串行化
+    lock: std::sync::Mutex<()>,
+}
+
+impl RarArchiveReader {
+    pub fn open(path: &Path) -> Result<Self> {
+        unrar::Archive::new(path)
+            .open_for_listing()
+            .map_err(|e| anyhow::anyhow!("不是有效的 RAR/CBR: {e:?}"))?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            lock: std::sync::Mutex::new(()),
+        })
+    }
+}
+
+impl ArchiveReader for RarArchiveReader {
+    fn list_entries(&self) -> Result<Vec<ArchiveEntry>> {
+        let _g = self.lock.lock().unwrap();
+        let archive = unrar::Archive::new(&self.path)
+            .open_for_listing()
+            .map_err(|e| anyhow::anyhow!("打开 RAR 失败: {e:?}"))?;
+        let mut out = Vec::new();
+        let mut n = 0usize;
+        for item in archive {
+            let item = item.map_err(|e| anyhow::anyhow!("读条目失败: {e:?}"))?;
+            n += 1;
+            if n > MAX_ENTRIES {
+                anyhow::bail!("压缩包条目过多（> {MAX_ENTRIES}）");
+            }
+            let name = item.filename.to_string_lossy().replace('\\', "/");
+            if !is_safe_entry_path(&name) {
+                continue;
+            }
+            out.push(ArchiveEntry {
+                path: name,
+                is_dir: item.is_directory(),
+                size: item.unpacked_size,
+            });
+        }
+        Ok(out)
+    }
+
+    fn read_entry(&self, path: &str) -> Result<Vec<u8>> {
+        if !is_safe_entry_path(path) {
+            anyhow::bail!("非法资源路径");
+        }
+        let _g = self.lock.lock().unwrap();
+        let mut archive = unrar::Archive::new(&self.path)
+            .open_for_processing()
+            .map_err(|e| anyhow::anyhow!("打开 RAR 失败: {e:?}"))?;
+        // 流式扫描到目标条目（unrar 无随机访问）
+        let target = path.replace('\\', "/");
+        loop {
+            let Some(cursor) = archive
+                .read_header()
+                .map_err(|e| anyhow::anyhow!("读 RAR 头失败: {e:?}"))?
+            else {
+                anyhow::bail!("压缩包内无此条目: {path}");
+            };
+            let name = cursor.entry().filename.to_string_lossy().replace('\\', "/");
+            if name == target {
+                if cursor.entry().unpacked_size > MAX_ENTRY_BYTES {
+                    anyhow::bail!("条目过大");
+                }
+                let (data, _rest) = cursor
+                    .read()
+                    .map_err(|e| anyhow::anyhow!("解压失败 {path}: {e:?}"))?;
+                if data.len() as u64 > MAX_ENTRY_BYTES {
+                    anyhow::bail!("解压后过大（{} bytes）", data.len());
+                }
+                return Ok(data);
+            }
+            archive = cursor
+                .skip()
+                .map_err(|e| anyhow::anyhow!("跳过条目失败: {e:?}"))?;
+        }
+    }
 }
 
 // ── ComicArchiveParser ──
@@ -208,8 +289,7 @@ impl ComicArchiveParser {
                 if !rar_supported() {
                     anyhow::bail!("暂不支持 RAR/CBR 压缩包（缺少解压后端）");
                 }
-                // T5：接入 unrar 后替换
-                anyhow::bail!("暂不支持 RAR/CBR 压缩包");
+                Box::new(RarArchiveReader::open(path)?)
             }
             _ => Box::new(ZipArchiveReader::open(path)?),
         };
@@ -509,5 +589,19 @@ mod tests {
         zw.finish().unwrap();
         let mut parser = ComicArchiveParser::from_file(&path).unwrap();
         assert!(parser.parse().is_err());
+    }
+
+    #[test]
+    fn rar_backend_rejects_non_rar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("fake.cbr");
+        std::fs::write(&path, b"not a rar").unwrap();
+        // 应明确失败而不是 panic
+        assert!(RarArchiveReader::open(&path).is_err());
+    }
+
+    #[test]
+    fn rar_supported_flag() {
+        assert!(rar_supported());
     }
 }

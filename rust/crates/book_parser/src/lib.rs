@@ -19,6 +19,11 @@ pub mod image_size;
 pub use traits::{BookParser, BookMetadata, ChapterInfo, BookFormat};
 
 pub mod comic_archive;
+
+// libunrar 依赖 Win32 注册表/加密 API（GetRarDataPath / GetRnd）
+#[cfg(windows)]
+#[link(name = "advapi32")]
+extern "system" {}
 pub use loader::BookSourceLoader;
 pub use txt_parser::TxtParser;
 pub use epub_parser::EpubParser;

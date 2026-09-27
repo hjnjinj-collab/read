@@ -20,6 +20,7 @@ rquickjs = { version = "0.6", features = ["array-buffer", "classes", "parallel",
 tokio = { workspace = true }     # 异步运行时
 log = { workspace = true }       # 日志
 zhconv = "0.4.1"
+unrar = "0.5.8"
 
 [features]
 default = ["js-engine"]
