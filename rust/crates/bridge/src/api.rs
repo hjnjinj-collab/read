@@ -101,6 +101,40 @@ fn build_layout_engine(config: LayoutConfig, font_manager: FontManager) -> Layou
     LayoutEngine::with_cache_and_measure(config, font_manager, glyph_cache, MEASURE_CACHE.clone())
 }
 
+/// 压缩包漫画分页：每图一页（gallery），复用 layout_items 与 PageInfo 映射
+fn process_comic_chapter(
+    handle: &crate::BookHandle,
+    chapter_index: usize,
+    config: &LayoutConfig,
+) -> anyhow::Result<Vec<crate::PageInfo>> {
+    let comic = handle
+        .comic
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("非漫画句柄"))?;
+    let ch = comic
+        .chapters()
+        .get(chapter_index)
+        .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
+
+    let items: Vec<layout_engine::LayoutItem> = ch
+        .pages
+        .iter()
+        .map(|p| layout_engine::LayoutItem::Image {
+            resource_href: p.href.clone(),
+            aspect: p.aspect,
+            width_percent: None,
+            align: None,
+            bleed: true,   // 整页图贴边
+            gallery: true, // 一页一图
+        })
+        .collect();
+
+    let font_manager = FONT_MANAGER.lock().unwrap().clone();
+    let engine = build_layout_engine(config.clone(), font_manager);
+    let pages = engine.layout_items(&items, chapter_index)?;
+    Ok(pages.into_iter().map(crate::PageInfo::from).collect())
+}
+
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
 // (update_book_cleaning / release_book / per-book clear), None = clear all.
 fn invalidate_preprocessed_cache(book_id: Option<&str>) {
@@ -827,6 +861,7 @@ fn parse_txt_file_inner(
                 source_path: Some(file_path.clone()),
                 epub_cleaned: None,
                 structured: None,
+                comic: None,
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
                 cleaning_fingerprint: cleaning_fp,
             }
@@ -862,12 +897,44 @@ fn parse_txt_file_inner(
                 source_path: Some(file_path.clone()),
                 epub_cleaned: None,
                 structured: Some(crate::StructuredEpubHandle { parser }),
+                comic: None,
+                clean_rebuild_gate: Arc::new(Mutex::new(())),
+                cleaning_fingerprint: cleaning_fp,
+            }
+        }
+        BookFormat::Comic => {
+            use book_parser::comic_archive::ComicArchiveParser;
+            let mut parser = ComicArchiveParser::from_file(path)
+                .map_err(|e| anyhow::anyhow!("压缩包漫画解析失败: {}", e))?;
+            let metadata = parser.parse()?;
+            let list = parser.get_chapter_list()?;
+            let chapters = list
+                .iter()
+                .map(|c| book_parser::Chapter {
+                    title: c.title.clone(),
+                    start_pos: 0,
+                    end_pos: 0,
+                    level: c.level,
+                    parent_index: c.parent_index,
+                })
+                .collect();
+            BookHandle {
+                book: crate::Book {
+                    title: book_name.unwrap_or(metadata.title),
+                    content: String::new(),
+                    chapters,
+                },
+                parser: None,
+                source_path: Some(file_path.clone()),
+                epub_cleaned: None,
+                structured: None,
+                comic: Some(parser),
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
                 cleaning_fingerprint: cleaning_fp,
             }
         }
         other => anyhow::bail!(
-            "暂不支持该格式导入: {}（支持 TXT / EPUB）",
+            "暂不支持该格式导入: {}（支持 TXT / EPUB / 压缩包漫画）",
             other.extension()
         ),
     };
@@ -2911,6 +2978,24 @@ fn process_structured_chapter(
     params: &StructuredParams,
     prefer_try_lock: bool,
 ) -> anyhow::Result<Option<Arc<Vec<crate::PageInfo>>>> {
+    // 压缩包漫画：一页一图，不走 EPUB IR 文本流水线
+    {
+        let books = if prefer_try_lock {
+            match BOOKS.try_read() {
+                Ok(g) => g,
+                Err(_) => return Ok(None),
+            }
+        } else {
+            BOOKS.read().unwrap()
+        };
+        if let Some(handle) = books.get(book_id) {
+            if handle.comic.is_some() {
+                let pages = process_comic_chapter(handle, chapter_index, &params.config)?;
+                return Ok(Some(Arc::new(pages)));
+            }
+        }
+    }
+
     let cache_key = structured_cache_key(book_id, chapter_index, params);
 
     // M8-P4 缓存命中：Arc::clone 免整章克隆
@@ -3451,6 +3536,10 @@ pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Resu
     let handle = books
         .get(&book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+    // 压缩包漫画：按需读 ZIP 条目
+    if let Some(comic) = handle.comic.as_ref() {
+        return comic.get_resource(&resource_href);
+    }
     let structured = handle
         .structured
         .as_ref()
@@ -3469,19 +3558,24 @@ pub fn get_book_cover(book_id: String) -> anyhow::Result<Vec<u8>> {
     let handle = books
         .get(&book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+    if let Some(comic) = handle.comic.as_ref() {
+        return Ok(comic.cover_data().cloned().unwrap_or_default());
+    }
     let Some(structured) = handle.structured.as_ref() else {
         return Ok(Vec::new());
     };
     Ok(structured.parser.cover_data().cloned().unwrap_or_default())
 }
 
-/// 书籍格式标记（Dart 据此分流结构化/旧 API："epub" | "txt"）
+/// 书籍格式标记（Dart 据此分流结构化/旧 API："epub" | "txt" | "comic"）
 pub fn get_book_format(book_id: String) -> anyhow::Result<String> {
     let books = BOOKS.read().unwrap();
     let handle = books
         .get(&book_id)
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
-    Ok(if handle.structured.is_some() {
+    Ok(if handle.comic.is_some() {
+        "comic"
+    } else if handle.structured.is_some() {
         "epub"
     } else {
         "txt"
@@ -3595,6 +3689,8 @@ pub fn search_in_book(
                 &mut hits,
                 max_hits,
             ),
+            // 漫画无正文可搜
+            "comic" => Ok(()),
             _ => search_txt_chapter(
                 &book_id,
                 chapter_index,
@@ -4505,10 +4601,7 @@ pub fn get_session_chapter_content(
             }
             Err(anyhow::anyhow!("章节不存在"))
         }
-        BookFormat::Epub => {
-            Err(anyhow::anyhow!("EPUB 章节内容获取需要解析器"))
-        }
-        _ => Err(anyhow::anyhow!("不支持的格式"))
+        _ => Err(anyhow::anyhow!("不支持的格式")),
     }
 }
 
@@ -4866,6 +4959,71 @@ mod tests {
             cache.glyph_cache().get(&key).is_some(),
             "热路径键应命中预热条目"
         );
+    }
+
+    /// 压缩包漫画：导入 → format=comic → gallery 一页一图 → 资源可取
+    #[test]
+    fn comic_cbz_import_and_gallery_pages() {
+        let dir = std::env::temp_dir().join(format!("comic_bridge_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let cbz = dir.join("demo.cbz");
+        {
+            let file = std::fs::File::create(&cbz).unwrap();
+            let mut zw = zip::ZipWriter::new(file);
+            let opts = zip::write::FileOptions::default();
+            let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde";
+            zw.start_file("Ch01/001.png", opts).unwrap();
+            IoWrite::write_all(&mut zw, png).unwrap();
+            zw.start_file("Ch01/002.png", opts).unwrap();
+            IoWrite::write_all(&mut zw, png).unwrap();
+            zw.start_file("Ch02/001.png", opts).unwrap();
+            IoWrite::write_all(&mut zw, png).unwrap();
+            zw.finish().unwrap();
+        }
+
+        let book_id = parse_txt_file_inner(
+            cbz.to_string_lossy().to_string(),
+            Some("demo".into()),
+            None,
+        )
+        .expect("CBZ 导入");
+        assert_eq!(get_book_format(book_id.clone()).unwrap(), "comic");
+
+        let config = structured_layout_config(
+            360.0,
+            640.0,
+            18.0,
+            1.5,
+            20.0,
+            20.0,
+            20.0,
+            20.0,
+            "default".into(),
+            1.0,
+            true,
+        );
+        let pages = {
+            let books = BOOKS.read().unwrap();
+            let handle = books.get(&book_id).unwrap();
+            process_comic_chapter(handle, 0, &config).expect("漫画分页")
+        };
+        assert_eq!(pages.len(), 2, "gallery 一页一图");
+        assert!(
+            pages[0].entries.iter().any(|e| {
+                e.resource_href
+                    .as_deref()
+                    .map(|h| h.ends_with("001.png"))
+                    == Some(true)
+            }),
+            "第一页应为 001.png"
+        );
+        let href = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| e.resource_href.clone())
+            .unwrap();
+        assert!(!get_book_resource(book_id, href).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// M6-S1：TXT 预加载真预热——load_fn 副作用（分页缓存回填）验证。

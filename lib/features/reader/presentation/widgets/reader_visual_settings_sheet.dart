@@ -163,6 +163,22 @@ class _ReaderVisualSettingsSheetState
                 setState(() {});
               },
               itemBuilder: (context, i) {
+                // 漫画：排版页签占位（无文字流可排）
+                final isComic = ref.read(readerProvider.notifier).isComic;
+                if (isComic && i == 1) {
+                  return Center(
+                    child: Text(
+                      '漫画模式无需文字排版',
+                      style: TextStyle(
+                        color: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.color
+                            ?.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  );
+                }
                 final pages = const [
                   _FormIconPage(),
                   _TypographyPage(),
@@ -435,7 +451,7 @@ class _FormIconPage extends ConsumerWidget {
   }
 }
 
-// ── ② 排版布局 ──
+// ── ② 排版布局（漫画模式由 tab 过滤，不展示） ──
 
 class _TypographyPage extends ConsumerStatefulWidget {
   const _TypographyPage();

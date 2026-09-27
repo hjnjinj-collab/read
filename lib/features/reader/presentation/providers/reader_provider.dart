@@ -259,6 +259,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 当前书是否为 EPUB（结构化路径分流标记）
   bool _isEpub = false;
+  bool _isComic = false;
 
   // 只读访问器：供设置对话框回读当前生效的配置
   bool get removeDuplicateTitle => _removeDuplicateTitle;
@@ -315,6 +316,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 当前书是否按 EPUB 结构化路径渲染
   bool get renderAsEpub => _isEpub;
+  bool get isComic => _isComic;
+  /// 结构化路径（EPUB / 压缩包漫画）：走 get_page_structured
+  bool get usesStructuredLayout => _isEpub || _isComic;
 
   void setScreenSize(
     double width,
@@ -1118,7 +1122,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     // 用户替换规则经 replaceRules（A30b），两者哈希均入 Rust 结构化分页缓存
     // 键，切换/改规则即换键重算；去广告在 JS 提取层恒开，不调
     // updateBookCleaning（无导入级净化缓存）
-    if (_isEpub) {
+    if (usesStructuredLayout) {
       await _loadCurrentPage(
         anchorCharOffset: state.currentPage?.startCharIndex,
       );
@@ -1243,7 +1247,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         return;
       }
       _isEpub = format == 'epub';
-      if (_isEpub) {
+      _isComic = format == 'comic';
+      if (_isEpub || _isComic) {
         BookImageStore.instance.bind(_bookService, bookId);
         // 封面落盘供书架显示（异步，不阻塞打开）
         unawaited(persistBookCover(_bookService, bookId, filePath));
@@ -1342,7 +1347,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     try {
       // 分流：EPUB 结构化分页 / TXT 文本分页
       var page;
-      if (_isEpub) {
+      if (usesStructuredLayout) {
         // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
         int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
             ? 1
@@ -2107,7 +2112,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 加载单页（复用 _loadCurrentPage 的参数管线，但不修改 state）
   Future<PageInfo> _loadSinglePage(int chapterIndex, int pageIndex) async {
-    if (_isEpub) {
+    if (usesStructuredLayout) {
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
           ? 1
           : _chineseConvert == ChineseConvertType.t2s
@@ -2173,7 +2178,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 已在 LRU 中；并发多章无收益（JS 提取器进程级单 Context）。
   void _prefetchNextChapterEpub() {
     final bookId = state.bookId;
-    if (bookId == null || !_isEpub) return;
+    if (bookId == null || !usesStructuredLayout) return;
     final next = state.currentChapterIndex + 1;
     if (next >= state.chapters.length) return;
     final convertCode = _chineseConvert == ChineseConvertType.s2t
@@ -2834,7 +2839,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       padTop: _padTop,
       padBottom: _paddingVertical,
     );
-    if (_isEpub) {
+    if (usesStructuredLayout) {
       // 简繁编码与 TXT 同口径；页数与页内容必须同参（否则错位）
       int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
           ? 1
@@ -3176,7 +3181,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 在邻居页加载前启动，用户首屏图片零延迟。
   /// fire-and-forget：不阻塞 UI，预热完成后触发重绘。
   void _prewarmCurrentPageImages(PageInfo page) {
-    if (!_isEpub) return;  // 仅 EPUB 有图片资源
+    if (!usesStructuredLayout) return;  // 仅 EPUB/漫画有图片资源
     
     final imageHrefs = ResourceManifest.of(page).hrefs;
     if (imageHrefs.isEmpty) return;
@@ -3221,7 +3226,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 预测性预热下下页（阶段2优化）
   Future<void> _prewarmPredictedPage(PageDirection direction) async {
-    if (!_isEpub) return;
+    if (!usesStructuredLayout) return;
     
     try {
       final currentChapter = state.currentChapterIndex;
@@ -3265,7 +3270,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       
       // 异步获取页面并预热图片
       final PageInfo page;
-      if (_isEpub) {
+      if (usesStructuredLayout) {
         int convertCode = _chineseConvert == ChineseConvertType.s2t
             ? 1
             : _chineseConvert == ChineseConvertType.t2s

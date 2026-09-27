@@ -17,6 +17,8 @@ pub mod image_size;
 
 // 重新导出新 API
 pub use traits::{BookParser, BookMetadata, ChapterInfo, BookFormat};
+
+pub mod comic_archive;
 pub use loader::BookSourceLoader;
 pub use txt_parser::TxtParser;
 pub use epub_parser::EpubParser;

@@ -20,6 +20,7 @@
 | 翻页稳定性 | 资源就绪轮询、看门狗、邻居预热 | **已交付** |
 | 日志体系 | 环形缓冲 15min + 分类过滤 + 导出选路径 | **已交付** |
 | 字距进 FFI | `LayoutConfig.letter_spacing` 真实折行 + justify 扣字距 | **已交付** |
+| 压缩包漫画 | CBZ/ZIP 导入+gallery 分页；RAR 降级报错 | **首期已交付** |
 
 远端：`origin/master` 落后本地（字距 FFI 本轮待提交/推送）。
 
@@ -56,10 +57,11 @@
 
 1. **真机回归**：连翻 EPUB 图多章节——动画是否跟手、是否仍卡 pending
 2. **真机回归字距**：调字距后折行/justify 是否正确（本轮已进 FFI，待设备验收）
-3. **T2.5 字体 sheet 增强**：系统字体列表、文件网格排序
-4. **T1.3 悬浮圆键排**：间距 8、居中、溢出更多（与工具排网格对齐）
-5. **spec 收口**：`reader-menu-chrome-ia.md` Tasks 勾选与 Report
-6. **性能**：Bug 页/日志写文件在高频 turn 事件下的开销
+3. **压缩包漫画**：首期 CBZ/ZIP 已通（文件夹=章图=页）；RAR 明确报错待 unrar；真机回归
+4. **T2.5 字体 sheet 增强**：系统字体列表、文件网格排序
+5. **T1.3 悬浮圆键排**：间距 8、居中、溢出更多（与工具排网格对齐）
+6. **spec 收口**：`reader-menu-chrome-ia.md` Tasks 勾选与 Report
+7. **性能**：Bug 页/日志写文件在高频 turn 事件下的开销
 
 ---
 
@@ -84,6 +86,7 @@
 | **P0** | `docs/compose/progress-summary.md` | 本文件 |
 | **P0** | `docs/compose/spec/reader-menu-chrome-ia.md` | 菜单契约 + T0–T3 |
 | **P0** | `docs/compose/spec/letter-spacing-ffi.md` | 字距进 FFI（本轮） |
+| **P0** | `docs/compose/spec/archive-comic.md` | 压缩包漫画计划（待实现） |
 | **P0** | `docs/compose/spec/gear-capsule-face-and-menu-veil.md` | 齿轮/渐变历史 |
 | P1 | `docs/compose/spec/reader-statusbar-immersive-glass.md` | 沉浸 + 液态同源 |
 | P1 | `docs/BUGFIX_INDEX.md` | Impeller BF 等 |

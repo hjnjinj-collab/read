@@ -81,6 +81,15 @@ impl BookSourceLoader {
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             let format = BookFormat::from_extension(ext);
             if format != BookFormat::Unknown {
+                // EPUB vs 裸 ZIP 漫画：扩展名 .epub 直接信；.zip/.cbz 若包内
+                // 带 EPUB 结构仍纠正为 Epub（少见但存在误后缀）
+                let format = if format == BookFormat::Comic {
+                    Self::refine_zip_as_epub(path).unwrap_or(format)
+                } else if format == BookFormat::Epub {
+                    format
+                } else {
+                    format
+                };
                 return Ok(FormatDetectionResult {
                     format,
                     method: DetectionMethod::Extension,
@@ -97,7 +106,11 @@ impl BookSourceLoader {
             .with_context(|| "读取文件头失败")?;
 
         if bytes_read >= 4 {
-            let format = BookFormat::from_magic(&magic);
+            let mut format = BookFormat::from_magic(&magic);
+            // ZIP 容器：有 EPUB 结构 → Epub，否则 Comic
+            if format == BookFormat::Comic && magic.starts_with(b"PK") {
+                format = Self::refine_zip_as_epub(path).unwrap_or(BookFormat::Comic);
+            }
             if format != BookFormat::Unknown {
                 return Ok(FormatDetectionResult {
                     format,
@@ -122,6 +135,26 @@ impl BookSourceLoader {
             method: DetectionMethod::Default,
             confidence: 0.5,
         })
+    }
+
+    /// ZIP 是否实为 EPUB：看 `mimetype` 条目或 `META-INF/container.xml`。
+    /// 打开失败/非 ZIP → None（维持 Comic）。
+    fn refine_zip_as_epub(path: &Path) -> Option<BookFormat> {
+        use std::io::Read;
+        let file = File::open(path).ok()?;
+        let mut archive = zip::ZipArchive::new(file).ok()?;
+        if let Ok(mut m) = archive.by_name("mimetype") {
+            let mut buf = String::new();
+            if m.read_to_string(&mut buf).is_ok()
+                && buf.trim() == "application/epub+zip"
+            {
+                return Some(BookFormat::Epub);
+            }
+        }
+        if archive.by_name("META-INF/container.xml").is_ok() {
+            return Some(BookFormat::Epub);
+        }
+        Some(BookFormat::Comic)
     }
 
     /// 检测内容是否为文本
@@ -172,6 +205,11 @@ impl BookSourceLoader {
             BookFormat::Epub => {
                 let parser = EpubParser::from_file(path)
                     .with_context(|| "创建 EPUB 解析器失败")?;
+                Ok(Box::new(parser))
+            }
+            BookFormat::Comic => {
+                let parser = crate::comic_archive::ComicArchiveParser::from_file(path)
+                    .with_context(|| "创建压缩包漫画解析器失败")?;
                 Ok(Box::new(parser))
             }
             BookFormat::Pdf | BookFormat::Mobi => {
@@ -231,13 +269,14 @@ mod tests {
     #[test]
     fn test_detect_epub_by_magic_number() {
         let mut tmp = NamedTempFile::new().unwrap();
-        // EPUB magic: PK\x03\x04
+        // ZIP magic: PK\x03\x04 —— 无 EPUB 结构时判 Comic
         tmp.write_all(b"PK\x03\x04\x00\x00\x00\x00").unwrap();
         // 使用无扩展名的临时文件
         let path = tmp.path().to_path_buf();
 
         let result = BookSourceLoader::detect_format_detailed(&path).unwrap();
-        assert_eq!(result.format, BookFormat::Epub);
+        // 裸 ZIP（无 mimetype/container.xml）→ Comic
+        assert_eq!(result.format, BookFormat::Comic);
         assert_eq!(result.method, DetectionMethod::MagicNumber);
     }
 

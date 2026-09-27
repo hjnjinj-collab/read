@@ -256,6 +256,8 @@ impl ChapterInfo {
 pub enum BookFormat {
     Txt,
     Epub,
+    /// 压缩包漫画（cbz/zip/cbr/rar）：图片列表 → 章/页
+    Comic,
     Pdf,
     Mobi,
     Unknown,
@@ -267,6 +269,9 @@ impl BookFormat {
         match ext.to_lowercase().as_str() {
             "txt" | "text" => BookFormat::Txt,
             "epub" => BookFormat::Epub,
+            // 压缩包漫画：cbz/cbr 业界标准；裸 zip/rar 也按漫画包处理
+            // （有 mimetype 的 epub 由 detect 逻辑优先判 Epub）
+            "cbz" | "zip" | "cbr" | "rar" => BookFormat::Comic,
             "pdf" => BookFormat::Pdf,
             "mobi" | "azw" | "azw3" => BookFormat::Mobi,
             _ => BookFormat::Unknown,
@@ -274,11 +279,19 @@ impl BookFormat {
     }
 
     /// 从 Magic Number 推断格式
+    ///
+    /// **ZIP 歧义**：`PK\x03\x04` 既可是 EPUB 也可是漫画包。此处对裸 ZIP
+    /// 返回 `Comic`（更常见于漫画）；扩展名 `.epub` 或包内
+    /// `mimetype`/`META-INF/container.xml` 由 `loader` 纠正为 Epub。
     pub fn from_magic(magic: &[u8]) -> Self {
         if magic.len() >= 4 {
-            // EPUB 是 ZIP 格式，以 PK\x03\x04 开头
-            if magic.starts_with(b"PK\x03\x04") {
-                return BookFormat::Epub;
+            // ZIP 容器：默认 Comic，loader 再识别 EPUB 结构
+            if magic.starts_with(b"PK\x03\x04") || magic.starts_with(b"PK\x05\x06") {
+                return BookFormat::Comic;
+            }
+            // RAR（RAR4 `Rar!\x1A\x07` / RAR5 `Rar!\x1A\x07\x01`）
+            if magic.starts_with(b"Rar!\x1A\x07") {
+                return BookFormat::Comic;
             }
             // PDF 以 %PDF 开头
             if magic.starts_with(b"%PDF") {
@@ -297,6 +310,7 @@ impl BookFormat {
         match self {
             BookFormat::Txt => "txt",
             BookFormat::Epub => "epub",
+            BookFormat::Comic => "cbz",
             BookFormat::Pdf => "pdf",
             BookFormat::Mobi => "mobi",
             BookFormat::Unknown => "unknown",
@@ -308,6 +322,7 @@ impl BookFormat {
         match self {
             BookFormat::Txt => "TXT 文本",
             BookFormat::Epub => "EPUB 电子书",
+            BookFormat::Comic => "压缩包漫画",
             BookFormat::Pdf => "PDF 文档",
             BookFormat::Mobi => "MOBI 电子书",
             BookFormat::Unknown => "未知格式",
@@ -316,12 +331,20 @@ impl BookFormat {
 
     /// 是否支持章节提取
     pub fn supports_chapters(&self) -> bool {
-        matches!(self, BookFormat::Txt | BookFormat::Epub)
+        matches!(
+            self,
+            BookFormat::Txt | BookFormat::Epub | BookFormat::Comic
+        )
     }
 
     /// 是否支持资源获取（图片、字体等）
     pub fn supports_resources(&self) -> bool {
-        matches!(self, BookFormat::Epub)
+        matches!(self, BookFormat::Epub | BookFormat::Comic)
+    }
+
+    /// 是否为图片页阅读（漫画：一页一图，无文字排版）
+    pub fn is_image_book(&self) -> bool {
+        matches!(self, BookFormat::Comic)
     }
 }
 
@@ -341,6 +364,10 @@ mod tests {
         assert_eq!(BookFormat::from_extension("TXT"), BookFormat::Txt);
         assert_eq!(BookFormat::from_extension("epub"), BookFormat::Epub);
         assert_eq!(BookFormat::from_extension("EPUB"), BookFormat::Epub);
+        assert_eq!(BookFormat::from_extension("cbz"), BookFormat::Comic);
+        assert_eq!(BookFormat::from_extension("zip"), BookFormat::Comic);
+        assert_eq!(BookFormat::from_extension("cbr"), BookFormat::Comic);
+        assert_eq!(BookFormat::from_extension("rar"), BookFormat::Comic);
         assert_eq!(BookFormat::from_extension("pdf"), BookFormat::Pdf);
         assert_eq!(BookFormat::from_extension("mobi"), BookFormat::Mobi);
         assert_eq!(BookFormat::from_extension("azw3"), BookFormat::Mobi);
@@ -349,9 +376,14 @@ mod tests {
 
     #[test]
     fn test_book_format_from_magic() {
+        // 裸 ZIP 默认 Comic（EPUB 由 loader 看 mimetype/container 纠正）
         assert_eq!(
             BookFormat::from_magic(b"PK\x03\x04\x00\x00\x00\x00"),
-            BookFormat::Epub
+            BookFormat::Comic
+        );
+        assert_eq!(
+            BookFormat::from_magic(b"Rar!\x1A\x07\x00"),
+            BookFormat::Comic
         );
         assert_eq!(
             BookFormat::from_magic(b"%PDF-1.4"),

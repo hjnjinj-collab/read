@@ -267,7 +267,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage>
     try {
       final files = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['txt', 'epub'],
+        allowedExtensions: ['txt', 'epub', 'cbz', 'zip', 'cbr', 'rar'],
       );
       if (files.isEmpty || files.first.path == null) return;
       final filePath = files.first.path!;
