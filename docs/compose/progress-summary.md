@@ -1,6 +1,6 @@
 # 项目进度总结（progress summary）
 
-> 更新：2026-09-25 ｜ 仓库：`D:\android\example\legado_flutter` ｜ 分支：`master`
+> 更新：2026-09-27 ｜ 仓库：`D:\android\example\legado_flutter` ｜ 分支：`master`
 > 用途：重开会话时先读本文件 +「进度文件清单」。
 >
 > **Compose Next 恢复**：若续跑 `/compose-next` 而指令不在上下文，先重新加载 `compose-next` skill。
@@ -19,8 +19,9 @@
 | 字体 | 选择生效、已导入列表、液态弹层 | **已交付** |
 | 翻页稳定性 | 资源就绪轮询、看门狗、邻居预热 | **已交付** |
 | 日志体系 | 环形缓冲 15min + 分类过滤 + 导出选路径 | **已交付** |
+| 字距进 FFI | `LayoutConfig.letter_spacing` 真实折行 + justify 扣字距 | **已交付** |
 
-远端：`origin/master` 落后本地约 **25 commits**（本轮将推送）。
+远端：`origin/master` 落后本地（字距 FFI 本轮待提交/推送）。
 
 ---
 
@@ -35,7 +36,8 @@
 
 ### 排版
 - 子页签：**字体**（字体/字号/字重四档/斜体）· **正文**（间距+段落）· **颜色**（强调）· **布局**
-- 字距：拖动即时生效（不缩放字形）；`layoutPadH` 参与折行并触发重排
+- 字距：进 FFI（`LayoutConfig.letter_spacing`）；判满 `natural+ls×n`；justify 先扣 `ls×n`；MeasureCache 恒自然宽
+- 命中测试/选区/脚注与主绘制同口径 `letterGap+userLS`；拖动预览仅绘制，松手重排
 - 字体：FontLoader 成功即切换；已导入字体列表；`showShellColorPicker`/`PaperColorPicker` 同源
 
 ### 背景 / 主题
@@ -53,7 +55,7 @@
 ## 三、下一步计划（优先级）
 
 1. **真机回归**：连翻 EPUB 图多章节——动画是否跟手、是否仍卡 pending
-2. **字距 FFI**：`LayoutConfig.letter_spacing` 仍为 0，仅用 padding 近似折行；长期应进 Rust
+2. **真机回归字距**：调字距后折行/justify 是否正确（本轮已进 FFI，待设备验收）
 3. **T2.5 字体 sheet 增强**：系统字体列表、文件网格排序
 4. **T1.3 悬浮圆键排**：间距 8、居中、溢出更多（与工具排网格对齐）
 5. **spec 收口**：`reader-menu-chrome-ia.md` Tasks 勾选与 Report
@@ -69,6 +71,7 @@
 - 翻页资源：`usableForAnimation` 需 ready/failed；**挂起时轮询**，勿过早直翻
 - 噪声事件只压控制台；**文件/环形缓冲全量**（导出可回溯）
 - `shellFrostLiquidStyle` 唯一折射；大面板 `strength: 1`
+- **字距**：MeasureCache 恒自然宽；判满/justify 才计 `ls`；轻量 setter 须 **await** `_syncParagraphFormat` 再 reload
 - `flutter analyze` 基线：约 **20+ PRE-EXISTING** info/warning
 - master 主 worktree；**push 仅在用户明确要求时**
 
@@ -80,6 +83,7 @@
 |--------|------|------|
 | **P0** | `docs/compose/progress-summary.md` | 本文件 |
 | **P0** | `docs/compose/spec/reader-menu-chrome-ia.md` | 菜单契约 + T0–T3 |
+| **P0** | `docs/compose/spec/letter-spacing-ffi.md` | 字距进 FFI（本轮） |
 | **P0** | `docs/compose/spec/gear-capsule-face-and-menu-veil.md` | 齿轮/渐变历史 |
 | P1 | `docs/compose/spec/reader-statusbar-immersive-glass.md` | 沉浸 + 液态同源 |
 | P1 | `docs/BUGFIX_INDEX.md` | Impeller BF 等 |
