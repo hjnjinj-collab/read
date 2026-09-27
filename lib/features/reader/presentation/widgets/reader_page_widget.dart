@@ -342,7 +342,7 @@ class PageContentRenderer {
         fontSize: baseFontSize * baseScale,
         height: baseLineHeight,
         fontFamily: ReaderFont.family,
-        letterSpacing: entry.letterGap,
+        letterSpacing: entry.letterGap + PageContentRenderer.userLetterSpacing,
       );
       final children = <InlineSpan>[];
       var cursor = 0;
@@ -358,7 +358,8 @@ class PageContentRenderer {
                 fontSize: baseFontSize * (seg.fontScale ?? baseScale),
                 height: baseLineHeight,
                 fontFamily: ReaderFont.family,
-                letterSpacing: seg.letterSpacing ?? entry.letterGap,
+                letterSpacing: (seg.letterSpacing ?? entry.letterGap) +
+                    PageContentRenderer.userLetterSpacing,
                 fontFeatures: seg.footnoteRef != null
                     ? const [FontFeature.superscripts()]
                     : null,

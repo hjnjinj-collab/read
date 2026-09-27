@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/reader_font.dart';
 import '../providers/reader_provider.dart';
+import 'reader_page_widget.dart' show PageContentRenderer;
 
 /// A31: 文本选区 Overlay（重命名为 ReaderSelectionOverlay 避免与 Flutter 内置 TextSelectionOverlay 冲突）
 ///
@@ -106,7 +107,8 @@ class _ReaderSelectionOverlayState extends ConsumerState<ReaderSelectionOverlay>
         fontSize: widget.baseFontSize * (entry.fontScale ?? 1.0),
         height: widget.baseLineHeight,
         fontFamily: ReaderFont.family,
-        letterSpacing: entry.letterGap,
+        letterSpacing:
+            entry.letterGap + PageContentRenderer.userLetterSpacing,
       );
       final textPainter = TextPainter(
         text: TextSpan(text: text, style: baseStyle),

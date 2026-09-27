@@ -38,20 +38,24 @@ pub fn is_word_char(c: char) -> bool {
 
 /// 两端对齐空隙分配：返回每字符 letterSpacing（px）
 ///
-/// - `natural_width`：禁则/整词回退完成后的最终行文本实测宽度
+/// - `natural_width`：禁则/整词回退完成后的最终行文本实测宽度（**自然宽**，不含用户字距）
 /// - `available_width`：本行可用宽度（首行含缩进折减后的有效宽度）
 /// - `n_chars`：行字符总数（含拉丁字符——Flutter 行尾字符也加一个间隙，
 ///   除以总数右缘才精确贴合）
+/// - `letter_spacing`：用户字距（px）；绘制端 `letterSpacing = gap + user_ls`，
+///   故 slack 须先扣除 `user_ls * n`，否则正字距时系统性溢出
 pub fn justify_gap(
     natural_width: f32,
     available_width: f32,
     n_chars: usize,
     font_size: f32,
+    letter_spacing: f32,
 ) -> f32 {
     if n_chars < 2 {
         return 0.0;
     }
-    let slack = available_width - natural_width;
+    let used_by_ls = letter_spacing * n_chars as f32;
+    let slack = available_width - natural_width - used_by_ls;
     // 已超宽（epsilon 溢出行）或短行豁免（富余 > 40% 行宽）
     if slack <= 0.0 || slack > available_width * 0.4 {
         return 0.0;
@@ -123,15 +127,26 @@ mod tests {
     #[test]
     fn justify_gap_short_line_exemption() {
         // 富余 > 40% 行宽 → 不分配
-        assert_eq!(justify_gap(100.0, 200.0, 10, 18.0), 0.0);
+        assert_eq!(justify_gap(100.0, 200.0, 10, 18.0, 0.0), 0.0);
         // 富余 20 行宽 → 每字符 4px
-        assert!((justify_gap(160.0, 200.0, 10, 18.0) - 4.0).abs() < 1e-4);
+        assert!((justify_gap(160.0, 200.0, 10, 18.0, 0.0) - 4.0).abs() < 1e-4);
         // 单字间隙超半字 → 不分配（gap=25 > 18/2）
-        assert_eq!(justify_gap(160.0, 200.0, 2, 18.0), 0.0);
+        assert_eq!(justify_gap(160.0, 200.0, 2, 18.0, 0.0), 0.0);
         // 单字符行不分配
-        assert_eq!(justify_gap(0.0, 200.0, 1, 18.0), 0.0);
+        assert_eq!(justify_gap(0.0, 200.0, 1, 18.0, 0.0), 0.0);
         // 已超宽不分配
-        assert_eq!(justify_gap(210.0, 200.0, 10, 18.0), 0.0);
+        assert_eq!(justify_gap(210.0, 200.0, 10, 18.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn justify_gap_accounts_for_user_letter_spacing() {
+        // 自然 160、可用 200、10 字：若忽略字距 gap=4，绘制 (4+2)*10=60 → 总宽 220 溢出。
+        // 扣除 user_ls*n 后 gap=(200-160-20)/10=2 → 绘制 (2+2)*10=40 → 总宽 200。
+        let gap = justify_gap(160.0, 200.0, 10, 18.0, 2.0);
+        assert!((gap - 2.0).abs() < 1e-4, "gap={}", gap);
+        // 负字距：slack 变大，gap 增加以填满
+        let gap_neg = justify_gap(160.0, 200.0, 10, 18.0, -1.0);
+        assert!((gap_neg - 5.0).abs() < 1e-4, "gap_neg={}", gap_neg);
     }
 
     #[test]

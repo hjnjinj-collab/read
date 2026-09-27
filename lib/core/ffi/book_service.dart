@@ -775,6 +775,7 @@ class BookService {
   ///
   /// Dart 侧调用：用户在设置 UI 修改段落格式时通过此方法同步 Rust 全局
   /// 设置，随后 FFI 分页调用自动应用。配合 paraFormatHash 作为缓存键。
+  /// letter_spacing：用户字距（px）；Rust 判满/justify 计入，MeasureCache 不含。
   Future<void> setParagraphFormatSettings({
     required bool enableIndent,
     required int indentSizeChars,
@@ -785,6 +786,7 @@ class BookService {
     required bool justify,
     required bool punctuationCompress,
     double commentScale = 0.82,
+    double letterSpacing = 0.0,
   }) async {
     await rust_api.setParagraphFormatSettings(
       enableIndent: enableIndent,
@@ -796,6 +798,7 @@ class BookService {
       justify: justify,
       punctuationCompress: punctuationCompress,
       commentScale: commentScale,
+      letterSpacing: letterSpacing,
     );
   }
 

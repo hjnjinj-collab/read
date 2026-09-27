@@ -474,6 +474,7 @@ impl LayoutEngine {
                         content_width,
                         line_char_count,
                         self.config.font_size,
+                        self.config.letter_spacing,
                     )
                 } else {
                     0.0
@@ -816,6 +817,7 @@ impl LayoutEngine {
                                 avail,
                                 line.text.chars().count(),
                                 self.config.font_size,
+                                self.config.letter_spacing,
                             )
                         } else {
                             0.0
@@ -1282,9 +1284,11 @@ impl LayoutEngine {
             let candidate = &text[..end_byte];
             // M12：find_longest_fit 在 TXT 路径，effective_font_size = config.font_size
             let w = self.measure_text_width(candidate, self.config.font_size);
+            // 字距：Flutter n 字 n 隙，判满须计入用户 letterSpacing
+            let w_spaced = self.spaced_width(w, mid);
 
             // M12 修复：允许在 epsilon 范围内超出，让行更满
-            if w <= max_width + eps {
+            if w_spaced <= max_width + eps {
                 best_end_char = mid;
                 low = mid + 1;
             } else {
@@ -1316,7 +1320,8 @@ impl LayoutEngine {
                 let w_full = self.measure_text_width(candidate, self.config.font_size);
                 let natural = self.measure_text_width(&next_ch.to_string(), self.config.font_size);
                 let discount = kinsoku::compression_discount(natural);
-                if w_full - discount <= max_width + eps {
+                let w_full_spaced = self.spaced_width(w_full, ext_end_char);
+                if w_full_spaced - discount <= max_width + eps {
                     best_end_char = ext_end_char;
                 }
             }
@@ -1412,36 +1417,36 @@ impl LayoutEngine {
     /// 调用方传入 `config.font_size * scale`，让 Rust 端 cache key 与 Dart 端
     /// `MeasureTextService.configure(fontSize: ...)` 对齐。
     /// font_scale!=1.0 的章节标题/评论行也能命中。
+    ///
+    /// **字距红线**：恒返回**自然宽**（不含 `config.letter_spacing`）。
+    /// MeasureCache 只存自然宽；用户字距在判满/justify 处单独计入
+    /// （Flutter n 字 n 隙语义），避免缓存污染与双重计量。
     pub fn measure_text_width(&self, text: &str, font_size: f32) -> f32 {
         if text.is_empty() {
             return 0.0;
         }
-        // 优先查 MeasureCache（命中 = Skia 真实宽度）
+        // 优先查 MeasureCache（命中 = Skia 真实自然宽）
         if let Some(w) = self
             .measure_cache
             .get(&self.config.font_name, font_size, text)
         {
             return w;
         }
-        // miss → 用 ttf-parser 累加（带 letter_spacing 同步逻辑）
-        let letter_spacing = self.config.letter_spacing;
+        // miss → 用 ttf-parser 累加自然宽
         let mut total = 0.0f32;
-        let mut count = 0usize;
         for ch in text.chars() {
-            let w = self.get_char_width_inner(ch, font_size);
-            // 与原版一致：letter_spacing 加到每个字符（含最后一个，潜在 bug 但保留以不破坏锚点）
-            total += w + letter_spacing;
-            count += 1;
-        }
-        // 与原 layout_paragraph 一致：最后字符不加 letter_spacing，避免多算一次
-        if count > 0 {
-            total -= letter_spacing;
+            total += self.get_char_width_inner(ch, font_size);
         }
         // M12 必修3：兜底放在 emit_line! 内，不在这里。理由：
         // 二分搜索路径需 raw 宽度做 `w <= max_width - eps` 判定，
         // 在这里截断会破坏二分收敛（test_multi_page_layout 在 fallback 字体下失败）。
         // emit_line! 处仅对 TextLine.width 报告值做 min 截断，让 line.width <= content_width。
         total
+    }
+
+    /// 用户字距计入后的行宽（Flutter letterSpacing：n 字 n 隙，含行尾）
+    fn spaced_width(&self, natural: f32, n_chars: usize) -> f32 {
+        natural + self.config.letter_spacing * n_chars as f32
     }
 
     /// content_width 内部辅助（M12 必修3 用）
@@ -1720,6 +1725,7 @@ impl LayoutEngine {
                         avail,
                         line.text.chars().count(),
                         self.config.font_size,
+                        self.config.letter_spacing,
                     );
                 }
             }
@@ -1793,7 +1799,9 @@ impl LayoutEngine {
 
         for end in (start_chars + 1)..=seg_end {
             let w = self.measure_styled_prefix_width(item, start_chars, end);
-            if w <= max_width + eps {
+            // 字距：n 字 n 隙（含行尾），与 TXT find_longest_fit 同口径
+            let w_spaced = self.spaced_width(w, end - start_chars);
+            if w_spaced <= max_width + eps {
                 best = end;
                 best_w = w;
             } else {
@@ -1818,7 +1826,8 @@ impl LayoutEngine {
                         * Self::scale_at(&item.runs, item.font_scale, best),
                 );
                 let discount = kinsoku::compression_discount(natural);
-                if w_full - discount <= max_width + eps {
+                let w_full_spaced = self.spaced_width(w_full, ext_end - start_chars);
+                if w_full_spaced - discount <= max_width + eps {
                     best = ext_end;
                     best_w = w_full;
                 }
@@ -3507,6 +3516,59 @@ mod tests {
             "关闭压缩时行首禁则回退应拉回 1 字（实得 {} 字）",
             lines2[0].chars().count()
         );
+    }
+
+    #[test]
+    fn letter_spacing_shrinks_line_capacity() {
+        // 字距 FFI：正字距 → 行字数减少；负字距 → 行字数增加。
+        // 实测口径 fs=16/cw=280/eps=5：自然 ~17 字/行。
+        let para = "甲".repeat(40);
+
+        let (mut engine0, _) = create_test_engine();
+        engine0.config.letter_spacing = 0.0;
+        let lines0 = engine0.layout_paragraph_with_oracle(&para, 280.0).unwrap();
+        let n0 = lines0[0].chars().count();
+
+        let (mut engine_pos, _) = create_test_engine();
+        engine_pos.config.letter_spacing = 4.0;
+        let lines_pos = engine_pos.layout_paragraph_with_oracle(&para, 280.0).unwrap();
+        let n_pos = lines_pos[0].chars().count();
+        assert!(
+            n_pos < n0,
+            "正字距应减少行字数：ls=0 → {} 字，ls=4 → {} 字",
+            n0,
+            n_pos
+        );
+
+        let (mut engine_neg, _) = create_test_engine();
+        engine_neg.config.letter_spacing = -2.0;
+        let lines_neg = engine_neg.layout_paragraph_with_oracle(&para, 280.0).unwrap();
+        let n_neg = lines_neg[0].chars().count();
+        assert!(
+            n_neg > n0,
+            "负字距应增加行字数：ls=0 → {} 字，ls=-2 → {} 字",
+            n0,
+            n_neg
+        );
+    }
+
+    #[test]
+    fn measure_text_width_ignores_letter_spacing() {
+        // MeasureCache 红线：measurement 恒自然宽，用户字距不得进测宽
+        let (mut engine, _) = create_test_engine();
+        let text = "字距测试行";
+        let w0 = engine.measure_text_width(text, 16.0);
+        engine.config.letter_spacing = 4.0;
+        let w1 = engine.measure_text_width(text, 16.0);
+        assert!(
+            (w0 - w1).abs() < 1e-3,
+            "measure_text_width 不应随 letter_spacing 变化：{} vs {}",
+            w0,
+            w1
+        );
+        // spaced_width 才计入字距（n 字 n 隙）
+        let spaced = engine.spaced_width(w1, text.chars().count());
+        assert!((spaced - (w1 + 4.0 * 5.0)).abs() < 1e-3);
     }
 
     #[test]

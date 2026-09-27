@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/reader_font.dart';
 import '../providers/reader_provider.dart';
+import 'reader_page_widget.dart' show PageContentRenderer;
 
 /// A31-v4: 选区高亮独立覆盖层
 ///
@@ -46,7 +47,7 @@ class SelectionHighlightPainter extends CustomPainter {
         fontSize: baseFontSize * (entry.fontScale ?? 1.0),
         height: baseLineHeight,
         fontFamily: ReaderFont.family,
-        letterSpacing: entry.letterGap,
+        letterSpacing: entry.letterGap + PageContentRenderer.userLetterSpacing,
       );
       final textPainter = TextPainter(
         text: TextSpan(text: text, style: baseStyle),

@@ -332,6 +332,7 @@ mod tests {
             justify: false,
             punctuation_compress: false,
             comment_scale: 0.82,
+            letter_spacing: 0.0,
         }
     }
 

@@ -265,6 +265,7 @@ fn layout_fingerprint(key: &StructuredPageKey) -> u64 {
     key.page_fill_threshold_bits.hash(&mut h);
     key.show_comments.hash(&mut h);
     key.comment_scale_bits.hash(&mut h);
+    key.letter_spacing_bits.hash(&mut h);
     key.para_format_hash.hash(&mut h);
     key.remove_duplicate_title.hash(&mut h);
     key.rules_hash.hash(&mut h);
@@ -439,6 +440,8 @@ struct StructuredPageKey {
     show_comments: bool,
     /// 注释字号倍率 bits（0.70–1.00；变更即换键）
     comment_scale_bits: u32,
+    /// 字距 bits（变更即换键；与 TXT pagination_cache 同口径双保险）
+    letter_spacing_bits: u32,
     /// M9 段落格式化设置哈希（缩进/重分段/间距变更即换键）
     para_format_hash: u64,
     /// A30c：去重标题开关（变更即换键自然重算）
@@ -484,6 +487,7 @@ impl StructuredPageKey {
             page_fill_threshold_bits: config.page_fill_threshold.to_bits(),
             show_comments: config.show_comments,
             comment_scale_bits: config.comment_scale.to_bits(),
+            letter_spacing_bits: config.letter_spacing.to_bits(),
             para_format_hash,
             remove_duplicate_title,
             rules_hash,
@@ -551,6 +555,15 @@ fn effective_justify() -> bool {
 /// P3：行尾标点压缩悬挂开关（单源同上）
 fn effective_punct_compress() -> bool {
     PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().punctuation_compress
+}
+
+/// 字距 FFI：用户字距（px）单源。写入全部 LayoutConfig.letter_spacing。
+fn effective_letter_spacing() -> f32 {
+    PARAGRAPH_FORMAT_SETTINGS
+        .lock()
+        .unwrap()
+        .letter_spacing
+        .clamp(-2.0, 8.0)
 }
 
 /// A34.1：注释行字号倍率（单源同上；钳制 [0.70, 1.00]）
@@ -953,6 +966,7 @@ pub fn set_paragraph_format_settings(
     justify: bool,
     punctuation_compress: bool,
     comment_scale: f32,
+    letter_spacing: f32,
 ) -> anyhow::Result<()> {
     let mut settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap();
     settings.enable_indent = enable_indent;
@@ -968,6 +982,8 @@ pub fn set_paragraph_format_settings(
     settings.justify = justify;
     settings.punctuation_compress = punctuation_compress;
     settings.comment_scale = comment_scale.clamp(0.70, 1.00);
+    // 字距：与 Dart 滑杆同一钳制，供判满/justify 消费
+    settings.letter_spacing = letter_spacing.clamp(-2.0, 8.0);
     // 阈值变更会改变 TXT 预处理 Stage2 输出：清空预处理缓存，防陈旧命中
     // （分页缓存由 para_format_hash 换键；预处理缓存键已含阈值，此处双保险）
     if old_threshold != settings.smart_split_threshold {
@@ -1159,7 +1175,7 @@ pub fn batch_locate_notes(
             bottom: padding_bottom,
         },
         font_name: font_name.clone(),
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
@@ -2052,7 +2068,7 @@ pub fn layout_chapter(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
@@ -2098,7 +2114,7 @@ pub fn get_page(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
@@ -2154,7 +2170,7 @@ pub fn get_page_count(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold,
         show_comments: true,
@@ -2218,7 +2234,7 @@ pub fn get_page_processed(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
@@ -2309,7 +2325,7 @@ pub fn get_page_count_processed(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments: true,
@@ -3131,7 +3147,7 @@ fn structured_layout_config(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: effective_paragraph_spacing(font_size),
         page_fill_threshold,
         show_comments,
@@ -4124,7 +4140,7 @@ pub fn get_page_cached(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
@@ -4179,7 +4195,7 @@ pub fn get_page_count_cached(
             bottom: padding_bottom,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
@@ -4234,7 +4250,7 @@ pub fn get_page_cached_processed(
             bottom: padding_bottom,
         },
         font_name: font_name.clone(),
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
@@ -4418,7 +4434,7 @@ pub fn create_reading_session(
             bottom: 20.0,
         },
         font_name,
-        letter_spacing: 0.0,
+        letter_spacing: effective_letter_spacing(),
         paragraph_spacing: font_size * 0.8,
         page_fill_threshold: 0.9,
         show_comments: true,
@@ -5050,6 +5066,7 @@ mod tests {
             justify: false,
             punctuation_compress: false,
             comment_scale: 0.82,
+            letter_spacing: 0.0,
         }
     }
 

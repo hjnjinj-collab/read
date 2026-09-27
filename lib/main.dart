@@ -89,6 +89,7 @@ void main() async {
       justify: settings.justify,
       punctuationCompress: settings.punctuationCompress,
       commentScale: settings.commentScale,
+      letterSpacing: settings.letterSpacing,
     );
   } catch (_) {}
 

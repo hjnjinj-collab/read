@@ -3179,6 +3179,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
             let api_justify = <bool>::sse_decode(&mut deserializer);
             let api_punctuation_compress = <bool>::sse_decode(&mut deserializer);
             let api_comment_scale = <f32>::sse_decode(&mut deserializer);
+            let api_letter_spacing = <f32>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -3193,6 +3194,7 @@ fn wire__crate__api__set_paragraph_format_settings_impl(
                             api_justify,
                             api_punctuation_compress,
                             api_comment_scale,
+                            api_letter_spacing,
                         )?;
                         Ok(output_ok)
                     })(),

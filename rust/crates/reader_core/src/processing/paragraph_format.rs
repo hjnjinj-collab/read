@@ -54,6 +54,9 @@ pub struct ParagraphFormatSettings {
     pub punctuation_compress: bool,
     /// 注释行字号倍率（0.70–1.00；默认 0.82）。进布局行高与分页缓存键。
     pub comment_scale: f32,
+    /// 用户字距（px，[-2, 8]；默认 0）。Flutter 语义：每字符（含行尾）加间隙。
+    /// 只进判满预算与 justify 空隙，不进 MeasureCache（自然宽红线）。
+    pub letter_spacing: f32,
 }
 
 impl Default for ParagraphFormatSettings {
@@ -68,6 +71,7 @@ impl Default for ParagraphFormatSettings {
             justify: false,
             punctuation_compress: false,
             comment_scale: 0.82,
+            letter_spacing: 0.0,
         }
     }
 }
@@ -99,6 +103,7 @@ impl ParagraphFormatSettings {
         self.justify.hash(&mut hasher);
         self.punctuation_compress.hash(&mut hasher);
         self.comment_scale.to_bits().hash(&mut hasher);
+        self.letter_spacing.to_bits().hash(&mut hasher);
         hasher.finish()
     }
 
@@ -166,6 +171,11 @@ mod tests {
         let mut s5 = s1.clone();
         s5.smart_split_threshold = 150;
         assert_ne!(s1.hash_value(), s5.hash_value());
+
+        // 字距 FFI：字距参与哈希（断行/justify 变更即换键）
+        let mut s6 = s1.clone();
+        s6.letter_spacing = 2.0;
+        assert_ne!(s1.hash_value(), s6.hash_value());
     }
 
     #[test]

@@ -670,6 +670,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       justify: _justify,
       punctuationCompress: _punctuationCompress,
       commentScale: _commentScale,
+      letterSpacing: _letterSpacing,
     );
     _paraFormatHash = _computeParaFormatHash();
     _renderStore.advanceSession(
@@ -716,15 +717,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
   void setJustify(bool v) {
     if (_justify == v) return;
     _justify = v;
-    unawaited(_syncParagraphFormat());
-    _reloadAfterLayoutChange('justify');
+    unawaited(() async {
+      await _syncParagraphFormat();
+      _reloadAfterLayoutChange('justify');
+    }());
   }
 
   void setPunctuationCompress(bool v) {
     if (_punctuationCompress == v) return;
     _punctuationCompress = v;
-    unawaited(_syncParagraphFormat());
-    _reloadAfterLayoutChange('punct');
+    unawaited(() async {
+      await _syncParagraphFormat();
+      _reloadAfterLayoutChange('punct');
+    }());
   }
 
   /// 边距：左右同源 padH，上下同源 padVertical（引擎当前两轴模型）
@@ -756,29 +761,26 @@ class ReaderNotifier extends Notifier<ReadingState> {
     state = state.copyWith(); // 触发 reader 页重建 → 新 painter 读到新字距
   }
 
-  /// 用户字距（px；绘制层叠加，不进 Rust 断行；**不改 fontFamily**）
+  /// 用户字距（px；绘制层叠加 + Rust 判满/justify 同步消费；**不改 fontFamily**）
   void setLetterSpacing(double v) {
     final x = v.clamp(-2.0, 8.0);
+    if ((_letterSpacing - x).abs() < 0.01) {
+      _persistSettings();
+      return;
+    }
     _letterSpacing = x;
     PageContentRenderer.userLetterSpacing = x;
     PageContentRenderer.themeRevision++;
-    _persistSettings();
-    // 字距改变行宽 → 必须重排分页（否则行溢出被硬裁）
-    _reloadAfterLayoutChange('letter-spacing');
+    // 字距进 FFI：必须等 Rust 全局 + para_format_hash 就绪再重排，
+    // 否则布局读到旧字距/旧缓存键（unawaited 会与 reload 赛跑）
+    unawaited(() async {
+      await _syncParagraphFormat();
+      _reloadAfterLayoutChange('letter-spacing');
+    }());
   }
 
-  /// 排版用水平边距：字距加宽字面后收窄内容区，让分页/折行重算。
-  /// （LayoutConfig.letter_spacing 仍为 0，用 padding 近似等效折行）
-  double get layoutPadH {
-    final ls = _letterSpacing;
-    if (ls.abs() < 0.05) return _paddingHorizontal;
-    final fontSize = _fontSize.clamp(12.0, 32.0);
-    final content =
-        (_screenWidth - 2 * _paddingHorizontal).clamp(80.0, _screenWidth);
-    // 每字加 ls → 约 content/fontSize 字/行，总加宽 ≈ ls * chars
-    final extra = (ls * (content / fontSize)).clamp(-24.0, 48.0);
-    return (_paddingHorizontal + extra / 2).clamp(0.0, 80.0);
-  }
+  /// 排版用水平边距：用户边距（字距已进 Rust LayoutConfig，不再用 padding 近似）
+  double get layoutPadH => _paddingHorizontal;
 
   /// 章节标题字号倍率（isChapterStart 行；纯绘制）
   void setTitleScale(double v) {
@@ -1095,6 +1097,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       justify: justify,
       punctuationCompress: punctuationCompress,
       commentScale: _commentScale,
+      letterSpacing: _letterSpacing,
     );
     _paraFormatHash = _computeParaFormatHash();
 
@@ -2609,7 +2612,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         fontSize: fontSize * (entry.fontScale ?? 1.0),
         height: lineHeight,
         fontFamily: ReaderFont.family,
-        letterSpacing: entry.letterGap,
+        letterSpacing: entry.letterGap + PageContentRenderer.userLetterSpacing,
       );
       final tp = TextPainter(
         text: TextSpan(text: text, style: baseStyle),
@@ -2651,7 +2654,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
       fontSize: fontSize * (entry.fontScale ?? 1.0),
       height: lineHeight,
       fontFamily: ReaderFont.family,
-      letterSpacing: entry.letterGap,
+      letterSpacing: entry.letterGap + PageContentRenderer.userLetterSpacing,
     );
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: baseStyle),
@@ -2795,6 +2798,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     h = h * 31 + (_punctuationCompress ? 1 : 0);
     // A34.1：注释字号倍率参与哈希（行高变化改变分页）
     h = h * 31 + (_commentScale * 1000).round();
+    // 字距 FFI：字距改变断行/justify，参与哈希换键
+    h = h * 31 + (_letterSpacing * 1000).round();
     return BigInt.from(h & 0x7FFFFFFFFFFFFFFF);
   }
 
