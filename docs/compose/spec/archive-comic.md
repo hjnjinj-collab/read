@@ -12,9 +12,9 @@ commits: # leave empty while in progress; fill at delivery
 
 **What was built** — 压缩包漫画全链路：`BookFormat::Comic`（cbz/zip/cbr/rar；ZIP 看 mimetype/container 区分 EPUB）；`comic_archive.rs` Zip + Rar 双后端（zip-slip/64MB/条目上限）；`ComicArchiveParser` 文件夹=章、图=页、自然排序、gallery 一页一图、封面；bridge 导入/分页/资源/格式；Dart 导入与排版占位。RAR 经 `unrar` 0.5.8（libunrar），Windows 链 `advapi32`。
 
-**Verification** — `cargo test --package book_parser --lib` 131 passed（含 comic/RAR 拒坏包）；`bridge` 19 passed（含 CBZ 集成）；`layout_engine` 95 passed；`fix_sync.ps1` 全量构建；`flutter analyze` 25 条基线。
+**Verification** — `cargo test --package book_parser --lib` 131 passed（含 comic/RAR 拒坏包）；`bridge` 19 passed（含 CBZ 集成）；`layout_engine` 95 passed；`fix_sync.ps1` 全量构建；`flutter analyze` 25 条基线；**`build_apk.ps1 -Abis arm64-v8a` 成功**（`app-arm64-v8a-release.apk` 47.1MB，含 libbridge.so）。
 
-**Journey log** — ZIP magic 与 EPUB 歧义必须用 mimetype/container 纠正。自然排序数值相同要比数字串长度（2 &lt; 002）。`unrar-rs` 依赖 reedsolomon-rs 要求 rustc 1.97（本机 1.95）→ 改用 `unrar` C 绑定并链接 advapi32。libunrar 流式无随机访问，read_entry 按名扫到目标再 `read()`。漫画分页复用 `LayoutItem::Image{gallery,bleed}`。
+**Journey log** — ZIP magic 与 EPUB 歧义必须用 mimetype/container 纠正。自然排序数值相同要比数字串长度（2 &lt; 002）。`unrar-rs` 依赖 reedsolomon-rs 要求 rustc 1.97（本机 1.95）→ 改用 `unrar` C 绑定并链接 advapi32。libunrar 流式无随机访问，read_entry 按名扫到目标再 `read()`。漫画分页复用 `LayoutItem::Image{gallery,bleed}`。**libunrar C++ 含 Win32 源，Android NDK 编不过 → RAR 仅 Windows；Android 仅 CBZ/ZIP**，`.cbr/.rar` 解析期明确报错。
 
 ## [S1] Problem
 

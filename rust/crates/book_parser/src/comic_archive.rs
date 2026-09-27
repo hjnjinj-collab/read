@@ -161,19 +161,28 @@ impl ArchiveReader for ZipArchiveReader {
     }
 }
 
-// ── Rar 后端（unrar crate / libunrar） ──
+// ── Rar 后端（仅 Windows：libunrar C++ 含 Win32 源，Android NDK 无法编译） ──
 
 /// RAR 是否可在本机解析
+#[cfg(windows)]
 pub fn rar_supported() -> bool {
     true
 }
 
+/// RAR 是否可在本机解析（Android/iOS 等：false，调用方给明确错误）
+#[cfg(not(windows))]
+pub fn rar_supported() -> bool {
+    false
+}
+
+#[cfg(windows)]
 pub struct RarArchiveReader {
     path: PathBuf,
     /// libunrar 流式句柄不可随机访问；每次 list/read 重开，用互斥串行化
     lock: std::sync::Mutex<()>,
 }
 
+#[cfg(windows)]
 impl RarArchiveReader {
     pub fn open(path: &Path) -> Result<Self> {
         unrar::Archive::new(path)
@@ -186,6 +195,7 @@ impl RarArchiveReader {
     }
 }
 
+#[cfg(windows)]
 impl ArchiveReader for RarArchiveReader {
     fn list_entries(&self) -> Result<Vec<ArchiveEntry>> {
         let _g = self.lock.lock().unwrap();
@@ -287,9 +297,16 @@ impl ComicArchiveParser {
         let reader: Box<dyn ArchiveReader> = match ext.as_str() {
             "rar" | "cbr" => {
                 if !rar_supported() {
-                    anyhow::bail!("暂不支持 RAR/CBR 压缩包（缺少解压后端）");
+                    anyhow::bail!("当前平台暂不支持 RAR/CBR（请转为 CBZ/ZIP）");
                 }
-                Box::new(RarArchiveReader::open(path)?)
+                #[cfg(windows)]
+                {
+                    Box::new(RarArchiveReader::open(path)?)
+                }
+                #[cfg(not(windows))]
+                {
+                    anyhow::bail!("当前平台暂不支持 RAR/CBR（请转为 CBZ/ZIP）");
+                }
             }
             _ => Box::new(ZipArchiveReader::open(path)?),
         };
@@ -593,15 +610,23 @@ mod tests {
 
     #[test]
     fn rar_backend_rejects_non_rar() {
+        if !rar_supported() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("fake.cbr");
         std::fs::write(&path, b"not a rar").unwrap();
         // 应明确失败而不是 panic
+        #[cfg(windows)]
         assert!(RarArchiveReader::open(&path).is_err());
     }
 
     #[test]
     fn rar_supported_flag() {
+        // Windows 启用；其它平台明确 false（APK 走 CBZ/ZIP）
+        #[cfg(windows)]
         assert!(rar_supported());
+        #[cfg(not(windows))]
+        assert!(!rar_supported());
     }
 }
