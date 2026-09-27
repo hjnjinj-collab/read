@@ -1,18 +1,27 @@
 ---
 feature: reader-menu-chrome-ia
 status: in-progress
-updated: 2026-09-23
+updated: 2026-09-25
 branch: master
-commits: c84cfa2..uncommitted
+commits: c84cfa2..d03b42a
 ---
 
-# 阅读菜单 Chrome · 双套布局（草稿）
+# 阅读菜单 Chrome · 双套布局
 
-> **本轮只出草稿**，不实现。对标：`D:\android\example\legado-with-MD3`
+> 对标：`D:\android\example\legado-with-MD3`
 > （`ReadBookMenuBar*` / `SystemMenuPage` / `ReadMenuConfig`）。
-> 真机截图对照：传统 MD3 底栏设置（字号/翻页方式/速度 + 工具图标排）。
 
 ## Report
+
+**进度（2026-09-25）** — Phase 1–2 主体已落地：A/B chrome、设置五页（含 Bug 收集）、排版/背景/字体接线、字距重排、翻页资源轮询与看门狗。详见 `docs/compose/progress-summary.md`。
+
+**Verification** — `flutter analyze` 无新增 error（基线 info/warning）；真机多轮 UI/翻页反馈已修。
+
+**Journey log**
+- 字距若导致行溢出，禁止 `canvas.scale` 缩字形；用 `layoutPadH` 近似折行
+- FrameSet.resourceState 会滞后 → 门控以 BookImageStore 实时状态为准
+- 资源未就绪：挂起轮询等动画，勿过早无动画直翻
+- 液态控件勿放进可滚 ListView（丢纹理）；过滤条固定头部
 
 **Journey log 补** — 真机模糊泄露：阅读 chrome 多枚 `LiquidGlassTabBarAction` 叠 BF 必漏；圆键改无 Lens 玻璃观感，模糊只留上下 `ReaderBlurVeil` 各一层。
 
