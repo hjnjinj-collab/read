@@ -894,14 +894,25 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 漫画整页图（gallery+bleed）：矩形铺满内容区，绘制端 cover——
-                    // 小图/扁图不再只占半页。EPUB 画廊（gallery 无 bleed）仍
-                    // 等比适配，便于图说叠在同页底部。
-                    if *gallery && *bleed {
-                        img_width = self.config.width;
+                    // 漫画经典排版（gallery+bleed）：
+                    // - 整宽下自然高 ≥ 70% 页高 → 独占整页拉伸铺满
+                    // - 否则（半页级小图）→ 整宽自然高上下拼页
+                    let comic_pack = *gallery && *bleed;
+                    let mut comic_solo_full = false;
+                    if comic_pack {
+                        let page_h = self.config.height;
+                        let full_w = self.config.width;
+                        let nat_h = full_w / ratio;
+                        img_width = full_w;
                         img_x = 0.0;
-                        // bleed 页首 y=0 贴顶：高度用整窗高；否则用内容区高
-                        img_height = self.config.height;
+                        if nat_h >= page_h * 0.70 {
+                            // 大图：独占一页拉伸
+                            comic_solo_full = true;
+                            img_height = page_h;
+                        } else {
+                            // 小图：按自然高度拼页
+                            img_height = nat_h;
+                        }
                     } else if *gallery {
                         img_width = content_width;
                         img_x = self.config.padding.left;
@@ -936,16 +947,27 @@ impl LayoutEngine {
                     }
                     }
 
-                    // 画廊：非空页则新起一页（每图一页；图说跟在同页）
-                    if *gallery && !entries.is_empty() {
+                    // EPUB 画廊：一图一页（图说可同页）；漫画拼页不强制
+                    if *gallery && !comic_pack && !entries.is_empty() {
                         break_page!();
                     }
-                    // 当前页放不下且页非空 → 翻页；翻页后仍放不下（整页高）
-                    // 则独占新页顶部。出血图在页首贴顶（y=0）
-                    if current_y + img_height > bottom_limit && !entries.is_empty() {
+                    // 大图独占：页非空先翻页
+                    if comic_solo_full && !entries.is_empty() {
                         break_page!();
                     }
-                    let y = if (*bleed || *gallery) && entries.is_empty() && text_lines_on_page == 0 {
+                    // 漫画小图：从页顶起拼，可用整窗高
+                    let comic_bottom = if comic_pack && !comic_solo_full {
+                        self.config.height
+                    } else {
+                        bottom_limit
+                    };
+                    if current_y + img_height > comic_bottom && !entries.is_empty() {
+                        break_page!();
+                    }
+                    let y = if (*bleed || comic_solo_full || comic_pack)
+                        && entries.is_empty()
+                        && text_lines_on_page == 0
+                    {
                         0.0
                     } else {
                         current_y
@@ -958,8 +980,12 @@ impl LayoutEngine {
                         width: img_width,
                         height: img_height,
                     }));
-                    // 图片不消耗字符锚点；图后留段间距
-                    current_y = y + img_height + self.config.paragraph_spacing;
+                    // 漫画小图紧拼；其余图后留段间距
+                    if comic_pack && !comic_solo_full {
+                        current_y = y + img_height;
+                    } else {
+                        current_y = y + img_height + self.config.paragraph_spacing;
+                    }
                 }
                 LayoutItem::Table(table) => {
                     // 表格前垂直留白（margin-top 百分比 × 内容高）
@@ -3198,13 +3224,13 @@ mod tests {
         assert!(img0.height > 0.0);
     }
 
-    /// 漫画 gallery+bleed：整页 cover，小图/扁图也铺满
+    /// 漫画 gallery+bleed：≥70% 页高的图独占整页拉伸
     #[test]
-    fn gallery_bleed_fills_full_content_box() {
+    fn gallery_bleed_tall_image_fills_full_page() {
         let (engine, cfg) = create_test_engine();
         let items = vec![LayoutItem::Image {
-            resource_href: "wide.jpg".into(),
-            aspect: 2.0, // 扁图：旧逻辑只占约半页高
+            resource_href: "tall.jpg".into(),
+            aspect: 0.5, // 竖图：整宽下自然高 = 2×宽 > 70% 页高
             width_percent: None,
             align: None,
             bleed: true,
@@ -3219,15 +3245,57 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let content_h = cfg.height - cfg.padding.top - cfg.padding.bottom;
         assert!(
             (img.height - cfg.height).abs() < 1.0,
-            "gallery+bleed 应铺满整窗高: img_h={} page_h={}",
+            "大图应铺满整窗高: img_h={} page_h={}",
             img.height,
             cfg.height
         );
         assert!((img.width - cfg.width).abs() < 1.0, "应铺满整窗宽");
-        let _ = content_h;
+    }
+
+    /// 漫画 gallery+bleed：半页级小图上下拼在同一页
+    #[test]
+    fn gallery_bleed_short_images_stack_on_one_page() {
+        let (engine, cfg) = create_test_engine();
+        // 整宽 300、aspect=1.5 → 自然高 200 ≈ 页高 400 的 50%
+        let items = vec![
+            LayoutItem::Image {
+                resource_href: "s1.jpg".into(),
+                aspect: 1.5,
+                width_percent: None,
+                align: None,
+                bleed: true,
+                gallery: true,
+            },
+            LayoutItem::Image {
+                resource_href: "s2.jpg".into(),
+                aspect: 1.5,
+                width_percent: None,
+                align: None,
+                bleed: true,
+                gallery: true,
+            },
+        ];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        assert_eq!(pages.len(), 1, "两张半页小图应拼在同页，实际 {} 页", pages.len());
+        let imgs: Vec<_> = pages[0]
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                PageEntry::Image(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(imgs.len(), 2);
+        assert!(imgs[1].y > imgs[0].y, "第二张应在第一张下方");
+        let nat_h = cfg.width / 1.5;
+        assert!(
+            (imgs[0].height - nat_h).abs() < 1.0,
+            "小图按自然高: {} vs {}",
+            imgs[0].height,
+            nat_h
+        );
     }
 
     /// A34.3：标题分割线 Hr → 内容区宽填充 Rect
