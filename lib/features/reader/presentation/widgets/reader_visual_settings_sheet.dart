@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1664,14 +1665,17 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
     } catch (_) {}
   }
 
-  Future<void> _notifyProgress(int pct, String text) async {
+  Future<void> _notifyProgress(int pct, String text,
+      {bool indeterminate = false}) async {
     try {
       await _channel.invokeMethod('showProgress', {
         'id': _notifyId,
         'title': 'OCR 模型下载',
         'text': text,
         'progress': pct,
-        'indeterminate': pct < 0,
+        'max': 100,
+        'indeterminate': indeterminate,
+        'done': false,
       });
     } catch (_) {}
   }
@@ -1684,6 +1688,58 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
         'text': text,
       });
     } catch (_) {}
+  }
+
+  /// 流式下载 → 临时文件 → 调 Rust **自动解压安装**（无感）
+  Future<void> _downloadAndInstall(String url) async {
+    final client = HttpClient();
+    final uri = Uri.parse(url);
+    final req = await client.getUrl(uri);
+    final resp = await req.close();
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw 'HTTP ${resp.statusCode}';
+    }
+    final total = resp.contentLength; // 可能为 -1
+    final tmpPath =
+        '${Directory.systemTemp.path}/ocr_model_${DateTime.now().millisecondsSinceEpoch}';
+    final file = File(tmpPath);
+    final sink = file.openWrite();
+    int received = 0;
+    int lastPct = -1;
+    await for (final chunk in resp) {
+      sink.add(chunk);
+      received += chunk.length;
+      if (total > 0) {
+        final pct = ((received * 100) / total).clamp(0, 99).toInt();
+        if (pct != lastPct) {
+          lastPct = pct;
+          await _notifyProgress(pct, '$pct%（${_fmtBytes(received)} / ${_fmtBytes(total)}）');
+        }
+      } else {
+        await _notifyProgress(-1, '已下载 ${_fmtBytes(received)}',
+            indeterminate: true);
+      }
+    }
+    await sink.flush();
+    await sink.close();
+    client.close();
+    // 交给 Rust：识别 zip/traineddata 并安装到模型目录（自动解压）
+    await BookService().installOcrModelFile(tmpPath);
+    try {
+      await file.delete();
+    } catch (_) {}
+    // 无感就绪：非对照模式时自动切 OCR 重排
+    if (_mode != 'compare') {
+      setState(() => _mode = 'reflow');
+      await BookService().setPdfScanMode(0);
+    }
+    await _notifyDone('安装完成，可切换扫描页为 OCR 重排');
+  }
+
+  static String _fmtBytes(int n) {
+    if (n < 1024) return '$n B';
+    if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
+    return '${(n / 1024 / 1024).toStringAsFixed(1)} MB';
   }
 
   @override
@@ -1753,27 +1809,28 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         final url = _urlCtrl.text.trim();
                         if (url.isEmpty) return;
                         setState(() => _busy = true);
-                        await _notifyProgress(-1, '开始下载…');
+                        await _notifyProgress(0, '开始下载…', indeterminate: true);
                         try {
-                          await BookService().downloadOcrModel(url);
-                          await _notifyDone('chi_sim 语言包已安装');
+                          await _downloadAndInstall(url);
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('OCR 模型安装完成')),
+                              const SnackBar(
+                                content: Text('OCR 模型已自动解压安装'),
+                              ),
                             );
                           }
                         } catch (e) {
-                          await _notifyDone('下载失败');
+                          await _notifyDone('下载或安装失败');
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('下载失败：$e')),
+                              SnackBar(content: Text('失败：$e')),
                             );
                           }
                         }
                         if (mounted) setState(() => _busy = false);
                         await _refresh();
                       },
-                child: Text(_busy ? '下载中…' : '下载模型'),
+                child: Text(_busy ? '下载中…' : '下载并安装'),
               ),
               const SizedBox(width: 8),
               if (installed)

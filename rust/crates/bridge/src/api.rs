@@ -190,16 +190,48 @@ pub fn ocr_model_status() -> String {
     }
 }
 
-/// 从本地文件安装 traineddata
+/// 从本地文件安装 traineddata / zip（**自动解压**，无感）
 pub fn install_ocr_model_file(src_path: String) -> anyhow::Result<String> {
     let Some(mgr) = ocr_manager() else {
         anyhow::bail!("OCR 模型目录未初始化");
     };
-    let dst = mgr.install_from_file(std::path::Path::new(&src_path))?;
+    let bytes = std::fs::read(&src_path)
+        .map_err(|e| anyhow::anyhow!("读模型文件失败: {e}"))?;
+    let dst = install_model_bytes(&mgr, &bytes)?;
+    // 安装完成后无感就绪：自动切 OCR 重排（若当前非对照）
+    if pdf_scan_mode() != PdfScanMode::Compare {
+        set_pdf_scan_mode(0);
+    }
     Ok(dst.display().to_string())
 }
 
-/// 从 URL 下载并安装 OCR 模型（不打包进 APK 的可下载接口）
+/// traineddata 或 zip → 落盘（zip 自动取 .traineddata）
+fn install_model_bytes(
+    mgr: &book_parser::ocr::OcrModelManager,
+    bytes: &[u8],
+) -> anyhow::Result<std::path::PathBuf> {
+    if bytes.starts_with(b"PK\x03\x04") {
+        let cursor = std::io::Cursor::new(bytes.to_vec());
+        let mut zip = zip::ZipArchive::new(cursor)
+            .map_err(|e| anyhow::anyhow!("模型 zip 无效: {e}"))?;
+        for i in 0..zip.len() {
+            let mut f = zip
+                .by_index(i)
+                .map_err(|e| anyhow::anyhow!("zip 条目: {e}"))?;
+            let name = f.name().to_string();
+            if name.ends_with(".traineddata") {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut f, &mut buf)?;
+                return mgr.install_from_bytes(&buf);
+            }
+        }
+        anyhow::bail!("zip 内无 .traineddata");
+    }
+    // 裸 traineddata
+    mgr.install_from_bytes(bytes)
+}
+
+/// 从 URL 下载并安装 OCR 模型（下载完成后自动解压/安装）
 pub async fn download_ocr_model(url: String) -> anyhow::Result<String> {
     let Some(mgr) = ocr_manager() else {
         anyhow::bail!("OCR 模型目录未初始化（先 setOcrModelDir）");
@@ -214,31 +246,11 @@ pub async fn download_ocr_model(url: String) -> anyhow::Result<String> {
         .bytes()
         .await
         .map_err(|e| anyhow::anyhow!("读下载体失败: {e}"))?;
-    // .traineddata 直接落盘；zip 包取第一个 *.traineddata（简化）
-    if url.ends_with(".traineddata") || bytes.len() > 1024 {
-        let is_zip = bytes.starts_with(b"PK\x03\x04");
-        if is_zip {
-            let cursor = std::io::Cursor::new(bytes.to_vec());
-            let mut zip = zip::ZipArchive::new(cursor)
-                .map_err(|e| anyhow::anyhow!("模型 zip 无效: {e}"))?;
-            for i in 0..zip.len() {
-                let mut f = zip
-                    .by_index(i)
-                    .map_err(|e| anyhow::anyhow!("zip 条目: {e}"))?;
-                let name = f.name().to_string();
-                if name.ends_with(".traineddata") {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut f, &mut buf)?;
-                    let dst = mgr.install_from_bytes(&buf)?;
-                    return Ok(dst.display().to_string());
-                }
-            }
-            anyhow::bail!("zip 内无 .traineddata");
-        }
-        let dst = mgr.install_from_bytes(&bytes)?;
-        return Ok(dst.display().to_string());
+    let dst = install_model_bytes(&mgr, &bytes)?;
+    if pdf_scan_mode() != PdfScanMode::Compare {
+        set_pdf_scan_mode(0);
     }
-    anyhow::bail!("下载内容不是 traineddata")
+    Ok(dst.display().to_string())
 }
 
 /// 卸载 OCR 模型
