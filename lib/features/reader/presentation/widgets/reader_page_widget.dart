@@ -310,13 +310,31 @@ class PageContentRenderer {
   // (paperColor getter defined above with overrides)
 
   /// A35：命中图片 entry（画廊/正文图点按放大）
-  static String? hitImage(PageInfo page, Offset local) {
+  ///
+  /// [forZoom]：true=放大手势（含整页图）；false=单击交互——
+  /// **整页图不拦截单击**，避免挡住「点图开菜单」（PDF/EPUB/漫画通用）。
+  static String? hitImage(PageInfo page, Offset local, {bool forZoom = false}) {
     for (final entry in page.entries) {
       if (entry.resourceHref == null) continue;
       final rect = Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height);
-      if (rect.inflate(8).contains(local)) {
-        return entry.resourceHref;
+      if (!rect.inflate(8).contains(local)) continue;
+      if (!forZoom) {
+        // 占画面 ≥55% 视为整页图：单击交给菜单/翻页
+        final area = entry.width * entry.height;
+        final pageArea = page.entries.fold<double>(
+          0,
+          (s, e) =>
+              s +
+              (e.resourceHref != null ? e.width * e.height : 0),
+        );
+        final screenH = rect.bottom; // 粗估
+        final isFullPage =
+            area >= pageArea * 0.85 ||
+            entry.height >= screenH * 0.55 ||
+            entry.width * entry.height >= 80000;
+        if (isFullPage) continue;
       }
+      return entry.resourceHref;
     }
     return null;
   }

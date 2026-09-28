@@ -15,8 +15,10 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * OCR 模型下载系统通知。
- * 高版本优先走实况进度（ProgressStyle，反射调用避免编译期 SDK 依赖），
- * 否则回退 NotificationCompat 进度条。
+ *
+ * - 下载中：系统进度条（Compat setProgress）+ 百分比文案
+ * - Android 16+：附加 ProgressStyle（实况进度/Live Updates）
+ * - 成功 / 失败：标题与图标明确区分，便于一眼识别
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "legado/notify"
@@ -37,14 +39,16 @@ class MainActivity : FlutterActivity() {
                     val max = call.argument<Int>("max") ?: 100
                     val indeterminate = call.argument<Boolean>("indeterminate") ?: false
                     val done = call.argument<Boolean>("done") ?: false
-                    showNotification(id, title, text, progress, max, indeterminate, done)
+                    val failed = call.argument<Boolean>("failed") ?: false
+                    showNotification(id, title, text, progress, max, indeterminate, done, failed)
                     result.success(true)
                 }
                 "showDone" -> {
                     val id = call.argument<Int>("id") ?: 1
                     val title = call.argument<String>("title") ?: "完成"
                     val text = call.argument<String>("text") ?: ""
-                    showNotification(id, title, text, 100, 100, false, true)
+                    val failed = call.argument<Boolean>("failed") ?: false
+                    showNotification(id, title, text, 100, 100, false, true, failed)
                     result.success(true)
                 }
                 "cancel" -> {
@@ -65,7 +69,7 @@ class MainActivity : FlutterActivity() {
             val ch = NotificationChannel(
                 channelId,
                 "OCR 模型下载",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             )
             ch.setSound(null, null)
             nm().createNotificationChannel(ch)
@@ -96,7 +100,8 @@ class MainActivity : FlutterActivity() {
         progress: Int,
         max: Int,
         indeterminate: Boolean,
-        done: Boolean
+        done: Boolean,
+        failed: Boolean
     ) {
         if (!ensureNotifyPermission()) return
         ensureChannel()
@@ -106,67 +111,65 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Android 16+ 实况进度（反射，避免 compileSdk 依赖）
-        if (Build.VERSION.SDK_INT >= 36 && !done && tryLiveProgress(id, title, text, progress, max, pi)) {
-            return
+        val icon = when {
+            failed -> android.R.drawable.stat_notify_error
+            done -> android.R.drawable.stat_sys_download_done
+            else -> android.R.drawable.stat_sys_download
         }
 
-        val b = NotificationCompat.Builder(this, channelId)
+        // Compat：确定型进度条（系统通知栏可见）
+        val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(
-                if (done) android.R.drawable.stat_sys_download_done
-                else android.R.drawable.stat_sys_download
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(if (failed) text else "$text（$progress%）")
             )
+            .setSmallIcon(icon)
             .setContentIntent(pi)
             .setOnlyAlertOnce(true)
-            .setOngoing(!done)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(!done && !failed)
+            .setAutoCancel(done || failed)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-        if (done) {
-            b.setProgress(0, 0, false)
+            .setColor(if (failed) 0xFFD32F2F.toInt() else 0xFF1976D2.toInt())
+
+        if (done || failed) {
+            builder.setProgress(0, 0, false)
         } else {
-            b.setProgress(max.coerceAtLeast(1), progress.coerceIn(0, max), indeterminate)
+            builder.setProgress(
+                max.coerceAtLeast(1),
+                progress.coerceIn(0, max),
+                indeterminate
+            )
         }
-        nm().notify(id, b.build())
+
+        // Android 16+ 实况进度样式（附加，失败静默）
+        if (Build.VERSION.SDK_INT >= 36 && !done && !failed) {
+            tryLiveProgressStyle(builder, progress, max)
+        }
+
+        nm().notify(id, builder.build())
     }
 
-    /** 成功则返回 true */
-    private fun tryLiveProgress(
-        id: Int, title: String, text: String,
-        progress: Int, max: Int, pi: PendingIntent
-    ): Boolean {
-        return try {
+    private fun tryLiveProgressStyle(
+        compat: NotificationCompat.Builder,
+        progress: Int,
+        max: Int
+    ) {
+        try {
             val psCls = Class.forName("android.app.Notification\$ProgressStyle")
             val ps = psCls.getDeclaredConstructor().newInstance()
             psCls.getMethod("setProgressMax", Integer.TYPE)
                 .invoke(ps, max.coerceAtLeast(1))
-            if (progress >= 0) {
-                psCls.getMethod("setProgress", Integer.TYPE)
-                    .invoke(ps, progress.coerceIn(0, max))
-            }
-            val nCls = android.app.Notification::class.java
-            val builderCls = Class.forName("android.app.Notification\$Builder")
-            val builder = builderCls
-                .getDeclaredConstructor(Context::class.java, String::class.java)
-                .newInstance(this, channelId)
-            builderCls.getMethod("setContentTitle", CharSequence::class.java)
-                .invoke(builder, title as CharSequence)
-            builderCls.getMethod("setContentText", CharSequence::class.java)
-                .invoke(builder, text as CharSequence)
-            builderCls.getMethod("setSmallIcon", Integer.TYPE)
-                .invoke(builder, android.R.drawable.stat_sys_download)
-            builderCls.getMethod("setContentIntent", PendingIntent::class.java)
-                .invoke(builder, pi)
-            builderCls.getMethod("setOngoing", Boolean::class.javaPrimitiveType)
-                .invoke(builder, false)
-            builderCls.getMethod("setStyle", Class.forName("android.app.Notification\$Style"))
-                .invoke(builder, ps)
-            val n = builderCls.getMethod("build").invoke(builder) as android.app.Notification
-            nm().notify(id, n)
-            true
+            psCls.getMethod("setProgress", Integer.TYPE)
+                .invoke(ps, progress.coerceIn(0, max))
+            // Compat builder 反射挂 Style（有则生效，无则仅进度条）
+            compat.javaClass.methods
+                .firstOrNull { it.name == "setStyle" && it.parameterTypes.size == 1 }
+                ?.invoke(compat, ps)
         } catch (_: Throwable) {
-            false
+            // 无 ProgressStyle 时仍显示 Compat 进度条
         }
     }
 }

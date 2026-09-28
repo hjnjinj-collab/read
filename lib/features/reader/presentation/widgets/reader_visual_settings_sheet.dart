@@ -1680,12 +1680,13 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
     } catch (_) {}
   }
 
-  Future<void> _notifyDone(String text) async {
+  Future<void> _notifyDone(String text, {bool failed = false}) async {
     try {
       await _channel.invokeMethod('showDone', {
         'id': _notifyId,
-        'title': 'OCR 模型已就绪',
+        'title': failed ? 'OCR 下载失败' : 'OCR 模型已就绪',
         'text': text,
+        'failed': failed,
       });
     } catch (_) {}
   }
@@ -1820,7 +1821,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                             );
                           }
                         } catch (e) {
-                          await _notifyDone('下载或安装失败');
+                          await _notifyDone('原因：$e', failed: true);
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('失败：$e')),

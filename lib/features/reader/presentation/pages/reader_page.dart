@@ -308,6 +308,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             _longPressTriggered = false;
             _isNoteMode = false;
           }
+        } else {
+          // 无文字命中：整页图长按放大（PDF/EPUB/漫画）
+          final imgHref = PageContentRenderer.hitImage(
+            page,
+            Offset(_dragStartX, _dragStartY),
+            forZoom: true,
+          );
+          if (imgHref != null && BookImageStore.instance.get(imgHref) != null) {
+            _longPressTriggered = true;
+            final img = BookImageStore.instance.get(imgHref)!;
+            img.toByteData(format: ui.ImageByteFormat.png).then((bd) {
+              if (bd != null && mounted) {
+                ImageZoomViewer.open(
+                  context,
+                  bd.buffer.asUint8List(),
+                  heroTag: imgHref,
+                );
+              }
+            }).catchError((_) {});
+          }
         }
       });
     }
@@ -542,7 +562,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     const microGestureThreshold = 3.0; // 3px 微手势阈值
 
     // A34：脚注引用优先——命中则弹层，不翻页/不开菜单
-    // A35：图片点按放大（画廊/正文图；次于脚注，先于翻页）
+    // A35：正文小图点按放大（整页图不拦截单击——点图要能开菜单）
     // 菜单开启时禁用画廊/脚注命中：中部图片不得挡住「点空白收起菜单」
     final menuOpen = _menuVisible.value;
     final page = ref.read(readerProvider).currentPage;
@@ -573,11 +593,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           return;
         }
       }
+      // 仅非整页小图可单击放大；整页图单击继续走菜单/翻页
       final imgHref = PageContentRenderer.hitImage(page, tapPos);
       if (imgHref != null) {
         final img = BookImageStore.instance.get(imgHref);
         if (img != null) {
-          // 取字节成功才拦截翻页；失败回落手势
           final opened = img
               .toByteData(format: ui.ImageByteFormat.png)
               .then((bd) {
@@ -590,7 +610,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                 return true;
               })
               .catchError((_) => false);
-          // 同步占位：命中图默认拦截；异步失败极罕见
           unawaited(opened);
           return;
         }
