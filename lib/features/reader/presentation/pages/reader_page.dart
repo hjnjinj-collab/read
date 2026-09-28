@@ -543,8 +543,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     // A34：脚注引用优先——命中则弹层，不翻页/不开菜单
     // A35：图片点按放大（画廊/正文图；次于脚注，先于翻页）
+    // 菜单开启时禁用画廊/脚注命中：中部图片不得挡住「点空白收起菜单」
+    final menuOpen = _menuVisible.value;
     final page = ref.read(readerProvider).currentPage;
-    if (page != null) {
+    if (page != null && !menuOpen) {
       final n = ref.read(readerProvider.notifier);
       final fnRef = PageContentRenderer.hitFootnote(
         page,

@@ -367,7 +367,13 @@ impl ComicArchiveParser {
         }
 
         let mut chapters = Vec::new();
-        for (key, mut pages) in groups {
+        // 章名自然排序（10 在 2 后；BTreeMap 字典序会把 10 排在 2 前）
+        let mut keys: Vec<String> = groups.keys().cloned().collect();
+        keys.sort_by(|a, b| natural_key(a).cmp(&natural_key(b)));
+        for key in keys {
+            let Some(mut pages) = groups.remove(&key) else {
+                continue;
+            };
             pages.sort_by(|a, b| natural_key(a).cmp(&natural_key(b)));
             let title = if key.is_empty() {
                 "全本".to_string()
@@ -606,6 +612,26 @@ mod tests {
         zw.finish().unwrap();
         let mut parser = ComicArchiveParser::from_file(&path).unwrap();
         assert!(parser.parse().is_err());
+    }
+
+    #[test]
+    fn chapter_folders_sort_naturally() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chs.cbz");
+        let file = File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(file);
+        let opts = FileOptions::default();
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde";
+        for dir in ["2", "10", "1"] {
+            let name = format!("{dir}/a.png");
+            zw.start_file(name.as_str(), opts).unwrap();
+            zw.write_all(png).unwrap();
+        }
+        zw.finish().unwrap();
+        let mut parser = ComicArchiveParser::from_file(&path).unwrap();
+        parser.parse().unwrap();
+        let titles: Vec<_> = parser.chapters().iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, vec!["1", "2", "10"], "章节名应按数字自然序");
     }
 
     #[test]

@@ -894,11 +894,22 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 画廊：最大高度 = 内容区（尽量占满页，图说可叠在同页底部）
-                    let max_height = if *bleed {
-                        bottom_limit
+                    // 漫画整页图（gallery+bleed）：矩形铺满内容区，绘制端 cover——
+                    // 小图/扁图不再只占半页。EPUB 画廊（gallery 无 bleed）仍
+                    // 等比适配，便于图说叠在同页底部。
+                    if *gallery && *bleed {
+                        img_width = self.config.width;
+                        img_x = 0.0;
+                        // bleed 页首 y=0 贴顶：高度用整窗高；否则用内容区高
+                        img_height = self.config.height;
                     } else if *gallery {
-                        content_height
+                        img_width = content_width;
+                        img_x = self.config.padding.left;
+                        img_height = content_height;
+                    } else {
+                    // 画廊/正文：最大高度 = 内容区
+                    let max_height = if *bleed {
+                        bottom_limit - current_y.max(0.0)
                     } else {
                         content_height
                     };
@@ -923,6 +934,7 @@ impl LayoutEngine {
                             );
                         }
                     }
+                    }
 
                     // 画廊：非空页则新起一页（每图一页；图说跟在同页）
                     if *gallery && !entries.is_empty() {
@@ -933,7 +945,7 @@ impl LayoutEngine {
                     if current_y + img_height > bottom_limit && !entries.is_empty() {
                         break_page!();
                     }
-                    let y = if *bleed && entries.is_empty() && text_lines_on_page == 0 {
+                    let y = if (*bleed || *gallery) && entries.is_empty() && text_lines_on_page == 0 {
                         0.0
                     } else {
                         current_y
@@ -3174,6 +3186,48 @@ mod tests {
             p.entries.iter().any(|e| matches!(e, PageEntry::Image(i) if i.resource_href == "b.jpg"))
         }).unwrap();
         assert!(second_img_page > first_img_page);
+        // EPUB 画廊（无 bleed）仍等比适配，不必铺满高度（图说可同页）
+        let img0 = pages[first_img_page]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Image(i) => Some(i),
+                _ => None,
+            })
+            .unwrap();
+        assert!(img0.height > 0.0);
+    }
+
+    /// 漫画 gallery+bleed：整页 cover，小图/扁图也铺满
+    #[test]
+    fn gallery_bleed_fills_full_content_box() {
+        let (engine, cfg) = create_test_engine();
+        let items = vec![LayoutItem::Image {
+            resource_href: "wide.jpg".into(),
+            aspect: 2.0, // 扁图：旧逻辑只占约半页高
+            width_percent: None,
+            align: None,
+            bleed: true,
+            gallery: true,
+        }];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let img = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Image(i) => Some(i),
+                _ => None,
+            })
+            .unwrap();
+        let content_h = cfg.height - cfg.padding.top - cfg.padding.bottom;
+        assert!(
+            (img.height - cfg.height).abs() < 1.0,
+            "gallery+bleed 应铺满整窗高: img_h={} page_h={}",
+            img.height,
+            cfg.height
+        );
+        assert!((img.width - cfg.width).abs() < 1.0, "应铺满整窗宽");
+        let _ = content_h;
     }
 
     /// A34.3：标题分割线 Hr → 内容区宽填充 Rect
