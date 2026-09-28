@@ -257,6 +257,15 @@ impl OcrPageCache {
         }
         Ok(())
     }
+
+    /// 页 OCR 结果磁盘缓存（键：href 或 book_page）
+    pub fn get_cached_text(&self, key: &str) -> Option<String> {
+        self.get(key)
+    }
+
+    pub fn put_text(&self, key: &str, text: &str) -> Result<()> {
+        self.put(key, text)
+    }
 }
 
 /// 测试用 mock 引擎

@@ -168,8 +168,50 @@ static OCR_ENGINE: Lazy<Mutex<Option<book_parser::ocr::OcrModelManager>>> =
 
 pub fn set_ocr_model_dir(dir: String) {
     *OCR_MODEL_DIR.lock().unwrap() = dir.clone();
-    let mgr = book_parser::ocr::OcrModelManager::new(dir);
+    let mgr = book_parser::ocr::OcrModelManager::new(dir.clone());
     *OCR_ENGINE.lock().unwrap() = Some(mgr);
+    OCR_PAGE_CACHE.set_dir(std::path::Path::new(&dir).join("cache"));
+}
+
+static OCR_PAGE_CACHE: Lazy<book_parser::ocr::OcrPageCache> =
+    Lazy::new(book_parser::ocr::OcrPageCache::default);
+
+/// 写入某页 OCR 文本缓存（Dart ML Kit 识别后落盘，Rust 分页时优先读）
+pub fn put_ocr_page_text(key: String, text: String) -> anyhow::Result<()> {
+    OCR_PAGE_CACHE.put_text(&key, &text)
+}
+
+/// 取 OCR 文本缓存
+pub fn get_ocr_page_text(key: String) -> String {
+    OCR_PAGE_CACHE.get_cached_text(&key).unwrap_or_default()
+}
+
+/// PDF 章内扫描页图 href 列表（供 Dart 预 OCR）
+pub fn pdf_image_hrefs(book_id: String, chapter_index: usize) -> anyhow::Result<Vec<String>> {
+    let books = BOOKS.read().unwrap();
+    let handle = books
+        .get(&book_id)
+        .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+    let pdf = handle
+        .pdf
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("非 PDF"))?;
+    let chs = pdf.get_chapter_list()?;
+    let ch = chs
+        .get(chapter_index)
+        .ok_or_else(|| anyhow::anyhow!("章节不存在"))?;
+    let start = ch.start_byte_offset.unwrap_or(0);
+    let end = ch.end_byte_offset.unwrap_or(start + 1);
+    let mut out = Vec::new();
+    for p in start..end {
+        use book_parser::pdf_parser::PdfPageKind;
+        if pdf.page_kind(p) == PdfPageKind::Image {
+            for img in pdf.list_page_images(p) {
+                out.push(img.href);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// OCR 模型状态 JSON：`{"installed":bool,"lang":"chi_sim","ready":bool}`
@@ -302,7 +344,27 @@ fn process_pdf_chapter(
                 }
             }
             PdfPageKind::Image => {
-                // 重排模式且 OCR 就绪 → 识别成文字（主题底+可换字体）
+                // 1) 缓存（Dart ML Kit 已识别）
+                let cache_key = format!("pdf:{}", pdf.list_page_images(p).next().map(|i| i.href.clone()).unwrap_or_default());
+                let cached = OCR_PAGE_CACHE.get_cached_text(&cache_key);
+                if let Some(text) = cached {
+                    let t = text.trim();
+                    if !t.is_empty() {
+                        items.push(layout_engine::LayoutItem::text(t.to_string()));
+                        continue;
+                    }
+                }
+                // 2) 缓存按 href
+                if let Some(img) = pdf.list_page_images(p).next() {
+                    if let Some(t) = OCR_PAGE_CACHE.get_cached_text(&img.href) {
+                        let t = t.trim();
+                        if !t.is_empty() {
+                            items.push(layout_engine::LayoutItem::text(t.to_string()));
+                            continue;
+                        }
+                    }
+                }
+                // 3) 本机 tesseract（桌面）/ 否则对照图
                 let mut ocr_text: Option<String> = None;
                 let want_ocr = matches!(mode, PdfScanMode::Reflow)
                     || (matches!(mode, PdfScanMode::Auto) && ocr_ready);

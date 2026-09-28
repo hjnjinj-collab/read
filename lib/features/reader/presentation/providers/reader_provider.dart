@@ -8,6 +8,7 @@ import '../../../../core/database/app_settings_service.dart';
 import '../../../../core/models/simple_models.dart';
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/services/measure_text_service.dart';
+import '../../../../core/services/ocr_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 import '../widgets/page_turn/page_turn_types.dart';
@@ -1351,6 +1352,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 分流：EPUB 结构化分页 / TXT 文本分页
       var page;
       if (usesStructuredLayout) {
+        // PDF 扫描页：先 ML Kit 预识别写入 OCR 缓存，再分页重排
+        // （否则一直是原图，字体/背景设置无效）
+        if (_isPdf) {
+          try {
+            await OcrService.instance
+                .preOcrPdfChapter(requestedBookId, requestedChapterIndex);
+          } catch (_) {}
+        }
         // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
         int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
             ? 1

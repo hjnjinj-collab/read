@@ -50,6 +50,8 @@ dependencies:
   dynamic_color: ^2.1.0
   palette_generator: ^0.3.3+7
   liquid_glass_easy: ^4.3.1
+  # 扫描 PDF OCR（系统文字识别；模型可走 ML Kit 下载）
+  google_mlkit_text_recognition: ^0.13.0
   # v9 迁移到自研 material_ui 类型体系（ColorScheme 与 framework 分叉），锁 8.x
   flex_color_scheme: ^8.2.0
   flex_color_picker: ^3.8.0

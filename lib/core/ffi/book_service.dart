@@ -828,6 +828,24 @@ class BookService {
     await rust_api.uninstallOcrModel();
   }
 
+  /// 写入某页 OCR 文本（ML Kit 识别后，分页重排用）
+  Future<void> putOcrPageText(String key, String text) async {
+    await rust_api.putOcrPageText(key: key, text: text);
+  }
+
+  Future<String> getOcrPageText(String key) async {
+    return await rust_api.getOcrPageText(key: key);
+  }
+
+  /// PDF 章内扫描页图 href（供预 OCR）
+  Future<List<String>> pdfImageHrefs(String bookId, int chapterIndex) async {
+    final list = await rust_api.pdfImageHrefs(
+      bookId: bookId,
+      chapterIndex: BigInt.from(chapterIndex),
+    );
+    return list.toList();
+  }
+
   /// Get default content cleaning options (获取默认净化选项)
   Future<rust_api.ContentCleaningOptions> getDefaultCleaningOptions() async {
     return await rust_api.ContentCleaningOptions.default_();
