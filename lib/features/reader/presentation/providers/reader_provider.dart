@@ -260,6 +260,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 当前书是否为 EPUB（结构化路径分流标记）
   bool _isEpub = false;
   bool _isComic = false;
+  bool _isPdf = false;
 
   // 只读访问器：供设置对话框回读当前生效的配置
   bool get removeDuplicateTitle => _removeDuplicateTitle;
@@ -317,8 +318,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// 当前书是否按 EPUB 结构化路径渲染
   bool get renderAsEpub => _isEpub;
   bool get isComic => _isComic;
-  /// 结构化路径（EPUB / 压缩包漫画）：走 get_page_structured
-  bool get usesStructuredLayout => _isEpub || _isComic;
+  bool get isPdf => _isPdf;
+  /// 结构化路径（EPUB / 压缩包漫画 / PDF）：走 get_page_structured
+  bool get usesStructuredLayout => _isEpub || _isComic || _isPdf;
 
   void setScreenSize(
     double width,
@@ -1248,7 +1250,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       }
       _isEpub = format == 'epub';
       _isComic = format == 'comic';
-      if (_isEpub || _isComic) {
+      _isPdf = format == 'pdf';
+      if (_isEpub || _isComic || _isPdf) {
         BookImageStore.instance.bind(_bookService, bookId);
         // 封面落盘供书架显示（异步，不阻塞打开）
         unawaited(persistBookCover(_bookService, bookId, filePath));

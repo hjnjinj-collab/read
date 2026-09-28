@@ -121,7 +121,8 @@ fn process_comic_chapter(
         .iter()
         .map(|p| layout_engine::LayoutItem::Image {
             resource_href: p.href.clone(),
-            aspect: p.aspect,
+            // 懒探测：打开时未解压全图，此处只读文件头
+            aspect: p.aspect.unwrap_or_else(|| comic.page_aspect(&p.href)),
             width_percent: None,
             align: None,
             bleed: true,   // 整页图贴边
@@ -133,6 +134,41 @@ fn process_comic_chapter(
     let engine = build_layout_engine(config.clone(), font_manager);
     let pages = engine.layout_items(&items, chapter_index)?;
     Ok(pages.into_iter().map(crate::PageInfo::from).collect())
+}
+
+/// PDF 分页：按章（页块）提取文本 → layout_text
+fn process_pdf_chapter(
+    handle: &crate::BookHandle,
+    chapter_index: usize,
+    config: &LayoutConfig,
+) -> anyhow::Result<Vec<crate::PageInfo>> {
+    let pdf = handle
+        .pdf
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("非 PDF 句柄"))?;
+    // 只提取本章页块文本（大文件不全书提取）
+    let chs = pdf.get_chapter_list()?;
+    let ch = chs
+        .get(chapter_index)
+        .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
+    let start = ch.start_byte_offset.unwrap_or(0);
+    let end = ch.end_byte_offset.unwrap_or(start + 1);
+    // PdfParser::extract_pages_text 需要 &self；通过 get_chapter_content 需要 &mut
+    // 这里只读提取：用公开 API 时需 &mut，故改调 chapter content 在 parse 侧
+    // 简化：对 handle.pdf 不可变借用时用 extract（已是 &self）
+    let text = extract_pdf_pages_text(pdf, start, end)?;
+    let font_manager = FONT_MANAGER.lock().unwrap().clone();
+    let engine = build_layout_engine(config.clone(), font_manager);
+    let pages = engine.layout_text(&text, chapter_index)?;
+    Ok(pages.into_iter().map(crate::PageInfo::from).collect())
+}
+
+fn extract_pdf_pages_text(
+    pdf: &book_parser::pdf_parser::PdfParser,
+    start: usize,
+    end: usize,
+) -> anyhow::Result<String> {
+    pdf.extract_pages_text(start, end)
 }
 
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
@@ -864,6 +900,7 @@ fn parse_txt_file_inner(
                 comic: None,
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
                 cleaning_fingerprint: cleaning_fp,
+                pdf: None,
             }
         }
         BookFormat::Epub => {
@@ -898,6 +935,7 @@ fn parse_txt_file_inner(
                 epub_cleaned: None,
                 structured: Some(crate::StructuredEpubHandle { parser }),
                 comic: None,
+                pdf: None,
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
                 cleaning_fingerprint: cleaning_fp,
             }
@@ -929,12 +967,45 @@ fn parse_txt_file_inner(
                 epub_cleaned: None,
                 structured: None,
                 comic: Some(parser),
+                pdf: None,
+                clean_rebuild_gate: Arc::new(Mutex::new(())),
+                cleaning_fingerprint: cleaning_fp,
+            }
+        }
+        BookFormat::Pdf => {
+            use book_parser::pdf_parser::PdfParser;
+            let mut parser = PdfParser::from_file(path)
+                .map_err(|e| anyhow::anyhow!("PDF 解析失败: {}", e))?;
+            let metadata = parser.parse()?;
+            let list = parser.get_chapter_list()?;
+            let chapters = list
+                .iter()
+                .map(|c| book_parser::Chapter {
+                    title: c.title.clone(),
+                    start_pos: 0,
+                    end_pos: 0,
+                    level: c.level,
+                    parent_index: c.parent_index,
+                })
+                .collect();
+            BookHandle {
+                book: crate::Book {
+                    title: book_name.unwrap_or(metadata.title),
+                    content: String::new(),
+                    chapters,
+                },
+                parser: None,
+                source_path: Some(file_path.clone()),
+                epub_cleaned: None,
+                structured: None,
+                comic: None,
+                pdf: Some(parser),
                 clean_rebuild_gate: Arc::new(Mutex::new(())),
                 cleaning_fingerprint: cleaning_fp,
             }
         }
         other => anyhow::bail!(
-            "暂不支持该格式导入: {}（支持 TXT / EPUB / 压缩包漫画）",
+            "暂不支持该格式导入: {}（支持 TXT / EPUB / PDF / 压缩包漫画）",
             other.extension()
         ),
     };
@@ -2993,6 +3064,10 @@ fn process_structured_chapter(
                 let pages = process_comic_chapter(handle, chapter_index, &params.config)?;
                 return Ok(Some(Arc::new(pages)));
             }
+            if handle.pdf.is_some() {
+                let pages = process_pdf_chapter(handle, chapter_index, &params.config)?;
+                return Ok(Some(Arc::new(pages)));
+            }
         }
     }
 
@@ -3575,6 +3650,8 @@ pub fn get_book_format(book_id: String) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
     Ok(if handle.comic.is_some() {
         "comic"
+    } else if handle.pdf.is_some() {
+        "pdf"
     } else if handle.structured.is_some() {
         "epub"
     } else {

@@ -26,6 +26,8 @@ pub struct BookHandle {
     pub structured: Option<StructuredEpubHandle>,
     /// 压缩包漫画句柄（CBZ/ZIP；有则 structured 为 None）
     pub comic: Option<book_parser::comic_archive::ComicArchiveParser>,
+    /// PDF 句柄（大文件按页提取；有则 structured 为 None）
+    pub pdf: Option<book_parser::pdf_parser::PdfParser>,
     /// 净化缓存 singleflight 门：锁外重建期间同一本书的并发重建在此汇合
     /// （调用方在读锁内 clone Arc 后在 BOOKS 锁外等待/持有，见 api.rs
     /// get_chapter_content_impl 两阶段重建）

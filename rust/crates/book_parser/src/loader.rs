@@ -212,7 +212,12 @@ impl BookSourceLoader {
                     .with_context(|| "创建压缩包漫画解析器失败")?;
                 Ok(Box::new(parser))
             }
-            BookFormat::Pdf | BookFormat::Mobi => {
+            BookFormat::Pdf => {
+                let parser = crate::pdf_parser::PdfParser::from_file(path)
+                    .with_context(|| "创建 PDF 解析器失败")?;
+                Ok(Box::new(parser))
+            }
+            BookFormat::Mobi => {
                 Err(anyhow::anyhow!(
                     "暂不支持的文件格式: {} ({})",
                     path.display(),

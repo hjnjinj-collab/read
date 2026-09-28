@@ -23,6 +23,8 @@ const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 /// 条目数上限
 const MAX_ENTRIES: usize = 20_000;
+/// 图片头探测字节数（PNG/JPEG/WEBP/GIF/BMP 头足够）
+pub const IMAGE_HEAD_BYTES: usize = 64 * 1024;
 
 /// 压缩包条目
 #[derive(Debug, Clone)]
@@ -36,6 +38,12 @@ pub struct ArchiveEntry {
 pub trait ArchiveReader: Send + Sync {
     fn list_entries(&self) -> Result<Vec<ArchiveEntry>>;
     fn read_entry(&self, path: &str) -> Result<Vec<u8>>;
+    /// 只读条目前 max_bytes 字节（宽高探测/封面缩略；**禁止**整图解压）
+    fn read_entry_head(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        let data = self.read_entry(path)?;
+        let n = data.len().min(max_bytes);
+        Ok(data[..n].to_vec())
+    }
 }
 
 /// 路径安全：拒绝 `..`、绝对路径、盘符、空段
@@ -159,6 +167,28 @@ impl ArchiveReader for ZipArchiveReader {
         }
         Ok(buf)
     }
+
+    /// 头探测：只解压前 max_bytes（GB 级包打开不卡）
+    fn read_entry_head(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        if !is_safe_entry_path(path) {
+            anyhow::bail!("非法资源路径");
+        }
+        let mut guard = self.archive.lock().unwrap();
+        let mut file = guard
+            .by_name(path)
+            .with_context(|| format!("压缩包内无此条目: {path}"))?;
+        let mut buf = vec![0u8; max_bytes.min(8 * 1024 * 1024)];
+        let mut filled = 0usize;
+        while filled < buf.len() {
+            let n = file.read(&mut buf[filled..])?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        buf.truncate(filled);
+        Ok(buf)
+    }
 }
 
 // ── Rar 后端（仅 Windows：libunrar C++ 含 Win32 源，Android NDK 无法编译） ──
@@ -267,7 +297,22 @@ impl ArchiveReader for RarArchiveReader {
 pub struct ComicPage {
     /// ZIP 内全路径（与 get_book_resource 同基准）
     pub href: String,
-    pub aspect: f32,
+    /// 宽高比；None=懒探测（打开时不全量解压）
+    pub aspect: Option<f32>,
+}
+
+impl ComicPage {
+    /// 取宽高比；未知则读文件头探测（不写回，见 ComicArchiveParser::page_aspect）
+    pub fn resolve_aspect(&self, reader: &dyn ArchiveReader) -> f32 {
+        if let Some(a) = self.aspect {
+            return a;
+        }
+        reader
+            .read_entry_head(&self.href, IMAGE_HEAD_BYTES)
+            .ok()
+            .and_then(|d| probe_image_size(&d).map(|x| x.ratio()))
+            .unwrap_or(0.75)
+    }
 }
 
 /// 一章（= 一个文件夹或合成「全本」）
@@ -285,6 +330,8 @@ pub struct ComicArchiveParser {
     chapters: Vec<ComicChapter>,
     metadata: Option<BookMetadata>,
     cover_data: Option<Vec<u8>>,
+    /// 懒探测宽高比缓存（href → ratio）
+    aspect_cache: std::sync::Mutex<std::collections::HashMap<String, f32>>,
 }
 
 impl ComicArchiveParser {
@@ -317,6 +364,7 @@ impl ComicArchiveParser {
             chapters: Vec::new(),
             metadata: None,
             cover_data: None,
+            aspect_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -382,13 +430,12 @@ impl ComicArchiveParser {
             };
             let mut comic_pages = Vec::new();
             for href in pages {
-                // 尺寸探测：只读条目前部；失败用默认 0.75 比
+                // 懒探测：只读文件头取宽高比，**不整图解压**（GB 级包秒开）
                 let aspect = self
                     .reader
-                    .read_entry(&href)
+                    .read_entry_head(&href, IMAGE_HEAD_BYTES)
                     .ok()
-                    .and_then(|data| probe_image_size(&data).map(|d| d.ratio()))
-                    .unwrap_or(0.75);
+                    .and_then(|data| probe_image_size(&data).map(|d| d.ratio()));
                 comic_pages.push(ComicPage { href, aspect });
             }
             chapters.push(ComicChapter {
@@ -401,15 +448,13 @@ impl ComicArchiveParser {
         // 保持原样（单文件夹包即一章）
         self.chapters = chapters;
 
-        // 封面：cover_href 或第一章第一页前 64KB
+        // 封面：只读头字节（缩略）；完整图走 BookImageStore
         if let Some(href) = cover_href {
-            if let Ok(data) = self.reader.read_entry(&href) {
+            if let Ok(data) = self.reader.read_entry_head(&href, IMAGE_HEAD_BYTES) {
                 self.cover_data = Some(data);
             }
         } else if let Some(first) = self.chapters.first().and_then(|c| c.pages.first()) {
-            // 封面只需 header 探测 + 展示，整图交给 BookImageStore；
-            // 这里存一份供 CoverStore（与 EPUB cover_data 同径）
-            if let Ok(data) = self.reader.read_entry(&first.href) {
+            if let Ok(data) = self.reader.read_entry_head(&first.href, IMAGE_HEAD_BYTES) {
                 self.cover_data = Some(data);
             }
         }
@@ -440,6 +485,42 @@ impl ComicArchiveParser {
     /// 封面字节（parse 时提取；可能为空）
     pub fn cover_data(&self) -> Option<&Vec<u8>> {
         self.cover_data.as_ref()
+    }
+
+    /// 页宽高比：已有则用；否则只读文件头探测并缓存
+    pub fn page_aspect(&self, href: &str) -> f32 {
+        if let Some(a) = self
+            .aspect_cache
+            .lock()
+            .unwrap()
+            .get(href)
+            .copied()
+        {
+            return a;
+        }
+        // 章节表里已探测过的直接用
+        for ch in &self.chapters {
+            for p in &ch.pages {
+                if p.href == href {
+                    if let Some(a) = p.aspect {
+                        self.aspect_cache.lock().unwrap().insert(href.to_string(), a);
+                        return a;
+                    }
+                    break;
+                }
+            }
+        }
+        let a = self
+            .reader
+            .read_entry_head(href, IMAGE_HEAD_BYTES)
+            .ok()
+            .and_then(|d| probe_image_size(&d).map(|x| x.ratio()))
+            .unwrap_or(0.75);
+        self.aspect_cache
+            .lock()
+            .unwrap()
+            .insert(href.to_string(), a);
+        a
     }
 
     /// 按 resource_href 取图片字节（bridge get_book_resource 用）
@@ -654,5 +735,40 @@ mod tests {
         assert!(rar_supported());
         #[cfg(not(windows))]
         assert!(!rar_supported());
+    }
+
+    #[test]
+    fn read_entry_head_truncates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("h.cbz");
+        let file = File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(file);
+        zw.start_file("a.bin", FileOptions::default()).unwrap();
+        zw.write_all(&vec![7u8; 100_000]).unwrap();
+        zw.finish().unwrap();
+        let z = ZipArchiveReader::open(&path).unwrap();
+        let head = z.read_entry_head("a.bin", 64).unwrap();
+        assert_eq!(head.len(), 64, "应只读头 64 字节");
+        let full = z.read_entry("a.bin").unwrap();
+        assert_eq!(full.len(), 100_000);
+    }
+
+    #[test]
+    fn parse_does_not_require_full_decompress_for_aspect() {
+        // 头含合法 PNG IHDR 时，aspect 从头得出（不依赖全图）
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("p.cbz");
+        let file = File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(file);
+        // 8x2 PNG 头 + 填充
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x08\x00\x00\x00\x02".to_vec();
+        png.extend_from_slice(&[0u8; 200]);
+        zw.start_file("1.png", FileOptions::default()).unwrap();
+        zw.write_all(&png).unwrap();
+        zw.finish().unwrap();
+        let mut p = ComicArchiveParser::from_file(&path).unwrap();
+        p.parse().unwrap();
+        let a = p.page_aspect("1.png");
+        assert!((a - 4.0).abs() < 0.05, "8x2 应约 4.0，实得 {}", a);
     }
 }
