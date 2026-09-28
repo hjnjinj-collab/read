@@ -593,27 +593,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           return;
         }
       }
-      // 仅非整页小图可单击放大；整页图单击继续走菜单/翻页
-      final imgHref = PageContentRenderer.hitImage(page, tapPos);
-      if (imgHref != null) {
-        final img = BookImageStore.instance.get(imgHref);
-        if (img != null) {
-          final opened = img
-              .toByteData(format: ui.ImageByteFormat.png)
-              .then((bd) {
-                if (bd == null || !mounted) return false;
-                ImageZoomViewer.open(
-                  context,
-                  bd.buffer.asUint8List(),
-                  heroTag: imgHref,
-                );
-                return true;
-              })
-              .catchError((_) => false);
-          unawaited(opened);
-          return;
-        }
-      }
+      // 正文小图也不拦截单击——统一长按放大，单击留给菜单/翻页
+      // （PDF/EPUB/漫画一致；长按路径见 _onPointerDown 无文字命中分支）
     }
 
     if (_pageTurnMode == PageTurnMode.collapse) {

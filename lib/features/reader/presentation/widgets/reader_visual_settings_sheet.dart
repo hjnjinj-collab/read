@@ -1645,9 +1645,15 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   String _status = '';
   String _mode = 'auto'; // reflow | compare | auto
   bool _busy = false;
-  /// 官方 tessdata_fast 简体包（可改）
+  /// 官方 tessdata_fast 简体包 + 国内可达镜像（GitHub 直连常 DNS 失败）
   static const _defaultOcrUrl =
-      'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata';
+      'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata';
+  static const _ocrMirrorUrls = <String>[
+    'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata',
+    'https://fastly.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata',
+    'https://ghproxy.net/https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata',
+    'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata',
+  ];
   final _urlCtrl = TextEditingController(text: _defaultOcrUrl);
   static const _channel = MethodChannel('legado/notify');
   static const _notifyId = 0x0C12;
@@ -1691,50 +1697,91 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
     } catch (_) {}
   }
 
-  /// 流式下载 → 临时文件 → 调 Rust **自动解压安装**（无感）
-  Future<void> _downloadAndInstall(String url) async {
-    final client = HttpClient();
-    final uri = Uri.parse(url);
-    final req = await client.getUrl(uri);
-    final resp = await req.close();
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      throw 'HTTP ${resp.statusCode}';
-    }
-    final total = resp.contentLength; // 可能为 -1
-    final tmpPath =
-        '${Directory.systemTemp.path}/ocr_model_${DateTime.now().millisecondsSinceEpoch}';
-    final file = File(tmpPath);
-    final sink = file.openWrite();
-    int received = 0;
-    int lastPct = -1;
-    await for (final chunk in resp) {
-      sink.add(chunk);
-      received += chunk.length;
-      if (total > 0) {
-        final pct = ((received * 100) / total).clamp(0, 99).toInt();
-        if (pct != lastPct) {
-          lastPct = pct;
-          await _notifyProgress(pct, '$pct%（${_fmtBytes(received)} / ${_fmtBytes(total)}）');
-        }
-      } else {
-        await _notifyProgress(-1, '已下载 ${_fmtBytes(received)}',
-            indeterminate: true);
+  /// 流式下载 → 临时文件 → Rust 自动解压安装；失败自动换镜像
+  Future<void> _downloadAndInstall(String userUrl) async {
+    // 用户 URL 优先，再试内置镜像（GitHub 直连常见「未知主机/错误码 7」）
+    final urls = <String>[
+      if (userUrl.trim().isNotEmpty) userUrl.trim(),
+      ..._ocrMirrorUrls,
+    ];
+    Object? lastErr;
+    final tried = <String>[];
+    for (final url in urls) {
+      if (tried.contains(url)) continue;
+      tried.add(url);
+      try {
+        await _downloadOne(url);
+        return;
+      } catch (e) {
+        lastErr = e;
+        await _notifyProgress(0, '失败，切换镜像…（$url）', indeterminate: true);
       }
     }
-    await sink.flush();
-    await sink.close();
-    client.close();
-    // 交给 Rust：识别 zip/traineddata 并安装到模型目录（自动解压）
-    await BookService().installOcrModelFile(tmpPath);
-    try {
-      await file.delete();
-    } catch (_) {}
-    // 无感就绪：非对照模式时自动切 OCR 重排
-    if (_mode != 'compare') {
-      setState(() => _mode = 'reflow');
-      await BookService().setPdfScanMode(0);
+    throw _friendlyNetError(lastErr ?? '下载失败');
+  }
+
+  String _friendlyNetError(Object e) {
+    final s = e.toString();
+    if (s.contains('SocketException') ||
+        s.contains('errno = 7') ||
+        s.contains('Failed host lookup') ||
+        s.contains('No address associated')) {
+      return '网络无法解析主机（错误码 7）。请检查网络/代理，'
+          '或改用镜像地址（如 jsdelivr、ghproxy）后重试。';
     }
-    await _notifyDone('安装完成，可切换扫描页为 OCR 重排');
+    return s;
+  }
+
+  Future<void> _downloadOne(String url) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final uri = Uri.parse(url);
+      final req = await client.getUrl(uri);
+      req.followRedirects = true;
+      req.maxRedirects = 5;
+      final resp = await req.close();
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw 'HTTP ${resp.statusCode}（$url）';
+      }
+      final total = resp.contentLength;
+      final tmpPath =
+          '${Directory.systemTemp.path}/ocr_model_${DateTime.now().millisecondsSinceEpoch}';
+      final file = File(tmpPath);
+      final sink = file.openWrite();
+      int received = 0;
+      int lastPct = -1;
+      await for (final chunk in resp) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) {
+          final pct = ((received * 100) / total).clamp(0, 99).toInt();
+          if (pct != lastPct) {
+            lastPct = pct;
+            await _notifyProgress(
+                pct, '$pct%（${_fmtBytes(received)} / ${_fmtBytes(total)}）');
+          }
+        } else {
+          await _notifyProgress(-1, '已下载 ${_fmtBytes(received)}',
+              indeterminate: true);
+        }
+      }
+      await sink.flush();
+      await sink.close();
+      if (received < 1024) {
+        throw '下载内容过小（$received 字节），可能不是模型文件';
+      }
+      await BookService().installOcrModelFile(tmpPath);
+      try {
+        await file.delete();
+      } catch (_) {}
+      if (_mode != 'compare') {
+        setState(() => _mode = 'reflow');
+        await BookService().setPdfScanMode(0);
+      }
+      await _notifyDone('安装完成，可切换扫描页为 OCR 重排');
+    } finally {
+      client.close();
+    }
   }
 
   static String _fmtBytes(int n) {
