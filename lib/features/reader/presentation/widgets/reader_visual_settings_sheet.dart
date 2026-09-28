@@ -1767,10 +1767,14 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
       }
       await sink.flush();
       await sink.close();
-      if (received < 1024) {
+      if (received < 2048) {
         throw '下载内容过小（$received 字节），可能不是模型文件';
       }
-      await BookService().installOcrModelFile(tmpPath);
+      // 先落盘成功再安装；安装失败不得发「已就绪」
+      final installedPath = await BookService().installOcrModelFile(tmpPath);
+      if (installedPath.isEmpty) {
+        throw '安装返回空路径';
+      }
       try {
         await file.delete();
       } catch (_) {}
@@ -1778,7 +1782,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
         setState(() => _mode = 'reflow');
         await BookService().setPdfScanMode(0);
       }
-      await _notifyDone('安装完成，可切换扫描页为 OCR 重排');
+      await _notifyDone('已写入：$installedPath');
     } finally {
       client.close();
     }

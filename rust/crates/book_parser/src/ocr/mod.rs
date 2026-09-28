@@ -191,6 +191,15 @@ impl OcrModelManager {
 
     /// 从字节安装（下载完成后落盘）
     pub fn install_from_bytes(&self, bytes: &[u8]) -> Result<PathBuf> {
+        // 防「假成功」：空包/错误页/极小文件不得当模型装入
+        if bytes.len() < 2048 {
+            anyhow::bail!("模型数据过小（{} 字节），下载可能失败", bytes.len());
+        }
+        // 常见错误页/HTML
+        let head = &bytes[..bytes.len().min(64)];
+        if head.starts_with(b"<") || head.starts_with(b"<!DOCTYPE") {
+            anyhow::bail!("内容是 HTML 而非模型文件（可能被网关拦截）");
+        }
         let dst_dir = self.root();
         std::fs::create_dir_all(&dst_dir)?;
         let lang = self.lang();
@@ -286,7 +295,7 @@ mod tests {
     fn install_and_status() {
         let tmp = tempfile::tempdir().unwrap();
         let m = OcrModelManager::new(tmp.path());
-        let p = m.install_from_bytes(b"FAKE_TESSDATA").unwrap();
+        let p = m.install_from_bytes(&vec![7u8; 8192]).unwrap();
         assert!(p.exists());
         match m.status() {
             OcrModelStatus::Installed { lang, .. } => assert_eq!(lang, "chi_sim"),
@@ -294,6 +303,17 @@ mod tests {
         }
         m.uninstall().unwrap();
         assert_eq!(m.status(), OcrModelStatus::NotInstalled);
+    }
+
+    #[test]
+    fn install_rejects_empty_and_html() {
+        let tmp = tempfile::tempdir().unwrap();
+        let m = OcrModelManager::new(tmp.path());
+        assert!(m.install_from_bytes(b"").is_err());
+        assert!(m.install_from_bytes(b"<html>not a model</html>").is_err());
+        // 足够大的假数据可通过（真 traineddata 另验）
+        let big = vec![0u8; 4096];
+        assert!(m.install_from_bytes(&big).is_ok());
     }
 
     #[test]

@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 网络下载 OCR 模型（无此权限则 Release 包零流量） -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- OCR 模型下载进度系统通知（Android 13+） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
