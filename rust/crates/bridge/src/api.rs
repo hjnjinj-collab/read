@@ -136,39 +136,73 @@ fn process_comic_chapter(
     Ok(pages.into_iter().map(crate::PageInfo::from).collect())
 }
 
-/// PDF 分页：按章（页块）提取文本 → layout_text
+/// PDF 分页：文字页走排版，扫描页走 gallery 图
 fn process_pdf_chapter(
     handle: &crate::BookHandle,
     chapter_index: usize,
     config: &LayoutConfig,
 ) -> anyhow::Result<Vec<crate::PageInfo>> {
+    use book_parser::pdf_parser::PdfPageKind;
     let pdf = handle
         .pdf
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("非 PDF 句柄"))?;
-    // 只提取本章页块文本（大文件不全书提取）
     let chs = pdf.get_chapter_list()?;
     let ch = chs
         .get(chapter_index)
         .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
     let start = ch.start_byte_offset.unwrap_or(0);
     let end = ch.end_byte_offset.unwrap_or(start + 1);
-    // PdfParser::extract_pages_text 需要 &self；通过 get_chapter_content 需要 &mut
-    // 这里只读提取：用公开 API 时需 &mut，故改调 chapter content 在 parse 侧
-    // 简化：对 handle.pdf 不可变借用时用 extract（已是 &self）
-    let text = extract_pdf_pages_text(pdf, start, end)?;
+
+    // 逐页分流：文字→layout_text 段；扫描→gallery 图；空白→占位
+    let mut items: Vec<layout_engine::LayoutItem> = Vec::new();
+    for p in start..end {
+        match pdf.page_kind(p) {
+            PdfPageKind::Text => {
+                let text = pdf.extract_pages_text(p, p + 1)?;
+                if !text.trim().is_empty() {
+                    items.push(layout_engine::LayoutItem::text(text.trim_end()));
+                }
+            }
+            PdfPageKind::Image => {
+                if let Some(img) = pdf.list_page_images(p).next() {
+                    let aspect = if img.height > 0 {
+                        img.width as f32 / img.height as f32
+                    } else {
+                        0.75
+                    };
+                    items.push(layout_engine::LayoutItem::Image {
+                        resource_href: img.href,
+                        aspect,
+                        width_percent: None,
+                        align: None,
+                        bleed: true,
+                        gallery: true,
+                    });
+                }
+            }
+            PdfPageKind::Blank => {
+                items.push(layout_engine::LayoutItem::text(format!(
+                    "（第 {} 页）",
+                    p + 1
+                )));
+            }
+        }
+    }
+
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = build_layout_engine(config.clone(), font_manager);
-    let pages = engine.layout_text(&text, chapter_index)?;
+    // 混排：有图用 layout_items；纯文可用 layout_text
+    let pages = if items
+        .iter()
+        .any(|i| matches!(i, layout_engine::LayoutItem::Image { .. }))
+    {
+        engine.layout_items(&items, chapter_index)?
+    } else {
+        let text = pdf.extract_pages_text(start, end)?;
+        engine.layout_text(&text, chapter_index)?
+    };
     Ok(pages.into_iter().map(crate::PageInfo::from).collect())
-}
-
-fn extract_pdf_pages_text(
-    pdf: &book_parser::pdf_parser::PdfParser,
-    start: usize,
-    end: usize,
-) -> anyhow::Result<String> {
-    pdf.extract_pages_text(start, end)
 }
 
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
@@ -3614,6 +3648,10 @@ pub fn get_book_resource(book_id: String, resource_href: String) -> anyhow::Resu
     // 压缩包漫画：按需读 ZIP 条目
     if let Some(comic) = handle.comic.as_ref() {
         return comic.get_resource(&resource_href);
+    }
+    // PDF 扫描页图
+    if let Some(pdf) = handle.pdf.as_ref() {
+        return BookParser::get_resource(pdf, &resource_href);
     }
     let structured = handle
         .structured

@@ -21,6 +21,7 @@ tokio = { workspace = true }     # 异步运行时
 log = { workspace = true }       # 日志
 zhconv = "0.4.1"
 lopdf = "0.45.0"
+flate2 = "1.1.10"
 
 # RAR/CBR：libunrar C++ 含 Win32 专用源（isnt.cpp/wbemidl），Android NDK 无法编译。
 # 桌面 Windows 启用；Android 仅 CBZ/ZIP（rar_supported()=false，解析期明确报错）。
