@@ -50,14 +50,31 @@ class OcrService {
     }
   }
 
-  /// 预识别 PDF 章扫描页，写入 Rust 缓存（key = image href）
-  Future<int> preOcrPdfChapter(String bookId, int chapterIndex) async {
+  /// 已 OCR 过的章（避免每次翻页重复识别导致卡顿）
+  final Set<String> _doneChapters = {};
+  final Set<String> _inflight = {};
+
+  /// 预识别 PDF 章扫描页；[blocking]=false 时后台跑不挡翻页
+  Future<int> preOcrPdfChapter(
+    String bookId,
+    int chapterIndex, {
+    bool blocking = false,
+  }) async {
     if (!_supported) return 0;
+    final key = '$bookId#$chapterIndex';
+    if (_doneChapters.contains(key) || _inflight.contains(key)) return 0;
+    _inflight.add(key);
     try {
       final hrefs = await BookService().pdfImageHrefs(bookId, chapterIndex);
       var ok = 0;
       for (final href in hrefs) {
         try {
+          // 已有缓存则跳过（性能）
+          final cached = await BookService().getOcrPageText(href);
+          if (cached.trim().isNotEmpty) {
+            ok++;
+            continue;
+          }
           final bytes = await BookService().getBookResource(bookId, href);
           final text = await recognizeImage(bytes);
           if (text.isNotEmpty) {
@@ -68,16 +85,21 @@ class OcrService {
           debugPrint('preOcr $href: $e');
         }
       }
+      _doneChapters.add(key);
       debugPrint('preOcrPdfChapter ch=$chapterIndex ok=$ok/${hrefs.length}');
       return ok;
     } catch (e) {
       debugPrint('preOcrPdfChapter: $e');
       return 0;
+    } finally {
+      _inflight.remove(key);
     }
   }
 
   void dispose() {
     _recognizer?.close();
     _recognizer = null;
+    _doneChapters.clear();
+    _inflight.clear();
   }
 }

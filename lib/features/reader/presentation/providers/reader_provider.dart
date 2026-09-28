@@ -1352,13 +1352,21 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 分流：EPUB 结构化分页 / TXT 文本分页
       var page;
       if (usesStructuredLayout) {
-        // PDF 扫描页：先 ML Kit 预识别写入 OCR 缓存，再分页重排
-        // （否则一直是原图，字体/背景设置无效）
+        // PDF 扫描页：后台 ML Kit 预识别（不挡翻页；每章只跑一次）
         if (_isPdf) {
-          try {
-            await OcrService.instance
-                .preOcrPdfChapter(requestedBookId, requestedChapterIndex);
-          } catch (_) {}
+          unawaited(() async {
+            try {
+              final n = await OcrService.instance
+                  .preOcrPdfChapter(requestedBookId, requestedChapterIndex);
+              // 首次识别成功后刷新一次，让用户看到文字重排
+              if (n > 0 && state.bookId == requestedBookId) {
+                _invalidateFrames(reason: 'pdf-ocr');
+                await _loadCurrentPage(
+                  anchorCharOffset: state.currentPage?.startCharIndex,
+                );
+              }
+            } catch (_) {}
+          }());
         }
         // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
         int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t

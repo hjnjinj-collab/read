@@ -307,6 +307,23 @@ fn ocr_manager() -> Option<book_parser::ocr::OcrModelManager> {
     OCR_ENGINE.lock().unwrap().clone()
 }
 
+/// OCR/扫描文本过短 → 判为插画页，保留原图
+fn is_illustration_text(t: &str) -> bool {
+    let n = t.chars().filter(|c| !c.is_whitespace()).count();
+    n < 24
+}
+
+/// 对 OCR/纯文本套用段落格式（首行缩进/段距），对齐 TXT 排版
+fn format_pdf_text(raw: &str) -> String {
+    let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
+    if !para_settings.needs_formatting() {
+        return raw.to_string();
+    }
+    let formatter = reader_core::ParagraphFormatter::new(para_settings);
+    formatter.format(raw)
+}
+
 /// PDF 分页：文字页/OCR 重排走排版，对照模式走 gallery 图
 fn process_pdf_chapter(
     handle: &crate::BookHandle,
@@ -332,7 +349,6 @@ fn process_pdf_chapter(
         .map(|m| m.build_engine().is_ready())
         .unwrap_or(false);
 
-    // 逐页分流
     let mut items: Vec<layout_engine::LayoutItem> = Vec::new();
     for p in start..end {
         let kind = pdf.page_kind(p);
@@ -340,57 +356,52 @@ fn process_pdf_chapter(
             PdfPageKind::Text => {
                 let text = pdf.extract_pages_text(p, p + 1)?;
                 if !text.trim().is_empty() {
-                    items.push(layout_engine::LayoutItem::text(text.trim_end()));
+                    // 与 TXT 同：首行缩进/段距
+                    items.push(layout_engine::LayoutItem::text(
+                        format_pdf_text(text.trim_end()),
+                    ));
                 }
             }
             PdfPageKind::Image => {
-                // 1) 缓存（Dart ML Kit 已识别）
-                let cache_key = format!("pdf:{}", pdf.list_page_images(p).next().map(|i| i.href.clone()).unwrap_or_default());
-                let cached = OCR_PAGE_CACHE.get_cached_text(&cache_key);
-                if let Some(text) = cached {
-                    let t = text.trim();
-                    if !t.is_empty() {
-                        items.push(layout_engine::LayoutItem::text(t.to_string()));
-                        continue;
-                    }
-                }
-                // 2) 缓存按 href
-                if let Some(img) = pdf.list_page_images(p).next() {
-                    if let Some(t) = OCR_PAGE_CACHE.get_cached_text(&img.href) {
-                        let t = t.trim();
-                        if !t.is_empty() {
-                            items.push(layout_engine::LayoutItem::text(t.to_string()));
-                            continue;
-                        }
-                    }
-                }
-                // 3) 本机 tesseract（桌面）/ 否则对照图
+                let img_opt = pdf.list_page_images(p).next();
+                // 缓存 OCR 文本（Dart ML Kit）
                 let mut ocr_text: Option<String> = None;
-                let want_ocr = matches!(mode, PdfScanMode::Reflow)
-                    || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
-                if want_ocr && ocr_ready {
-                    if let (Some(mgr), Some(img)) = (ocr.as_ref(), pdf.list_page_images(p).next())
-                    {
-                        if let Ok(bytes) = pdf.get_resource(&img.href) {
-                            let engine = mgr.build_engine();
-                            if engine.is_ready() {
-                                ocr_text = engine.recognize(&bytes).ok();
+                if let Some(img) = img_opt.as_ref() {
+                    ocr_text = OCR_PAGE_CACHE
+                        .get_cached_text(&img.href)
+                        .or_else(|| {
+                            OCR_PAGE_CACHE
+                                .get_cached_text(&format!("pdf:{}", img.href))
+                        });
+                }
+                // 本机引擎兜底（桌面 tesseract）
+                if ocr_text.is_none() {
+                    let want_ocr = matches!(mode, PdfScanMode::Reflow)
+                        || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
+                    if want_ocr && ocr_ready {
+                        if let (Some(mgr), Some(img)) = (ocr.as_ref(), img_opt.as_ref()) {
+                            if let Ok(bytes) = pdf.get_resource(&img.href) {
+                                let engine = mgr.build_engine();
+                                if engine.is_ready() {
+                                    ocr_text = engine.recognize(&bytes).ok();
+                                }
                             }
                         }
                     }
                 }
-                if let Some(text) = ocr_text {
-                    let t = text.trim();
-                    if !t.is_empty() {
-                        items.push(layout_engine::LayoutItem::text(t.to_string()));
-                    } else {
-                        items.push(layout_engine::LayoutItem::text(format!(
-                            "（第 {} 页扫描件）",
-                            p + 1
-                        )));
-                    }
-                } else if let Some(img) = pdf.list_page_images(p).next() {
-                    // 对照 / 无 OCR：整页图
+
+                let text_ok = ocr_text
+                    .as_deref()
+                    .map(|t| !t.trim().is_empty() && !is_illustration_text(t))
+                    .unwrap_or(false);
+
+                if text_ok {
+                    // 文字足够多：重排（缩进等已套用）
+                    items.push(layout_engine::LayoutItem::text(format_pdf_text(
+                        ocr_text.as_deref().unwrap_or("").trim(),
+                    )));
+                } else if let Some(img) = img_opt {
+                    // 插画/短文本页：保留原图，避免「插画消失」
                     let aspect = if img.height > 0 {
                         img.width as f32 / img.height as f32
                     } else {
