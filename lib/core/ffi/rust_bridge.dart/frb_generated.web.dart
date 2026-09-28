@@ -85,6 +85,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiTextWidth dco_decode_ffi_text_width(dynamic raw);
 
   @protected
+  int dco_decode_i_32(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
@@ -146,6 +149,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PageSegInfo dco_decode_page_seg_info(dynamic raw);
+
+  @protected
+  PdfScanMode dco_decode_pdf_scan_mode(dynamic raw);
 
   @protected
   (String, String) dco_decode_record_string_string(dynamic raw);
@@ -232,6 +238,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiTextWidth sse_decode_ffi_text_width(SseDeserializer deserializer);
 
   @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
@@ -295,6 +304,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PageSegInfo sse_decode_page_seg_info(SseDeserializer deserializer);
 
   @protected
+  PdfScanMode sse_decode_pdf_scan_mode(SseDeserializer deserializer);
+
+  @protected
   (String, String) sse_decode_record_string_string(SseDeserializer deserializer);
 
   @protected
@@ -314,9 +326,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_usize(SseDeserializer deserializer);
-
-  @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   void sse_encode_AnyhowException(AnyhowException self, SseSerializer serializer);
@@ -382,6 +391,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_ffi_text_width(FfiTextWidth self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
@@ -445,6 +457,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_page_seg_info(PageSegInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_pdf_scan_mode(PdfScanMode self, SseSerializer serializer);
+
+  @protected
   void sse_encode_record_string_string((String, String) self, SseSerializer serializer);
 
   @protected
@@ -464,9 +479,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 }
 
 // Section: wire_class

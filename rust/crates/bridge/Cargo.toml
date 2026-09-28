@@ -23,6 +23,7 @@ uuid = { version = "1.6", features = ["v4"] }
 encoding_rs = "0.8"
 zip = "0.6"
 lru = "0.12"                  # 结构化路径分页缓存
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [features]
 default = ["js-engine"]

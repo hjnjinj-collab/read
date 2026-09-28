@@ -6,6 +6,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'core/database/app_database.dart';
 import 'core/database/app_settings_service.dart';
@@ -91,6 +92,12 @@ void main() async {
       commentScale: settings.commentScale,
       letterSpacing: settings.letterSpacing,
     );
+  } catch (_) {}
+
+  // OCR 模型目录（可下载，不打进 APK）
+  try {
+    final support = await getApplicationSupportDirectory();
+    await BookService().setOcrModelDir('${support.path}/ocr');
   } catch (_) {}
 
   runApp(ProviderScope(

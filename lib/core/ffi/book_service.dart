@@ -802,6 +802,32 @@ class BookService {
     );
   }
 
+  /// PDF 扫描页：0=OCR重排 1=对照 2=自动
+  Future<void> setPdfScanMode(int mode) async {
+    await rust_api.setPdfScanMode(mode: mode);
+  }
+
+  Future<void> setOcrModelDir(String dir) async {
+    await rust_api.setOcrModelDir(dir: dir);
+  }
+
+  Future<String> ocrModelStatus() async {
+    return await rust_api.ocrModelStatus();
+  }
+
+  Future<String> installOcrModelFile(String srcPath) async {
+    return await rust_api.installOcrModelFile(srcPath: srcPath);
+  }
+
+  /// 从 URL 下载 OCR 模型（traineddata 或含 traineddata 的 zip）
+  Future<String> downloadOcrModel(String url) async {
+    return await rust_api.downloadOcrModel(url: url);
+  }
+
+  Future<void> uninstallOcrModel() async {
+    await rust_api.uninstallOcrModel();
+  }
+
   /// Get default content cleaning options (获取默认净化选项)
   Future<rust_api.ContentCleaningOptions> getDefaultCleaningOptions() async {
     return await rust_api.ContentCleaningOptions.default_();

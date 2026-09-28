@@ -20,6 +20,7 @@ pub use traits::{BookParser, BookMetadata, ChapterInfo, BookFormat};
 
 pub mod comic_archive;
 pub mod pdf_parser;
+pub mod ocr;
 
 // libunrar 依赖 Win32 注册表/加密 API（GetRarDataPath / GetRnd）
 #[cfg(windows)]

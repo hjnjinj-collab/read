@@ -7,9 +7,28 @@ import 'frb_generated.dart';
 import 'lib.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `apply_replace_rules_to_blocks_inner`, `apply_replace_rules_to_blocks`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `current_seg_threshold`, `effective_comment_scale`, `effective_justify`, `effective_letter_spacing`, `effective_paragraph_spacing`, `effective_punct_compress`, `evict_book_sessions_over_cap`, `evict_hot_cache_if_needed`, `find_all_ci`, `fnv1a64`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `hot_page_file`, `invalidate_preprocessed_cache`, `is_expired`, `layout_fingerprint`, `load_hot_pages_from_disk`, `load_txt_hot_pages_from_disk`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_comic_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `remove_duplicate_title_blocks`, `save_hot_pages_to_disk`, `save_txt_hot_pages_to_disk`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `smart_seg_config`, `structured_cache_key`, `structured_layout_config`, `touch_book_recency`, `trigger_preload_async`, `txt_hot_page_file`
+// These functions are ignored because they are not marked as `pub`: `apply_content_cleaning`, `apply_paragraph_format_settings`, `apply_replace_rules_to_blocks_inner`, `apply_replace_rules_to_blocks`, `blocks_to_layout_items_inner`, `blocks_to_layout_items`, `build_cleaner_from_options`, `build_epub_cleaner_from_options`, `build_excerpt`, `build_layout_engine`, `clear_structured_pagination_cache_for_book`, `clip_runs`, `current_seg_threshold`, `effective_comment_scale`, `effective_justify`, `effective_letter_spacing`, `effective_paragraph_spacing`, `effective_punct_compress`, `evict_book_sessions_over_cap`, `evict_hot_cache_if_needed`, `find_all_ci`, `fnv1a64`, `from_args`, `get_chapter_content_impl`, `get_chapter_content_quiet`, `get_preload_executor`, `get_preload_runtime`, `get_preprocessor_for_rules`, `hot_page_file`, `invalidate_preprocessed_cache`, `is_expired`, `layout_fingerprint`, `load_hot_pages_from_disk`, `load_txt_hot_pages_from_disk`, `locate_page_for_offset`, `locate_structured_page`, `map_align`, `map_run`, `merge_needle_hits`, `new`, `new`, `ocr_manager`, `page_has_text`, `parse_txt_file_inner`, `preload_txt_warm`, `prewarm_shared_glyph`, `process_and_layout_chapter_inner`, `process_and_layout_chapter`, `process_comic_chapter`, `process_pdf_chapter`, `process_structured_chapter`, `readerTraceCompat`, `remember_txt_layout`, `remove_duplicate_title_blocks`, `save_hot_pages_to_disk`, `save_txt_hot_pages_to_disk`, `search_epub_chapter`, `search_lower_char`, `search_txt_chapter`, `shared_tokio_runtime`, `slice_utf8_safe`, `smart_seg_config`, `structured_cache_key`, `structured_layout_config`, `touch_book_recency`, `trigger_preload_async`, `txt_hot_page_file`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BOOK_RECENCY`, `FfiLoadingProgress`, `PreloadRuntime`, `StructuredCacheEntry`, `StructuredPageKey`, `StructuredParams`, `TxtLayoutSnapshot`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `deref`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `hash`, `initialize`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `deref`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `hash`, `initialize`
+
+Future<void> setPdfScanMode({required int mode}) => RustLib.instance.api.crateApiSetPdfScanMode(mode: mode);
+
+Future<PdfScanMode> pdfScanMode() => RustLib.instance.api.crateApiPdfScanMode();
+
+Future<void> setOcrModelDir({required String dir}) => RustLib.instance.api.crateApiSetOcrModelDir(dir: dir);
+
+/// OCR 模型状态 JSON：`{"installed":bool,"lang":"chi_sim","ready":bool}`
+Future<String> ocrModelStatus() => RustLib.instance.api.crateApiOcrModelStatus();
+
+/// 从本地文件安装 traineddata
+Future<String> installOcrModelFile({required String srcPath}) =>
+    RustLib.instance.api.crateApiInstallOcrModelFile(srcPath: srcPath);
+
+/// 从 URL 下载并安装 OCR 模型（不打包进 APK 的可下载接口）
+Future<String> downloadOcrModel({required String url}) => RustLib.instance.api.crateApiDownloadOcrModel(url: url);
+
+/// 卸载 OCR 模型
+Future<void> uninstallOcrModel() => RustLib.instance.api.crateApiUninstallOcrModel();
 
 /// FFI：设置热分页缓存目录（applicationSupportDirectory/legado_page_hot）
 Future<void> setHotPageCacheDir({required String dir}) => RustLib.instance.api.crateApiSetHotPageCacheDir(dir: dir);
@@ -1111,6 +1130,18 @@ class FfiTextWidth {
           fontSize == other.fontSize &&
           text == other.text &&
           width == other.width;
+}
+
+/// PDF 扫描页显示模式
+enum PdfScanMode {
+  /// OCR 重排：出文字，主题底+可换字体（默认）
+  reflow,
+
+  /// 对照：整页原图
+  compare,
+
+  /// 自动：有文本层用文本层，扫描页 OCR（无模型则对照）
+  auto,
 }
 
 /// 单条搜索命中（EPUB/TXT 同构契约）

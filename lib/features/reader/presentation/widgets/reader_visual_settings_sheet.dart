@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
+import '../../../../core/ffi/book_service.dart';
 import '../../../../core/services/font_provider.dart';
 import '../../../../core/services/reader_font.dart';
 import '../../../../core/theme/app_icons.dart';
@@ -177,6 +180,16 @@ class _ReaderVisualSettingsSheetState
                             ?.withValues(alpha: 0.55),
                       ),
                     ),
+                  );
+                }
+                // PDF：排版页顶部挂扫描件 OCR 控件
+                final isPdf = ref.read(readerProvider.notifier).isPdf;
+                if (isPdf && i == 1) {
+                  return Column(
+                    children: const [
+                      _PdfOcrPanel(),
+                      Expanded(child: _TypographyPage()),
+                    ],
                   );
                 }
                 final pages = const [
@@ -1612,6 +1625,135 @@ class _FontSelectSheetState extends ConsumerState<_FontSelectSheet> {
           ),
         ],
         ),
+      ),
+    );
+  }
+}
+
+// ── PDF 扫描件 OCR（模型可下载，不进 APK） ──
+
+class _PdfOcrPanel extends ConsumerStatefulWidget {
+  const _PdfOcrPanel();
+
+  @override
+  ConsumerState<_PdfOcrPanel> createState() => _PdfOcrPanelState();
+}
+
+class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
+  String _status = '';
+  String _mode = 'auto'; // reflow | compare | auto
+  bool _busy = false;
+  final _urlCtrl = TextEditingController(
+    text: '',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    try {
+      final s = await BookService().ocrModelStatus();
+      if (mounted) setState(() => _status = s);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final installed = _status.contains('"installed":true');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '扫描 PDF',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _mode,
+                  isExpanded: true,
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'auto', child: Text('自动（推荐）')),
+                    DropdownMenuItem(
+                        value: 'reflow', child: Text('OCR 重排（可换字体）')),
+                    DropdownMenuItem(
+                        value: 'compare', child: Text('对照（原图）')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _mode = v);
+                    final m = v == 'reflow'
+                        ? 0
+                        : v == 'compare'
+                            ? 1
+                            : 2;
+                    unawaited(BookService().setPdfScanMode(m));
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            installed
+                ? 'OCR 模型：已安装（重排可用）'
+                : 'OCR 模型：未安装（扫描页为原图对照）',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _urlCtrl,
+            decoration: const InputDecoration(
+              labelText: 'OCR 模型下载 URL（.traineddata 或 zip）',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        final url = _urlCtrl.text.trim();
+                        if (url.isEmpty) return;
+                        setState(() => _busy = true);
+                        try {
+                          await BookService().downloadOcrModel(url);
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('下载失败：$e')),
+                            );
+                          }
+                        }
+                        if (mounted) setState(() => _busy = false);
+                        await _refresh();
+                      },
+                child: Text(_busy ? '下载中…' : '下载模型'),
+              ),
+              const SizedBox(width: 8),
+              if (installed)
+                TextButton(
+                  onPressed: () async {
+                    await BookService().uninstallOcrModel();
+                    await _refresh();
+                  },
+                  child: const Text('卸载'),
+                ),
+            ],
+          ),
+          const Divider(height: 16),
+        ],
       ),
     );
   }

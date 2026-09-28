@@ -136,7 +136,124 @@ fn process_comic_chapter(
     Ok(pages.into_iter().map(crate::PageInfo::from).collect())
 }
 
-/// PDF 分页：文字页走排版，扫描页走 gallery 图
+/// PDF 扫描页显示模式
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PdfScanMode {
+    /// OCR 重排：出文字，主题底+可换字体（默认）
+    Reflow = 0,
+    /// 对照：整页原图
+    Compare = 1,
+    /// 自动：有文本层用文本层，扫描页 OCR（无模型则对照）
+    Auto = 2,
+}
+
+static PDF_SCAN_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
+pub fn set_pdf_scan_mode(mode: u8) {
+    PDF_SCAN_MODE.store(mode.min(2), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn pdf_scan_mode() -> PdfScanMode {
+    match PDF_SCAN_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => PdfScanMode::Reflow,
+        1 => PdfScanMode::Compare,
+        _ => PdfScanMode::Auto,
+    }
+}
+
+/// OCR 模型根目录（app support/ocr）
+static OCR_MODEL_DIR: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
+static OCR_ENGINE: Lazy<Mutex<Option<book_parser::ocr::OcrModelManager>>> =
+    Lazy::new(|| Mutex::new(None));
+
+pub fn set_ocr_model_dir(dir: String) {
+    *OCR_MODEL_DIR.lock().unwrap() = dir.clone();
+    let mgr = book_parser::ocr::OcrModelManager::new(dir);
+    *OCR_ENGINE.lock().unwrap() = Some(mgr);
+}
+
+/// OCR 模型状态 JSON：`{"installed":bool,"lang":"chi_sim","ready":bool}`
+pub fn ocr_model_status() -> String {
+    let Some(mgr) = ocr_manager() else {
+        return r#"{"installed":false,"lang":"","ready":false}"#.into();
+    };
+    let st = mgr.status();
+    let ready = mgr.build_engine().is_ready();
+    match st {
+        book_parser::ocr::OcrModelStatus::Installed { lang, data_file } => format!(
+            r#"{{"installed":true,"lang":"{lang}","data_file":"{}","ready":{ready}}}"#,
+            data_file.replace('\\', "\\\\")
+        ),
+        book_parser::ocr::OcrModelStatus::NotInstalled => {
+            format!(r#"{{"installed":false,"lang":"{}","ready":false}}"#, mgr.lang())
+        }
+    }
+}
+
+/// 从本地文件安装 traineddata
+pub fn install_ocr_model_file(src_path: String) -> anyhow::Result<String> {
+    let Some(mgr) = ocr_manager() else {
+        anyhow::bail!("OCR 模型目录未初始化");
+    };
+    let dst = mgr.install_from_file(std::path::Path::new(&src_path))?;
+    Ok(dst.display().to_string())
+}
+
+/// 从 URL 下载并安装 OCR 模型（不打包进 APK 的可下载接口）
+pub async fn download_ocr_model(url: String) -> anyhow::Result<String> {
+    let Some(mgr) = ocr_manager() else {
+        anyhow::bail!("OCR 模型目录未初始化（先 setOcrModelDir）");
+    };
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| anyhow::anyhow!("下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        anyhow::bail!("下载 HTTP {}", resp.status());
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| anyhow::anyhow!("读下载体失败: {e}"))?;
+    // .traineddata 直接落盘；zip 包取第一个 *.traineddata（简化）
+    if url.ends_with(".traineddata") || bytes.len() > 1024 {
+        let is_zip = bytes.starts_with(b"PK\x03\x04");
+        if is_zip {
+            let cursor = std::io::Cursor::new(bytes.to_vec());
+            let mut zip = zip::ZipArchive::new(cursor)
+                .map_err(|e| anyhow::anyhow!("模型 zip 无效: {e}"))?;
+            for i in 0..zip.len() {
+                let mut f = zip
+                    .by_index(i)
+                    .map_err(|e| anyhow::anyhow!("zip 条目: {e}"))?;
+                let name = f.name().to_string();
+                if name.ends_with(".traineddata") {
+                    let mut buf = Vec::new();
+                    std::io::Read::read_to_end(&mut f, &mut buf)?;
+                    let dst = mgr.install_from_bytes(&buf)?;
+                    return Ok(dst.display().to_string());
+                }
+            }
+            anyhow::bail!("zip 内无 .traineddata");
+        }
+        let dst = mgr.install_from_bytes(&bytes)?;
+        return Ok(dst.display().to_string());
+    }
+    anyhow::bail!("下载内容不是 traineddata")
+}
+
+/// 卸载 OCR 模型
+pub fn uninstall_ocr_model() -> anyhow::Result<()> {
+    let Some(mgr) = ocr_manager() else {
+        return Ok(());
+    };
+    mgr.uninstall()
+}
+
+fn ocr_manager() -> Option<book_parser::ocr::OcrModelManager> {
+    OCR_ENGINE.lock().unwrap().clone()
+}
+
+/// PDF 分页：文字页/OCR 重排走排版，对照模式走 gallery 图
 fn process_pdf_chapter(
     handle: &crate::BookHandle,
     chapter_index: usize,
@@ -154,10 +271,18 @@ fn process_pdf_chapter(
     let start = ch.start_byte_offset.unwrap_or(0);
     let end = ch.end_byte_offset.unwrap_or(start + 1);
 
-    // 逐页分流：文字→layout_text 段；扫描→gallery 图；空白→占位
+    let mode = pdf_scan_mode();
+    let ocr = ocr_manager();
+    let ocr_ready = ocr
+        .as_ref()
+        .map(|m| m.build_engine().is_ready())
+        .unwrap_or(false);
+
+    // 逐页分流
     let mut items: Vec<layout_engine::LayoutItem> = Vec::new();
     for p in start..end {
-        match pdf.page_kind(p) {
+        let kind = pdf.page_kind(p);
+        match kind {
             PdfPageKind::Text => {
                 let text = pdf.extract_pages_text(p, p + 1)?;
                 if !text.trim().is_empty() {
@@ -165,7 +290,33 @@ fn process_pdf_chapter(
                 }
             }
             PdfPageKind::Image => {
-                if let Some(img) = pdf.list_page_images(p).next() {
+                // 重排模式且 OCR 就绪 → 识别成文字（主题底+可换字体）
+                let mut ocr_text: Option<String> = None;
+                let want_ocr = matches!(mode, PdfScanMode::Reflow)
+                    || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
+                if want_ocr && ocr_ready {
+                    if let (Some(mgr), Some(img)) = (ocr.as_ref(), pdf.list_page_images(p).next())
+                    {
+                        if let Ok(bytes) = pdf.get_resource(&img.href) {
+                            let engine = mgr.build_engine();
+                            if engine.is_ready() {
+                                ocr_text = engine.recognize(&bytes).ok();
+                            }
+                        }
+                    }
+                }
+                if let Some(text) = ocr_text {
+                    let t = text.trim();
+                    if !t.is_empty() {
+                        items.push(layout_engine::LayoutItem::text(t.to_string()));
+                    } else {
+                        items.push(layout_engine::LayoutItem::text(format!(
+                            "（第 {} 页扫描件）",
+                            p + 1
+                        )));
+                    }
+                } else if let Some(img) = pdf.list_page_images(p).next() {
+                    // 对照 / 无 OCR：整页图
                     let aspect = if img.height > 0 {
                         img.width as f32 / img.height as f32
                     } else {
@@ -192,7 +343,6 @@ fn process_pdf_chapter(
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = build_layout_engine(config.clone(), font_manager);
-    // 混排：有图用 layout_items；纯文可用 layout_text
     let pages = if items
         .iter()
         .any(|i| matches!(i, layout_engine::LayoutItem::Image { .. }))
@@ -200,7 +350,12 @@ fn process_pdf_chapter(
         engine.layout_items(&items, chapter_index)?
     } else {
         let text = pdf.extract_pages_text(start, end)?;
-        engine.layout_text(&text, chapter_index)?
+        // OCR 重排时 items 已含识别文本，改走 layout_items 保顺序
+        if !items.is_empty() {
+            engine.layout_items(&items, chapter_index)?
+        } else {
+            engine.layout_text(&text, chapter_index)?
+        }
     };
     Ok(pages.into_iter().map(crate::PageInfo::from).collect())
 }
