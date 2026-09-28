@@ -32,6 +32,10 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
@@ -49,4 +53,6 @@ flutter {
 dependencies {
     // OCR 下载进度系统通知（NotificationCompat）
     implementation("androidx.core:core-ktx:1.13.1")
+    // ML Kit 中文文字识别（TextRecognitionScript.chinese）
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 }
