@@ -87,6 +87,12 @@ class OcrService {
       }
       _doneChapters.add(key);
       debugPrint('preOcrPdfChapter ch=$chapterIndex ok=$ok/${hrefs.length}');
+      if (ok > 0) {
+        // 批量完成后一次失效分页缓存（不要每页 clear）
+        try {
+          await BookService().finalizeOcrBatch();
+        } catch (_) {}
+      }
       return ok;
     } catch (e) {
       debugPrint('preOcrPdfChapter: $e');

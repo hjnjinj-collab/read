@@ -178,7 +178,13 @@ static OCR_PAGE_CACHE: Lazy<book_parser::ocr::OcrPageCache> =
 
 /// 写入某页 OCR 文本缓存（Dart ML Kit 识别后落盘，Rust 分页时优先读）
 pub fn put_ocr_page_text(key: String, text: String) -> anyhow::Result<()> {
-    OCR_PAGE_CACHE.put_text(&key, &text)
+    OCR_PAGE_CACHE.put_text(&key, &text)?;
+    Ok(())
+}
+
+/// 一批 OCR 写完后调用：只失效一次分页缓存（避免每页 clear 导致卡顿）
+pub fn finalize_ocr_batch() {
+    STRUCTURED_PAGINATION_CACHE.lock().unwrap().clear();
 }
 
 /// 取 OCR 文本缓存
@@ -3323,32 +3329,9 @@ fn process_structured_chapter(
     params: &StructuredParams,
     prefer_try_lock: bool,
 ) -> anyhow::Result<Option<Arc<Vec<crate::PageInfo>>>> {
-    // 压缩包漫画：一页一图，不走 EPUB IR 文本流水线
-    {
-        let books = if prefer_try_lock {
-            match BOOKS.try_read() {
-                Ok(g) => g,
-                Err(_) => return Ok(None),
-            }
-        } else {
-            BOOKS.read().unwrap()
-        };
-        if let Some(handle) = books.get(book_id) {
-            if handle.comic.is_some() {
-                let pages = process_comic_chapter(handle, chapter_index, &params.config)?;
-                return Ok(Some(Arc::new(pages)));
-            }
-            if handle.pdf.is_some() {
-                let pages = process_pdf_chapter(handle, chapter_index, &params.config)?;
-                return Ok(Some(Arc::new(pages)));
-            }
-        }
-    }
-
     let cache_key = structured_cache_key(book_id, chapter_index, params);
 
-    // M8-P4 缓存命中：Arc::clone 免整章克隆
-    // 阶段2优化：检查 TTL 过期
+    // 缓存命中（TXT/EPUB/PDF/漫画统一走 LRU，翻页不再重算）
     if let Some(entry) = STRUCTURED_PAGINATION_CACHE
         .lock()
         .unwrap()
@@ -3358,11 +3341,10 @@ fn process_structured_chapter(
         if !entry.is_expired(STRUCTURED_CACHE_TTL_SECS) {
             return Ok(Some(entry.pages));
         }
-        // TTL 过期 → 移除旧缓存并重新计算
         STRUCTURED_PAGINATION_CACHE.lock().unwrap().pop(&cache_key);
     }
 
-    // 跨重启热缓存：内存 miss 先读盘（键用 source_path + 布局指纹，不含 book_id）
+    // 跨重启热缓存
     {
         let source_path = BOOKS
             .read()
@@ -3376,6 +3358,38 @@ fn process_structured_chapter(
                     .lock()
                     .unwrap()
                     .put(cache_key.clone(), entry);
+                return Ok(Some(pages));
+            }
+        }
+    }
+
+    // 压缩包漫画 / PDF：一页一图或 OCR 文本，写入同一分页缓存
+    {
+        let books = if prefer_try_lock {
+            match BOOKS.try_read() {
+                Ok(g) => g,
+                Err(_) => return Ok(None),
+            }
+        } else {
+            BOOKS.read().unwrap()
+        };
+        if let Some(handle) = books.get(book_id) {
+            if handle.comic.is_some() {
+                let pages = process_comic_chapter(handle, chapter_index, &params.config)?;
+                let pages = Arc::new(pages);
+                STRUCTURED_PAGINATION_CACHE.lock().unwrap().put(
+                    cache_key.clone(),
+                    StructuredCacheEntry::new(Arc::clone(&pages)),
+                );
+                return Ok(Some(pages));
+            }
+            if handle.pdf.is_some() {
+                let pages = process_pdf_chapter(handle, chapter_index, &params.config)?;
+                let pages = Arc::new(pages);
+                STRUCTURED_PAGINATION_CACHE.lock().unwrap().put(
+                    cache_key.clone(),
+                    StructuredCacheEntry::new(Arc::clone(&pages)),
+                );
                 return Ok(Some(pages));
             }
         }

@@ -837,6 +837,11 @@ class BookService {
     return await rust_api.getOcrPageText(key: key);
   }
 
+  /// 一批 OCR 写完后失效分页缓存
+  Future<void> finalizeOcrBatch() async {
+    await rust_api.finalizeOcrBatch();
+  }
+
   /// PDF 章内扫描页图 href（供预 OCR）
   Future<List<String>> pdfImageHrefs(String bookId, int chapterIndex) async {
     final list = await rust_api.pdfImageHrefs(

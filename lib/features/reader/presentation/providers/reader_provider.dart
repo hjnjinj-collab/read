@@ -2206,28 +2206,36 @@ class ReaderNotifier extends Notifier<ReadingState> {
         : _chineseConvert == ChineseConvertType.t2s
         ? 2
         : 0;
-    unawaited(
-      _bookService.prefetchStructuredChapter(
-        bookId,
-        next,
-        width: _screenWidth,
-        height: _screenHeight,
-        fontSize: _fontSize,
-        lineHeightMultiplier: _lineHeight,
-        paddingLeft: layoutPadH,
-        paddingTop: _padTop,
-        paddingRight: layoutPadH,
-        paddingBottom: _paddingVertical,
-        chineseConvert: convertCode,
-        pageFillThreshold: _pageFillThreshold,
-        showComments: _showComments,
-        paraFormatHash: _paraFormatHash,
-        removeDuplicateTitle: _removeDuplicateTitle, // A30c：预取与前台完全同参
-        replaceRules: _replaceRules, // A30b：预取与前台完全同参（含规则）
-        reSegment: _reSegment,
-        segmentRules: _segmentRules,
-      ),
-    );
+    unawaited(() async {
+      // PDF：先预识别下一章（对齐 TXT/EPUB 预缓存），再预分页
+      if (_isPdf) {
+        try {
+          await OcrService.instance.preOcrPdfChapter(bookId, next);
+        } catch (_) {}
+      }
+      try {
+        await _bookService.prefetchStructuredChapter(
+          bookId,
+          next,
+          width: _screenWidth,
+          height: _screenHeight,
+          fontSize: _fontSize,
+          lineHeightMultiplier: _lineHeight,
+          paddingLeft: layoutPadH,
+          paddingTop: _padTop,
+          paddingRight: layoutPadH,
+          paddingBottom: _paddingVertical,
+          chineseConvert: convertCode,
+          pageFillThreshold: _pageFillThreshold,
+          showComments: _showComments,
+          paraFormatHash: _paraFormatHash,
+          removeDuplicateTitle: _removeDuplicateTitle,
+          replaceRules: _replaceRules,
+          reSegment: _reSegment,
+          segmentRules: _segmentRules,
+        );
+      } catch (_) {}
+    }());
   }
 
   // ===== 书签 =====
