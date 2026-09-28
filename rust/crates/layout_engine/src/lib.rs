@@ -894,9 +894,9 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 漫画经典排版（gallery+bleed）：
-                    // - 整宽下自然高 ≥ 70% 页高 → 独占整页拉伸铺满
-                    // - 否则（半页级小图）→ 整宽自然高上下拼页
+                    // 漫画/扫描页经典排版（gallery+bleed）：
+                    // - 整宽下自然高 **≥ 60% 页高** → 独占整页**拉伸铺满**（不留空）
+                    // - 否则（半页级）→ 整宽自然高上下拼页
                     let comic_pack = *gallery && *bleed;
                     let mut comic_solo_full = false;
                     if comic_pack {
@@ -905,8 +905,8 @@ impl LayoutEngine {
                         let nat_h = full_w / ratio;
                         img_width = full_w;
                         img_x = 0.0;
-                        if nat_h >= page_h * 0.70 {
-                            // 大图：独占一页拉伸
+                        if nat_h >= page_h * 0.60 {
+                            // 大图（含约 65% 页高封面）：独占一页拉伸填满
                             comic_solo_full = true;
                             img_height = page_h;
                         } else {
@@ -3224,13 +3224,13 @@ mod tests {
         assert!(img0.height > 0.0);
     }
 
-    /// 漫画 gallery+bleed：≥70% 页高的图独占整页拉伸
+    /// 漫画 gallery+bleed：≥60% 页高的图独占整页拉伸
     #[test]
     fn gallery_bleed_tall_image_fills_full_page() {
         let (engine, cfg) = create_test_engine();
         let items = vec![LayoutItem::Image {
             resource_href: "tall.jpg".into(),
-            aspect: 0.5, // 竖图：整宽下自然高 = 2×宽 > 70% 页高
+            aspect: 0.5, // 竖图：整宽下自然高 > 60% 页高
             width_percent: None,
             align: None,
             bleed: true,
@@ -3252,6 +3252,37 @@ mod tests {
             cfg.height
         );
         assert!((img.width - cfg.width).abs() < 1.0, "应铺满整窗宽");
+    }
+
+    /// 约 65% 页高（旧阈值 70% 会误判小图留空）→ 仍应独占拉伸
+    #[test]
+    fn gallery_bleed_sixtyfive_percent_fills_page() {
+        let (engine, cfg) = create_test_engine();
+        // page_h=400，65% → nat_h=260 → aspect=300/260≈1.153
+        let aspect = cfg.width / (cfg.height * 0.65);
+        let items = vec![LayoutItem::Image {
+            resource_href: "cover.jpg".into(),
+            aspect,
+            width_percent: None,
+            align: None,
+            bleed: true,
+            gallery: true,
+        }];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let img = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Image(i) => Some(i),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            (img.height - cfg.height).abs() < 1.0,
+            "65% 页高图应拉伸铺满，实得 h={} page_h={}",
+            img.height,
+            cfg.height
+        );
     }
 
     /// 漫画 gallery+bleed：半页级小图上下拼在同一页

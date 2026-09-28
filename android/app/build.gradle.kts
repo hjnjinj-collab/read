@@ -45,3 +45,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // OCR 下载进度系统通知（NotificationCompat）
+    implementation("androidx.core:core-ktx:1.13.1")
+}

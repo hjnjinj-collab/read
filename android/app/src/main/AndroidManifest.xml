@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- OCR 模型下载进度系统通知（Android 13+） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="legado_flutter"
         android:name="${applicationName}"

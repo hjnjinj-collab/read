@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
@@ -1643,9 +1644,12 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   String _status = '';
   String _mode = 'auto'; // reflow | compare | auto
   bool _busy = false;
-  final _urlCtrl = TextEditingController(
-    text: '',
-  );
+  /// 官方 tessdata_fast 简体包（可改）
+  static const _defaultOcrUrl =
+      'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata';
+  final _urlCtrl = TextEditingController(text: _defaultOcrUrl);
+  static const _channel = MethodChannel('legado/notify');
+  static const _notifyId = 0x0C12;
 
   @override
   void initState() {
@@ -1657,6 +1661,28 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
     try {
       final s = await BookService().ocrModelStatus();
       if (mounted) setState(() => _status = s);
+    } catch (_) {}
+  }
+
+  Future<void> _notifyProgress(int pct, String text) async {
+    try {
+      await _channel.invokeMethod('showProgress', {
+        'id': _notifyId,
+        'title': 'OCR 模型下载',
+        'text': text,
+        'progress': pct,
+        'indeterminate': pct < 0,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _notifyDone(String text) async {
+    try {
+      await _channel.invokeMethod('showDone', {
+        'id': _notifyId,
+        'title': 'OCR 模型已就绪',
+        'text': text,
+      });
     } catch (_) {}
   }
 
@@ -1727,9 +1753,17 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         final url = _urlCtrl.text.trim();
                         if (url.isEmpty) return;
                         setState(() => _busy = true);
+                        await _notifyProgress(-1, '开始下载…');
                         try {
                           await BookService().downloadOcrModel(url);
+                          await _notifyDone('chi_sim 语言包已安装');
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('OCR 模型安装完成')),
+                            );
+                          }
                         } catch (e) {
+                          await _notifyDone('下载失败');
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('下载失败：$e')),
