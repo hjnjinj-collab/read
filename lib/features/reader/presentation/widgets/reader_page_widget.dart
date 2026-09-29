@@ -464,14 +464,13 @@ class PageContentRenderer {
       if (href != null) {
         final image = BookImageStore.instance.get(href);
         if (image != null) {
-          // 等比 cover 填充目标矩形：画廊整页图铺满不拉伸；
-          // 正常图布局矩形已含正确纵横比，cover≈原 fill 观感
+          // 拉伸铺满目标矩形：大图整页时宽=页宽、高=页高（不保持比例）；
+          // 拼页小图矩形已含正确纵横比，fill≈原等比
           paintImage(
             canvas: canvas,
             rect: Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height),
             image: image,
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
+            fit: BoxFit.fill,
           );
         } else {
           // 阶段3优化：根据加载状态显示不同的占位
