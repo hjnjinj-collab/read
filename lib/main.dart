@@ -6,6 +6,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:path_provider/path_provider.dart';
 
 import 'core/database/app_database.dart';
@@ -98,6 +99,16 @@ void main() async {
   try {
     final support = await getApplicationSupportDirectory();
     await BookService().setOcrModelDir('${support.path}/ocr');
+    // 启动即请求通知权限（下载时才请求易错过）
+    const MethodChannel('legado/notify').invokeMethod('showProgress', {
+      'id': 0x0C12,
+      'title': 'Legado',
+      'text': '通知已就绪',
+      'progress': 100,
+      'max': 100,
+      'indeterminate': false,
+      'done': true,
+    });
   } catch (_) {}
 
   runApp(ProviderScope(

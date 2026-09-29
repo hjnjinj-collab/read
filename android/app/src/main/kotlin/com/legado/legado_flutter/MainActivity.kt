@@ -69,7 +69,7 @@ class MainActivity : FlutterActivity() {
             val ch = NotificationChannel(
                 channelId,
                 "OCR 模型下载",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             )
             ch.setSound(null, null)
             nm().createNotificationChannel(ch)
@@ -87,7 +87,8 @@ class MainActivity : FlutterActivity() {
                     arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
                     1001
                 )
-                return false
+                // 不 return false：仍尝试 notify（部分 ROM 仍可显示）；
+                // 完全禁止时 notify 会失败，但不得挡住整条链路
             }
         }
         return true
@@ -103,7 +104,7 @@ class MainActivity : FlutterActivity() {
         done: Boolean,
         failed: Boolean
     ) {
-        if (!ensureNotifyPermission()) return
+        ensureNotifyPermission()
         ensureChannel()
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         val pi = PendingIntent.getActivity(

@@ -169,13 +169,18 @@ impl OcrModelManager {
         let data = self
             .root()
             .join(format!("{lang}.traineddata"));
-        if data.exists() {
-            OcrModelStatus::Installed {
+        // 不以「文件存在」为成功：必须达到最小体积才算已安装
+        const MIN_MODEL: u64 = 200_000; // best/fast 量级下限
+        match std::fs::metadata(&data) {
+            Ok(m) if m.len() >= MIN_MODEL => OcrModelStatus::Installed {
                 lang,
                 data_file: data.display().to_string(),
+            },
+            _ => {
+                // 残缺文件清掉，避免误判已安装
+                let _ = std::fs::remove_file(&data);
+                OcrModelStatus::NotInstalled
             }
-        } else {
-            OcrModelStatus::NotInstalled
         }
     }
 
@@ -192,7 +197,7 @@ impl OcrModelManager {
     /// 从字节安装（下载完成后落盘）
     pub fn install_from_bytes(&self, bytes: &[u8]) -> Result<PathBuf> {
         // 防「假成功」：空包/错误页/极小文件不得当模型装入
-        if bytes.len() < 2048 {
+        if bytes.len() < 200_000 {
             anyhow::bail!("模型数据过小（{} 字节），下载可能失败", bytes.len());
         }
         // 常见错误页/HTML
@@ -304,7 +309,7 @@ mod tests {
     fn install_and_status() {
         let tmp = tempfile::tempdir().unwrap();
         let m = OcrModelManager::new(tmp.path());
-        let p = m.install_from_bytes(&vec![7u8; 8192]).unwrap();
+        let p = m.install_from_bytes(&vec![7u8; 250_000]).unwrap();
         assert!(p.exists());
         match m.status() {
             OcrModelStatus::Installed { lang, .. } => assert_eq!(lang, "chi_sim"),
@@ -321,7 +326,7 @@ mod tests {
         assert!(m.install_from_bytes(b"").is_err());
         assert!(m.install_from_bytes(b"<html>not a model</html>").is_err());
         // 足够大的假数据可通过（真 traineddata 另验）
-        let big = vec![0u8; 4096];
+        let big = vec![0u8; 250_000];
         assert!(m.install_from_bytes(&big).is_ok());
     }
 

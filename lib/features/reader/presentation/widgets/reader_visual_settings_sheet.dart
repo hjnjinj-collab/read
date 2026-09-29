@@ -1862,7 +1862,14 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                 onPressed: _busy
                     ? null
                     : () async {
-                        // 已安装则不再重复下载（除非用户点「强制重下」）
+                        // 强制重下：先卸载旧包，避免残留被当成成功
+                        if (forceRedownload) {
+                          try {
+                            await BookService().uninstallOcrModel();
+                          } catch (_) {}
+                          await _refresh();
+                        }
+                        // 以实际状态为准再判断
                         final st = await BookService().ocrModelStatus();
                         if (st.contains('"installed":true') && !forceRedownload) {
                           if (mounted) {
@@ -1880,10 +1887,16 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         await _notifyProgress(0, '开始下载…', indeterminate: true);
                         try {
                           await _downloadAndInstall(url);
+                          // 下载安装后再查一次磁盘真实状态
+                          await _refresh();
+                          final ok = _status.contains('"installed":true');
+                          if (!ok) {
+                            throw '安装后校验失败（文件缺失或过小）';
+                          }
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('OCR 模型已自动解压安装'),
+                                content: Text('OCR 模型安装并校验完成'),
                               ),
                             );
                           }

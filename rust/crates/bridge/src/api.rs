@@ -433,21 +433,23 @@ fn process_pdf_chapter(
             }
             PdfPageKind::Image => {
                 let img_opt = pdf.list_page_images(p).next();
-                // 缓存 OCR 文本（Dart ML Kit）
                 let mut ocr_text: Option<String> = None;
-                if let Some(img) = img_opt.as_ref() {
-                    ocr_text = OCR_PAGE_CACHE
-                        .get_cached_text(&img.href)
-                        .or_else(|| {
-                            OCR_PAGE_CACHE
-                                .get_cached_text(&format!("pdf:{}", img.href))
-                        });
-                }
-                // 本机引擎兜底（桌面 tesseract）
-                if ocr_text.is_none() {
-                    let want_ocr = matches!(mode, PdfScanMode::Reflow)
-                        || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
-                    if want_ocr && ocr_ready {
+
+                // 原图模式：一律走图，**禁止**再用 OCR 缓存/识别
+                let want_ocr = matches!(mode, PdfScanMode::Reflow)
+                    || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
+
+                if want_ocr {
+                    if let Some(img) = img_opt.as_ref() {
+                        ocr_text = OCR_PAGE_CACHE
+                            .get_cached_text(&img.href)
+                            .or_else(|| {
+                                OCR_PAGE_CACHE
+                                    .get_cached_text(&format!("pdf:{}", img.href))
+                            });
+                    }
+                    // 本机引擎兜底（桌面 tesseract）
+                    if ocr_text.is_none() && ocr_ready {
                         if let (Some(mgr), Some(img)) = (ocr.as_ref(), img_opt.as_ref()) {
                             if let Ok(bytes) = pdf.get_resource(&img.href) {
                                 let engine = mgr.build_engine();
@@ -459,10 +461,11 @@ fn process_pdf_chapter(
                     }
                 }
 
-                let text_ok = ocr_text
-                    .as_deref()
-                    .map(|t| !t.trim().is_empty() && !is_illustration_text(t))
-                    .unwrap_or(false);
+                let text_ok = want_ocr
+                    && ocr_text
+                        .as_deref()
+                        .map(|t| !t.trim().is_empty() && !is_illustration_text(t))
+                        .unwrap_or(false);
 
                 if text_ok {
                     // 文字足够多：重排（缩进/重分段/章节标题，同 TXT）
@@ -470,7 +473,7 @@ fn process_pdf_chapter(
                         ocr_text.as_deref().unwrap_or("").trim(),
                     ));
                 } else if let Some(img) = img_opt {
-                    // 插画/短文本页：保留原图，避免「插画消失」
+                    // 原图模式 / 插画 / 短文本：保留原图
                     let aspect = if img.height > 0 {
                         img.width as f32 / img.height as f32
                     } else {
