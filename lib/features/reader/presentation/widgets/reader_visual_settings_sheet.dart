@@ -1768,8 +1768,12 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
       }
       await sink.flush();
       await sink.close();
-      if (received < 2048) {
+      if (received < 1024) {
         throw '下载内容过小（$received 字节），可能不是模型文件';
+      }
+      // 有 Content-Length 时必须收全，截断不算成功
+      if (total > 0 && received != total) {
+        throw '下载不完整（$received / $total 字节）';
       }
       // 先落盘成功再安装；安装失败不得发「已就绪」
       final installedPath = await BookService().installOcrModelFile(tmpPath);
@@ -1887,11 +1891,11 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         await _notifyProgress(0, '开始下载…', indeterminate: true);
                         try {
                           await _downloadAndInstall(url);
-                          // 下载安装后再查一次磁盘真实状态
+                          // 安装后再查磁盘真实状态（格式嗅探，非体积）
                           await _refresh();
                           final ok = _status.contains('"installed":true');
                           if (!ok) {
-                            throw '安装后校验失败（文件缺失或过小）';
+                            throw '安装后校验失败（文件缺失或格式非法）';
                           }
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(

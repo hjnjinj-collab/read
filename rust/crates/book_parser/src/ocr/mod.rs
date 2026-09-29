@@ -169,15 +169,14 @@ impl OcrModelManager {
         let data = self
             .root()
             .join(format!("{lang}.traineddata"));
-        // 不以「文件存在」为成功：必须达到最小体积才算已安装
-        const MIN_MODEL: u64 = 200_000; // best/fast 量级下限
-        match std::fs::metadata(&data) {
-            Ok(m) if m.len() >= MIN_MODEL => OcrModelStatus::Installed {
+        // 不以体积判定（tessdata_best/fast 大小会随版本变化）；
+        // 以「非空且非错误页」为准
+        match std::fs::read(&data) {
+            Ok(bytes) if looks_like_traineddata(&bytes) => OcrModelStatus::Installed {
                 lang,
                 data_file: data.display().to_string(),
             },
             _ => {
-                // 残缺文件清掉，避免误判已安装
                 let _ = std::fs::remove_file(&data);
                 OcrModelStatus::NotInstalled
             }
@@ -196,14 +195,8 @@ impl OcrModelManager {
 
     /// 从字节安装（下载完成后落盘）
     pub fn install_from_bytes(&self, bytes: &[u8]) -> Result<PathBuf> {
-        // 防「假成功」：空包/错误页/极小文件不得当模型装入
-        if bytes.len() < 200_000 {
-            anyhow::bail!("模型数据过小（{} 字节），下载可能失败", bytes.len());
-        }
-        // 常见错误页/HTML
-        let head = &bytes[..bytes.len().min(64)];
-        if head.starts_with(b"<") || head.starts_with(b"<!DOCTYPE") {
-            anyhow::bail!("内容是 HTML 而非模型文件（可能被网关拦截）");
+        if !looks_like_traineddata(bytes) {
+            anyhow::bail!("内容不是有效的 traineddata（可能是错误页/截断包）");
         }
         let dst_dir = self.root();
         std::fs::create_dir_all(&dst_dir)?;
@@ -271,6 +264,25 @@ impl OcrPageCache {
     pub fn put_text(&self, key: &str, text: &str) -> Result<()> {
         self.put(key, text)
     }
+}
+
+/// traineddata 格式嗅探（不按体积）：
+/// - 空包/HTML/JSON 错误页 → false
+/// - 官方 tessdata 多为二进制；含 "tessdata" / version 头或非文本头则接受
+fn looks_like_traineddata(bytes: &[u8]) -> bool {
+    if bytes.len() < 1024 {
+        return false;
+    }
+    let head = &bytes[..bytes.len().min(128)];
+    // 错误页 / 文本响应
+    if head.starts_with(b"<") || head.starts_with(b"{") || head.starts_with(b"[") {
+        return false;
+    }
+    if bytes.starts_with(b"PK\x03\x04") {
+        // zip 里嵌 traineddata 的包，交给上层解压；单文件不装
+        return false;
+    }
+    true
 }
 
 /// 测试用 mock 引擎
