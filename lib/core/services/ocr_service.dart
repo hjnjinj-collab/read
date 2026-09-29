@@ -5,8 +5,11 @@ library;
 
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart'
+    show Canvas, Paint, Rect, FilterQuality;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -28,6 +31,7 @@ class OcrService {
   }
 
   /// 图片字节 → 文本；失败/不支持返回空串
+  /// 精度：小图先放大到宽≥1200 再识别，减少小字漏识
   Future<String> recognizeImage(Uint8List bytes) async {
     if (!_supported || bytes.isEmpty) return '';
     File? tmp;
@@ -36,7 +40,8 @@ class OcrService {
       tmp = File(
         '${dir.path}/ocr_${DateTime.now().microsecondsSinceEpoch}.img',
       );
-      await tmp.writeAsBytes(bytes, flush: true);
+      final prepared = await _upscaleIfNeeded(bytes);
+      await tmp.writeAsBytes(prepared, flush: true);
       final input = InputImage.fromFilePath(tmp.path);
       final result = await _rec.processImage(input);
       return result.text.trim();
@@ -47,6 +52,40 @@ class OcrService {
       try {
         await tmp?.delete();
       } catch (_) {}
+    }
+  }
+
+  /// 小图放大到宽 ≥1200px（PNG），提升小字识别率
+  Future<Uint8List> _upscaleIfNeeded(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final img = frame.image;
+      final w = img.width;
+      final h = img.height;
+      if (w >= 1200 || w == 0 || h == 0) {
+        return bytes;
+      }
+      final scale = 1200 / w;
+      final tw = (w * scale).round();
+      final th = (h * scale).round();
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImageRect(
+        img,
+        Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+        Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+        Paint()..filterQuality = FilterQuality.high,
+      );
+      final pic = recorder.endRecording();
+      final out = await pic.toImage(tw, th);
+      final bd = await out.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose();
+      out.dispose();
+      if (bd == null) return bytes;
+      return bd.buffer.asUint8List();
+    } catch (_) {
+      return bytes;
     }
   }
 

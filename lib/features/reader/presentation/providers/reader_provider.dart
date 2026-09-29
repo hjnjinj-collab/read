@@ -262,6 +262,16 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _isEpub = false;
   bool _isComic = false;
   bool _isPdf = false;
+  /// PDF 当前是否「原图」模式（对照）；文字/原图进度分开记
+  bool _pdfImageMode = false;
+
+  /// 设置扫描页显示：0=文字重排 1=原图 2=自动
+  void setPdfScanMode(int mode) {
+    _pdfImageMode = mode == 1;
+    unawaited(BookService().setPdfScanMode(mode));
+  }
+
+  bool get pdfImageMode => _pdfImageMode;
 
   // 只读访问器：供设置对话框回读当前生效的配置
   bool get removeDuplicateTitle => _removeDuplicateTitle;
@@ -1280,7 +1290,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 锚点机制同时覆盖「改字号/净化配置后位置漂移」的迁移场景。
       // 无进度或索引失效时自然落到第 1 章第 1 页。
       // 注意：chapterIndex==0 也要恢复（旧逻辑 >0 导致首章进度丢失）
-      final saved = await _db.progressOf(filePath);
+      final saved = await _db.progressOf(
+        filePath,
+        imageMode: _isPdf && _pdfImageMode,
+      );
       if (openSeq != _openBookSeq) {
         readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-progress'});
         return;
@@ -1573,6 +1586,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
             chapterIndex: state.currentChapterIndex,
             charOffset: page.startCharIndex,
             totalChapters: state.chapters.length,
+            imageMode: _isPdf && _pdfImageMode,
           );
           await _db.touchLastRead(filePath);
         } catch (_) {
@@ -3158,6 +3172,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
           chapterIndex: state.currentChapterIndex,
           charOffset: page.startCharIndex,
           totalChapters: state.chapters.length,
+          imageMode: _isPdf && _pdfImageMode,
         );
         await _db.touchLastRead(filePath);
       } catch (_) {

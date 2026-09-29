@@ -1817,9 +1817,9 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                     DropdownMenuItem(
                         value: 'auto', child: Text('自动（推荐）')),
                     DropdownMenuItem(
-                        value: 'reflow', child: Text('OCR 重排（可换字体）')),
+                        value: 'reflow', child: Text('文字模式（可换字体）')),
                     DropdownMenuItem(
-                        value: 'compare', child: Text('对照（原图）')),
+                        value: 'compare', child: Text('原图模式')),
                   ],
                   onChanged: (v) {
                     if (v == null) return;
@@ -1829,7 +1829,10 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         : v == 'compare'
                             ? 1
                             : 2;
-                    unawaited(BookService().setPdfScanMode(m));
+                    unawaited(() async {
+                      ref.read(readerProvider.notifier).setPdfScanMode(m);
+                      // 切模式后按该模式进度恢复当前章
+                    }());
                   },
                 ),
               ),

@@ -162,8 +162,16 @@ class AppDatabase extends _$AppDatabase {
 
   // ===== 阅读进度 =====
 
-  Future<ReadingProgressData?> progressOf(String bookPath) {
-    return (select(readingProgress)..where((r) => r.bookPath.equals(bookPath)))
+  /// 进度键：文字/原图双模式各自记一份（`path` / `path#img`）
+  static String progressKey(String bookPath, {required bool imageMode}) =>
+      imageMode ? '$bookPath#img' : bookPath;
+
+  Future<ReadingProgressData?> progressOf(
+    String bookPath, {
+    bool imageMode = false,
+  }) {
+    final key = progressKey(bookPath, imageMode: imageMode);
+    return (select(readingProgress)..where((r) => r.bookPath.equals(key)))
         .getSingleOrNull();
   }
 
@@ -172,10 +180,12 @@ class AppDatabase extends _$AppDatabase {
     required int chapterIndex,
     required int charOffset,
     required int totalChapters,
+    bool imageMode = false,
   }) async {
+    final key = progressKey(bookPath, imageMode: imageMode);
     await into(readingProgress).insertOnConflictUpdate(
       ReadingProgressCompanion.insert(
-        bookPath: bookPath,
+        bookPath: key,
         chapterIndex: chapterIndex,
         charOffset: charOffset,
         totalChapters: totalChapters,
