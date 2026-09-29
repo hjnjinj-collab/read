@@ -1645,6 +1645,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   String _status = '';
   String _mode = 'auto'; // reflow | compare | auto
   bool _busy = false;
+  bool forceRedownload = false;
   /// 最高档语言包 tessdata_best（体积大、精度最高）+ 国内镜像
   static const _defaultOcrUrl =
       'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_best@main/chi_sim.traineddata';
@@ -1861,6 +1862,18 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                 onPressed: _busy
                     ? null
                     : () async {
+                        // 已安装则不再重复下载（除非用户点「强制重下」）
+                        final st = await BookService().ocrModelStatus();
+                        if (st.contains('"installed":true') && !forceRedownload) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('语言包已安装，无需重复下载'),
+                              ),
+                            );
+                          }
+                          return;
+                        }
                         final url = _urlCtrl.text.trim();
                         if (url.isEmpty) return;
                         setState(() => _busy = true);
@@ -1885,8 +1898,17 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         if (mounted) setState(() => _busy = false);
                         await _refresh();
                       },
-                child: Text(_busy ? '下载中…' : '下载并安装'),
+                child: Text(_busy
+                    ? '下载中…'
+                    : (installed ? '重新下载安装' : '下载并安装')),
               ),
+              if (installed)
+                TextButton(
+                  onPressed: () {
+                    setState(() => forceRedownload = !forceRedownload);
+                  },
+                  child: Text(forceRedownload ? '取消强制重下' : '强制重下'),
+                ),
               const SizedBox(width: 8),
               if (installed)
                 TextButton(

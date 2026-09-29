@@ -267,8 +267,35 @@ class ReaderNotifier extends Notifier<ReadingState> {
 
   /// 设置扫描页显示：0=文字重排 1=原图 2=自动
   void setPdfScanMode(int mode) {
+    final wasImage = _pdfImageMode;
     _pdfImageMode = mode == 1;
-    unawaited(BookService().setPdfScanMode(mode));
+    unawaited(() async {
+      await BookService().setPdfScanMode(mode);
+      // 立即生效：清分页缓存并按新模式重载当前页（并恢复该模式进度）
+      if (_isPdf && wasImage != _pdfImageMode) {
+        try {
+          await BookService().clearStructuredPaginationCache(state.bookId ?? '');
+        } catch (_) {}
+        final fp = state.filePath;
+        if (fp != null) {
+          final saved = await _db.progressOf(fp, imageMode: _pdfImageMode);
+          if (saved != null &&
+              saved.chapterIndex >= 0 &&
+              saved.chapterIndex < state.chapters.length) {
+            state = state.copyWith(currentChapterIndex: saved.chapterIndex);
+            await _loadCurrentPage(anchorCharOffset: saved.charOffset);
+          } else {
+            await _loadCurrentPage(
+              anchorCharOffset: state.currentPage?.startCharIndex,
+            );
+          }
+        } else {
+          await _loadCurrentPage(
+            anchorCharOffset: state.currentPage?.startCharIndex,
+          );
+        }
+      }
+    }());
   }
 
   bool get pdfImageMode => _pdfImageMode;

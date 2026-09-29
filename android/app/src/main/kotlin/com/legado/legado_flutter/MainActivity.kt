@@ -149,7 +149,83 @@ class MainActivity : FlutterActivity() {
             tryLiveProgressStyle(builder, progress, max)
         }
 
+        // 小米超级岛 / 焦点通知（实况）：miui.focus.param
+        attachXiaomiFocus(builder, title, text, progress, max, done, failed)
+
         nm().notify(id, builder.build())
+    }
+
+    /**
+     * 小米澎湃 OS 焦点通知 / 超级岛参数（dev.mi.com pId=2131）
+     * 支持机型以岛/焦点形态展示下载进度；其它机型忽略该 extras。
+     */
+    private fun attachXiaomiFocus(
+        builder: NotificationCompat.Builder,
+        title: String,
+        text: String,
+        progress: Int,
+        max: Int,
+        done: Boolean,
+        failed: Boolean
+    ) {
+        try {
+            val pct = if (done || failed) 100 else progress.coerceIn(0, 100)
+            val ticker = if (failed) "OCR 下载失败" else if (done) "OCR 就绪" else "OCR 下载 $pct%"
+            // 进度文案放入岛/焦点，状态栏 ticker 同步
+            val island = """
+                {
+                  "param_v2": {
+                    "protocol": 1,
+                    "business": "download",
+                    "updatable": true,
+                    "enableFloat": true,
+                    "islandFirstFloat": true,
+                    "ticker": ${jsonStr(ticker)},
+                    "aodTitle": ${jsonStr(ticker)},
+                    "param_island": {
+                      "islandProperty": 1,
+                      "bigIslandArea": {
+                        "imageTextInfoLeft": {
+                          "type": 1,
+                          "textInfo": {
+                            "frontTitle": ${jsonStr(title)},
+                            "title": ${jsonStr(if (done || failed) ticker else "$pct%")},
+                            "content": ${jsonStr(text)},
+                            "useHighLight": true
+                          }
+                        }
+                      },
+                      "smallIslandArea": {
+                        "picInfo": { "type": 1 }
+                      }
+                    },
+                    "baseInfo": {
+                      "title": ${jsonStr(title)},
+                      "content": ${jsonStr(if (done || failed) text else "$pct% · $text")},
+                      "colorTitle": "${if (failed) "#D32F2F" else "#1976D2"}",
+                      "type": 2
+                    },
+                    "hintInfo": {
+                      "type": 1,
+                      "title": ${jsonStr(if (done || failed) ticker else "下载中 $pct%")}
+                    }
+                  }
+                }
+            """.trimIndent()
+            builder.extras.putString("miui.focus.param", island)
+        } catch (_: Throwable) {
+            // 非小米机型/字段变化：忽略
+        }
+    }
+
+    private fun jsonStr(s: String): String {
+        val escaped = s
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+            .replace("\t", " ")
+        return "\"$escaped\""
     }
 
     private fun tryLiveProgressStyle(
