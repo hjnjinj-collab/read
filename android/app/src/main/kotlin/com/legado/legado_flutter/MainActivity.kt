@@ -1,24 +1,32 @@
 package com.legado.legado_flutter
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
- * OCR 模型下载系统通知。
+ * OCR 模型下载系统通知 + 小米超级岛（客户端路径）。
  *
- * - 下载中：系统进度条（Compat setProgress）+ 百分比文案
- * - Android 16+：附加 ProgressStyle（实况进度/Live Updates）
- * - 成功 / 失败：标题与图标明确区分，便于一眼识别
+ * 超级岛按 dev.mi.com pId=2131「客户端实现」：
+ * - 原生通知 + extras `miui.focus.param`（param_v2 岛 JSON）
+ * - 图片经 `miui.focus.pics`（Icon）引用
+ * - **必须在 builder.build() 之后**写入 notification.extras
+ *
+ * 非小米 / 无焦点权限 / 查询失败：静默退回普通通知，不阻断下载链路。
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "legado/notify"
@@ -53,7 +61,7 @@ class MainActivity : FlutterActivity() {
                     val text = call.argument<String>("text") ?: ""
                     val failed = call.argument<Boolean>("failed") ?: false
                     showNotification(id, title, text, 100, 100, false, true, failed)
-                    // 完成态 5s 后自动取消，避免反复残留/重复感知
+                    // 完成态 5s 后自动取消（cancel 即收岛，文档第七节）
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         try { nm().cancel(id) } catch (_: Throwable) {}
                     }, 5000)
@@ -63,6 +71,9 @@ class MainActivity : FlutterActivity() {
                     val id = call.argument<Int>("id") ?: 1
                     nm().cancel(id)
                     result.success(true)
+                }
+                "islandSupport" -> {
+                    result.success(islandSupportJson())
                 }
                 else -> result.notImplemented()
             }
@@ -80,6 +91,7 @@ class MainActivity : FlutterActivity() {
                 NotificationManager.IMPORTANCE_HIGH
             )
             ch.setSound(null, null)
+            ch.enableVibration(false)
             nm().createNotificationChannel(ch)
         }
     }
@@ -95,12 +107,64 @@ class MainActivity : FlutterActivity() {
                     arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
                     1001
                 )
-                // 不 return false：仍尝试 notify（部分 ROM 仍可显示）；
-                // 完全禁止时 notify 会失败，但不得挡住整条链路
+                // 不 return false：仍尝试 notify（部分 ROM 仍可显示）
             }
         }
         return true
     }
+
+    // ===== 超级岛能力查询（dev.mi.com pId=2131 第五节）=====
+
+    /** persist.sys.feature.island：是否支持岛 */
+    private fun isSupportIsland(): Boolean {
+        return try {
+            val clazz = Class.forName("android.os.SystemProperties")
+            val method = clazz.getDeclaredMethod(
+                "getBoolean", String::class.java, Boolean::class.javaPrimitiveType
+            )
+            val v = method.invoke(null, "persist.sys.feature.island", false)
+            (v as? Boolean) ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /** notification_focus_protocol：0=无 1=OS1 2=OS2 3=OS3（岛） */
+    private fun focusProtocolVersion(): Int {
+        return try {
+            android.provider.Settings.System.getInt(
+                contentResolver, "notification_focus_protocol", 0
+            )
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
+    /** 焦点通知权限（用户设置里是否打开） */
+    private fun hasFocusPermission(): Boolean {
+        return try {
+            val uri = Uri.parse("content://miui.statusbar.notification.public")
+            val extras = Bundle().apply { putString("package", packageName) }
+            val bundle = contentResolver.call(uri, "canShowFocus", null, extras)
+            bundle?.getBoolean("canShowFocus", false) ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun islandSupportJson(): String {
+        return try {
+            JSONObject()
+                .put("island", isSupportIsland())
+                .put("protocol", focusProtocolVersion())
+                .put("focusPermission", hasFocusPermission())
+                .toString()
+        } catch (_: Throwable) {
+            """{"island":false,"protocol":0,"focusPermission":false}"""
+        }
+    }
+
+    // ===== 通知构建 =====
 
     private fun showNotification(
         id: Int,
@@ -114,6 +178,15 @@ class MainActivity : FlutterActivity() {
     ) {
         ensureNotifyPermission()
         ensureChannel()
+
+        // 能力查询仅用于日志；失败不得挡通知
+        try {
+            android.util.Log.i(
+                "LegadoIsland",
+                "support=${islandSupportJson()} title=$title pct=$progress done=$done failed=$failed"
+            )
+        } catch (_: Throwable) {}
+
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         val pi = PendingIntent.getActivity(
             this, 0, intent,
@@ -126,20 +199,19 @@ class MainActivity : FlutterActivity() {
             else -> android.R.drawable.stat_sys_download
         }
 
-        // Compat：确定型进度条（系统通知栏可见）
+        val pct = if (done || failed) 100 else progress.coerceIn(0, 100)
+        val progressText = if (done || failed) text else "$text（$pct%）"
+
         val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
-            .setContentText(text)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText(if (failed) text else "$text（$progress%）")
-            )
+            .setContentText(progressText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(progressText))
             .setSmallIcon(icon)
             .setContentIntent(pi)
             .setOnlyAlertOnce(true)
             .setOngoing(!done && !failed)
             .setAutoCancel(done || failed)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setColor(if (failed) 0xFFD32F2F.toInt() else 0xFF1976D2.toInt())
 
@@ -153,88 +225,119 @@ class MainActivity : FlutterActivity() {
             )
         }
 
-        // Android 16+ 实况进度样式（附加，失败静默）
         if (Build.VERSION.SDK_INT >= 36 && !done && !failed) {
             tryLiveProgressStyle(builder, progress, max)
         }
 
-        // 小米超级岛 / 焦点通知（实况）：miui.focus.param
-        attachXiaomiFocus(builder, title, text, progress, max, done, failed)
+        // 关键：先 build，再写 extras（官方示例 notification.extras.putString）
+        val notification: Notification = builder.build()
+        attachXiaomiIsland(notification, title, text, pct, done, failed)
 
-        nm().notify(id, builder.build())
+        nm().notify(id, notification)
     }
 
     /**
-     * 小米澎湃 OS 焦点通知 / 超级岛参数（dev.mi.com pId=2131）
-     * 支持机型以岛/焦点形态展示下载进度；其它机型忽略该 extras。
+     * 小米超级岛客户端接入（pId=2131 §1.2 / §四 模版接入示例）。
+     *
+     * - `miui.focus.param`：param_v2 + param_island（大岛 imageTextInfoLeft 的
+     *   picInfo+textInfo、小岛 picInfo.pic、baseInfo/hintInfo）
+     * - `miui.focus.pics`：Icon 引用（pic 字段写 key）
+     * - 非小米机型写入无害，SystemUI 忽略
      */
-    private fun attachXiaomiFocus(
-        builder: NotificationCompat.Builder,
+    private fun attachXiaomiIsland(
+        notification: Notification,
         title: String,
         text: String,
-        progress: Int,
-        max: Int,
+        pct: Int,
         done: Boolean,
         failed: Boolean
     ) {
         try {
-            val pct = if (done || failed) 100 else progress.coerceIn(0, 100)
+            val terminal = done || failed
+            val statusWord = when {
+                failed -> "失败"
+                done -> "完成"
+                else -> "下载中"
+            }
+            val bigTitle = if (terminal) statusWord else "$pct%"
             val ticker = if (failed) "OCR 下载失败" else if (done) "OCR 就绪" else "OCR 下载 $pct%"
-            // 进度文案放入岛/焦点，状态栏 ticker 同步
-            val island = """
-                {
-                  "param_v2": {
-                    "protocol": 1,
-                    "business": "download",
-                    "updatable": true,
-                    "enableFloat": true,
-                    "islandFirstFloat": true,
-                    "ticker": ${jsonStr(ticker)},
-                    "aodTitle": ${jsonStr(ticker)},
-                    "param_island": {
-                      "islandProperty": 1,
-                      "bigIslandArea": {
-                        "imageTextInfoLeft": {
-                          "type": 1,
-                          "textInfo": {
-                            "frontTitle": ${jsonStr(title)},
-                            "title": ${jsonStr(if (done || failed) ticker else "$pct%")},
-                            "content": ${jsonStr(text)},
-                            "useHighLight": true
-                          }
-                        }
-                      },
-                      "smallIslandArea": {
-                        "picInfo": { "type": 1 }
-                      }
-                    },
-                    "baseInfo": {
-                      "title": ${jsonStr(title)},
-                      "content": ${jsonStr(if (done || failed) text else "$pct% · $text")},
-                      "colorTitle": "${if (failed) "#D32F2F" else "#1976D2"}",
-                      "type": 2
-                    },
-                    "hintInfo": {
-                      "type": 1,
-                      "title": ${jsonStr(if (done || failed) ticker else "下载中 $pct%")}
-                    }
-                  }
-                }
-            """.trimIndent()
-            builder.extras.putString("miui.focus.param", island)
-        } catch (_: Throwable) {
-            // 非小米机型/字段变化：忽略
-        }
-    }
+            val color = if (failed) "#D32F2F" else "#1976D2"
 
-    private fun jsonStr(s: String): String {
-        val escaped = s
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "")
-            .replace("\t", " ")
-        return "\"$escaped\""
+            // 与官方「模版接入示例」同构；textInfo 放 imageTextInfoLeft 内
+            val island = JSONObject().apply {
+                put("param_v2", JSONObject().apply {
+                    put("protocol", 1)
+                    put("business", "download")
+                    put("islandFirstFloat", true)
+                    put("enableFloat", !terminal) // 更新时不再自动展开终态
+                    // 持续性：下载中 true；完成/失败 false（S2 终态契约）
+                    put("updatable", !terminal)
+                    put("timeout", if (terminal) 1 else 720) // 单位 min（官方表）
+                    put("ticker", ticker)
+                    put("aodTitle", ticker)
+                    put("param_island", JSONObject().apply {
+                        put("islandProperty", 1)
+                        put("islandTimeout", if (terminal) 60 else 3600)
+                        put("bigIslandArea", JSONObject().apply {
+                            // A 区：图文（进度）
+                            put("imageTextInfoLeft", JSONObject().apply {
+                                put("type", 1)
+                                put("picInfo", JSONObject().apply {
+                                    put("type", 1)
+                                    put("pic", "miui.focus.pic_main")
+                                })
+                                put("textInfo", JSONObject().apply {
+                                    put("frontTitle", title)
+                                    put("title", bigTitle)
+                                    put("content", text)
+                                    put("useHighLight", !terminal)
+                                })
+                            })
+                            // B 区：图
+                            put("picInfo", JSONObject().apply {
+                                put("type", 1)
+                                put("pic", "miui.focus.pic_main")
+                            })
+                        })
+                        put("smallIslandArea", JSONObject().apply {
+                            put("picInfo", JSONObject().apply {
+                                put("type", 1)
+                                put("pic", "miui.focus.pic_main")
+                            })
+                        })
+                        put("shareData", JSONObject().apply {
+                            put("pic", "miui.focus.pic_main")
+                            put("title", title)
+                            put("content", if (terminal) text else "$pct% · $text")
+                        })
+                    })
+                    put("baseInfo", JSONObject().apply {
+                        put("title", title)
+                        put("content", if (terminal) text else "$pct% · $text")
+                        put("colorTitle", color)
+                        put("type", 2)
+                    })
+                    put("hintInfo", JSONObject().apply {
+                        put("type", 1)
+                        put("title", if (terminal) ticker else "下载中 $pct%")
+                    })
+                })
+            }
+
+            notification.extras.putString("miui.focus.param", island.toString())
+
+            // 图片：launcher 图标作为岛内 pic
+            val pics = Bundle()
+            val picIcon = try {
+                Icon.createWithResource(this, applicationInfo.icon)
+            } catch (_: Throwable) {
+                Icon.createWithResource(this, android.R.drawable.stat_sys_download)
+            }
+            pics.putParcelable("miui.focus.pic_main", picIcon)
+            notification.extras.putBundle("miui.focus.pics", pics)
+        } catch (e: Throwable) {
+            android.util.Log.w("LegadoIsland", "attach island failed: $e")
+        }
     }
 
     private fun tryLiveProgressStyle(
@@ -249,7 +352,6 @@ class MainActivity : FlutterActivity() {
                 .invoke(ps, max.coerceAtLeast(1))
             psCls.getMethod("setProgress", Integer.TYPE)
                 .invoke(ps, progress.coerceIn(0, max))
-            // Compat builder 反射挂 Style（有则生效，无则仅进度条）
             compat.javaClass.methods
                 .firstOrNull { it.name == "setStyle" && it.parameterTypes.size == 1 }
                 ?.invoke(compat, ps)
