@@ -9,7 +9,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart'
-    show Canvas, Paint, Rect, FilterQuality;
+    show Canvas, Paint, Rect, FilterQuality, ColorFilter;
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -31,16 +31,16 @@ class OcrService {
   }
 
   /// 图片字节 → 文本；失败/不支持返回空串
-  /// 精度：小图先放大到宽≥1200 再识别，减少小字漏识
+  /// 预处理：放大 + 灰度 + 对比度（扫描件提精度）
   Future<String> recognizeImage(Uint8List bytes) async {
     if (!_supported || bytes.isEmpty) return '';
     File? tmp;
     try {
       final dir = await getTemporaryDirectory();
       tmp = File(
-        '${dir.path}/ocr_${DateTime.now().microsecondsSinceEpoch}.img',
+        '${dir.path}/ocr_${DateTime.now().microsecondsSinceEpoch}.png',
       );
-      final prepared = await _upscaleIfNeeded(bytes);
+      final prepared = await _preprocessForOcr(bytes);
       await tmp.writeAsBytes(prepared, flush: true);
       final input = InputImage.fromFilePath(tmp.path);
       final result = await _rec.processImage(input);
@@ -55,36 +55,55 @@ class OcrService {
     }
   }
 
-  /// 小图放大到宽 ≥1200px（PNG），提升小字识别率
-  Future<Uint8List> _upscaleIfNeeded(Uint8List bytes) async {
+  /// 扫描件预处理：放大到宽≥1400、灰度、对比度增强
+  Future<Uint8List> _preprocessForOcr(Uint8List bytes) async {
     try {
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
-      final img = frame.image;
-      final w = img.width;
-      final h = img.height;
-      if (w >= 1200 || w == 0 || h == 0) {
-        return bytes;
+      final src = frame.image;
+      final w = src.width;
+      final h = src.height;
+      if (w == 0 || h == 0) return bytes;
+
+      // 放大：短边目标，保证小字可读
+      var tw = w;
+      var th = h;
+      if (w < 1400) {
+        final s = 1400 / w;
+        tw = (w * s).round();
+        th = (h * s).round();
       }
-      final scale = 1200 / w;
-      final tw = (w * scale).round();
-      final th = (h * scale).round();
+
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
+      // 灰度 + 轻微对比（ColorMatrix）
+      // R'=G'=B' = 0.299R+0.587G+0.114B，再 (x-0.5)*1.25+0.5 拉对比
+      const grayContrast = <double>[
+        0.299 * 1.25, 0.587 * 1.25, 0.114 * 1.25, 0, -0.5 * 1.25 + 0.5,
+        0.299 * 1.25, 0.587 * 1.25, 0.114 * 1.25, 0, -0.5 * 1.25 + 0.5,
+        0.299 * 1.25, 0.587 * 1.25, 0.114 * 1.25, 0, -0.5 * 1.25 + 0.5,
+        0, 0, 0, 1, 0,
+      ];
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+        Paint()..colorFilter = const ColorFilter.matrix(grayContrast),
+      );
       canvas.drawImageRect(
-        img,
+        src,
         Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
         Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
         Paint()..filterQuality = FilterQuality.high,
       );
+      canvas.restore();
       final pic = recorder.endRecording();
       final out = await pic.toImage(tw, th);
       final bd = await out.toByteData(format: ui.ImageByteFormat.png);
-      img.dispose();
+      src.dispose();
       out.dispose();
       if (bd == null) return bytes;
       return bd.buffer.asUint8List();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Ocr preprocess: $e');
       return bytes;
     }
   }

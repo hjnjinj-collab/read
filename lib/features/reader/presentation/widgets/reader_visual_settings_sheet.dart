@@ -1645,14 +1645,14 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   String _status = '';
   String _mode = 'auto'; // reflow | compare | auto
   bool _busy = false;
-  /// 官方 tessdata_fast 简体包 + 国内可达镜像（GitHub 直连常 DNS 失败）
+  /// 最高档语言包 tessdata_best（体积大、精度最高）+ 国内镜像
   static const _defaultOcrUrl =
-      'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata';
+      'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_best@main/chi_sim.traineddata';
   static const _ocrMirrorUrls = <String>[
-    'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata',
-    'https://fastly.jsdelivr.net/gh/tesseract-ocr/tessdata_fast@main/chi_sim.traineddata',
-    'https://ghproxy.net/https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata',
-    'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata',
+    'https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata_best@main/chi_sim.traineddata',
+    'https://fastly.jsdelivr.net/gh/tesseract-ocr/tessdata_best@main/chi_sim.traineddata',
+    'https://ghproxy.net/https://github.com/tesseract-ocr/tessdata_best/raw/main/chi_sim.traineddata',
+    'https://github.com/tesseract-ocr/tessdata_best/raw/main/chi_sim.traineddata',
   ];
   final _urlCtrl = TextEditingController(text: _defaultOcrUrl);
   static const _channel = MethodChannel('legado/notify');
@@ -1849,7 +1849,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
           TextField(
             controller: _urlCtrl,
             decoration: const InputDecoration(
-              labelText: 'OCR 模型下载 URL（.traineddata 或 zip）',
+              labelText: 'OCR 语言包 URL（默认最高档 tessdata_best）',
               border: OutlineInputBorder(),
               isDense: true,
             ),
