@@ -1279,13 +1279,14 @@ class ReaderNotifier extends Notifier<ReadingState> {
       // 跨启动进度恢复（债#2/#3）：章节 + 字符锚点精确定位；
       // 锚点机制同时覆盖「改字号/净化配置后位置漂移」的迁移场景。
       // 无进度或索引失效时自然落到第 1 章第 1 页。
+      // 注意：chapterIndex==0 也要恢复（旧逻辑 >0 导致首章进度丢失）
       final saved = await _db.progressOf(filePath);
       if (openSeq != _openBookSeq) {
         readerTrace('openBook.cancel', {'seq': openSeq, 'stage': 'after-progress'});
         return;
       }
       if (saved != null &&
-          saved.chapterIndex > 0 &&
+          saved.chapterIndex >= 0 &&
           saved.chapterIndex < chapters.length) {
         state = state.copyWith(currentChapterIndex: saved.chapterIndex);
         await _loadCurrentPage(anchorCharOffset: saved.charOffset);

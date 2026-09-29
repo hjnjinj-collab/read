@@ -133,7 +133,9 @@ fn process_comic_chapter(
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = build_layout_engine(config.clone(), font_manager);
     let pages = engine.layout_items(&items, chapter_index)?;
-    Ok(pages.into_iter().map(crate::PageInfo::from).collect())
+    let mut infos: Vec<crate::PageInfo> = pages.into_iter().map(crate::PageInfo::from).collect();
+    assign_char_anchors(&mut infos);
+    Ok(infos)
 }
 
 /// PDF 扫描页显示模式
@@ -319,15 +321,78 @@ fn is_illustration_text(t: &str) -> bool {
     n < 24
 }
 
-/// 对 OCR/纯文本套用段落格式（首行缩进/段距），对齐 TXT 排版
+/// 对 OCR/纯文本套用段落格式（首行缩进/段距/**智能重分段**），对齐 TXT 排版
 fn format_pdf_text(raw: &str) -> String {
-    let mut para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
-    para_settings.re_paragraph_mode = reader_core::ReParagraphMode::None;
-    if !para_settings.needs_formatting() {
+    let para_settings = PARAGRAPH_FORMAT_SETTINGS.lock().unwrap().clone();
+    // 与 TXT 同源：用户 re_paragraph_mode / indent / 段距一并生效
+    if !para_settings.needs_formatting()
+        && para_settings.re_paragraph_mode == reader_core::ReParagraphMode::None
+    {
         return raw.to_string();
     }
     let formatter = reader_core::ParagraphFormatter::new(para_settings);
     formatter.format(raw)
+}
+
+/// OCR 文本 → 布局项：识别「第X章」标题行（与 TXT 章节识别同规则）
+fn pdf_text_items(text: &str) -> Vec<layout_engine::LayoutItem> {
+    use book_parser::chapter_recognizer::{ChapterRecognizer, LineContext};
+    let mut rec = ChapterRecognizer::new();
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut items = Vec::new();
+    let mut buf = String::new();
+    let total = lines.len();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        let ctx = LineContext {
+            line_number: i,
+            total_lines: total,
+            has_blank_before: i == 0 || lines[i - 1].trim().is_empty(),
+            has_blank_after: i + 1 >= total || lines[i + 1].trim().is_empty(),
+            previous_chapter_number: None,
+            has_previous_chapter: !items.is_empty(),
+            is_near_start: i < total / 5,
+        };
+        let is_heading = rec.recognize_line(trimmed, &ctx).is_some();
+        if is_heading {
+            if !buf.trim().is_empty() {
+                items.push(layout_engine::LayoutItem::text(format_pdf_text(buf.trim())));
+                buf.clear();
+            }
+            // 标题：放大 + 段前间距（对齐 TXT/EPUB 标题观感）
+            let mut t = layout_engine::LayoutItem::text(trimmed.to_string());
+            if let layout_engine::LayoutItem::Text(ref mut ti) = t {
+                ti.font_scale = Some(1.25);
+                ti.spacing_before_em = 0.6;
+                ti.spacing_after_em = 0.25;
+            }
+            items.push(t);
+        } else {
+            buf.push_str(line);
+            buf.push('\n');
+        }
+    }
+    if !buf.trim().is_empty() {
+        items.push(layout_engine::LayoutItem::text(format_pdf_text(buf.trim())));
+    }
+    if items.is_empty() && !text.trim().is_empty() {
+        items.push(layout_engine::LayoutItem::text(format_pdf_text(text.trim())));
+    }
+    items
+}
+
+/// 图片页无字符锚点时补合成锚点（进度恢复定位用）
+fn assign_char_anchors(pages: &mut [crate::PageInfo]) {
+    let mut next = 0usize;
+    for p in pages.iter_mut() {
+        if p.end_char_index > p.start_char_index {
+            next = p.end_char_index;
+            continue;
+        }
+        p.start_char_index = next;
+        p.end_char_index = next + 1000;
+        next = p.end_char_index;
+    }
 }
 
 /// PDF 分页：文字页/OCR 重排走排版，对照模式走 gallery 图
@@ -362,10 +427,8 @@ fn process_pdf_chapter(
             PdfPageKind::Text => {
                 let text = pdf.extract_pages_text(p, p + 1)?;
                 if !text.trim().is_empty() {
-                    // 与 TXT 同：首行缩进/段距
-                    items.push(layout_engine::LayoutItem::text(
-                        format_pdf_text(text.trim_end()),
-                    ));
+                    // 与 TXT 同路径：缩进/重分段 + 章节标题识别
+                    items.extend(pdf_text_items(text.trim_end()));
                 }
             }
             PdfPageKind::Image => {
@@ -402,10 +465,10 @@ fn process_pdf_chapter(
                     .unwrap_or(false);
 
                 if text_ok {
-                    // 文字足够多：重排（缩进等已套用）
-                    items.push(layout_engine::LayoutItem::text(format_pdf_text(
+                    // 文字足够多：重排（缩进/重分段/章节标题，同 TXT）
+                    items.extend(pdf_text_items(
                         ocr_text.as_deref().unwrap_or("").trim(),
-                    )));
+                    ));
                 } else if let Some(img) = img_opt {
                     // 插画/短文本页：保留原图，避免「插画消失」
                     let aspect = if img.height > 0 {
@@ -448,7 +511,10 @@ fn process_pdf_chapter(
             engine.layout_text(&text, chapter_index)?
         }
     };
-    Ok(pages.into_iter().map(crate::PageInfo::from).collect())
+    let mut infos: Vec<crate::PageInfo> = pages.into_iter().map(crate::PageInfo::from).collect();
+    // 图片页补合成锚点，进度可用 charOffset 恢复
+    assign_char_anchors(&mut infos);
+    Ok(infos)
 }
 
 // M9.5-G helper: invalidate preprocessed cache. Some(book_id) = per-book
