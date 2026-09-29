@@ -6,9 +6,14 @@
 //! - 扫描页：提取内嵌 XObject 图（JPEG 原样 / 位图转 PNG）
 //! - 单页对象用后即弃，不常驻像素/全书文本
 
+use crate::ccitt_fax::{decode_ccitt, CcittParams};
 use crate::traits::{BookFormat, BookMetadata, BookParser, ChapterInfo, ResourceType};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use lopdf::Stream;
 use std::path::{Path, PathBuf};
+
+/// 解码输出上限（防解压炸弹）
+const MAX_DECODED: usize = 64 * 1024 * 1024;
 
 /// 每「章」页数（无书签时的页块大小）
 const PAGES_PER_CHAPTER: usize = 50;
@@ -292,12 +297,12 @@ impl PdfParser {
         items.into_iter()
     }
 
-    /// 提取页内第 n 张图字节（JPEG 原样 / 其它编成 PNG）
-    pub fn extract_page_image(&self, page_index: usize, img_index: usize) -> Result<Vec<u8>> {
+    /// 诊断：页内第 n 张图的滤镜与 DecodeParms 摘要
+    pub fn debug_image_filters(&self, page_index: usize, img_index: usize) -> String {
         use lopdf::Object;
-        let xobjs = self
-            .page_resources_xobjects(page_index)
-            .ok_or_else(|| anyhow::anyhow!("页无 XObject"))?;
+        let Some(xobjs) = self.page_resources_xobjects(page_index) else {
+            return "no xobjects".into();
+        };
         let mut idx = 0usize;
         for (_name, obj) in xobjs.iter() {
             let id = match obj {
@@ -320,49 +325,328 @@ impl PdfParser {
                 idx += 1;
                 continue;
             }
-            let stream = stream.clone();
-            // 解压滤镜（DCTDecode 保留 JPEG 字节）
-            let filters: Vec<String> = stream
-                .dict
-                .get(b"Filter")
-                .map(|f| match f {
-                    Object::Name(n) => vec![String::from_utf8_lossy(n).to_string()],
-                    Object::Array(a) => a
-                        .iter()
-                        .filter_map(|x| x.as_name().ok().map(|n| String::from_utf8_lossy(n).to_string()))
-                        .collect(),
-                    _ => Vec::new(),
+            let filters = resolve_filter_names(&self.doc, dict)
+                .map(|f| f.join("+"))
+                .unwrap_or_else(|e| format!("filter-err:{e}"));
+            let parms = resolve_decode_parms(&self.doc, dict, 0, 1)
+                .map(|d| {
+                    let k = dict_i64(&d, b"K", 0);
+                    let cols = dict_i64(&d, b"Columns", 0);
+                    let rows = dict_i64(&d, b"Rows", 0);
+                    let b1 = dict_bool(&d, b"BlackIs1", false);
+                    let align = dict_bool(&d, b"EncodedByteAlign", false);
+                    format!("K={k} Columns={cols} Rows={rows} BlackIs1={b1} Align={align}")
                 })
+                .unwrap_or_else(|| "no-decodeparms".into());
+            let w = dict_i64(dict, b"Width", 0);
+            let h = dict_i64(dict, b"Height", 0);
+            let bits = dict_i64(dict, b"BitsPerComponent", -1);
+            let cs = dict
+                .get(b"ColorSpace")
+                .map(|o| format!("{o:?}"))
                 .unwrap_or_default();
-            let is_jpeg = filters.iter().any(|f| f == "DCTDecode");
-            let width = stream.dict.get(b"Width").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0) as u32;
-            let height = stream.dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0) as u32;
-            let bits = stream
-                .dict
+            let head = crate::ccitt_fax::peek_hex(&stream.content);
+            return format!(
+                "filters={filters} {parms} {w}x{h} bpc={bits} cs={cs} raw_len={} head=[{head}]",
+                stream.content.len()
+            );
+        }
+        "no image".into()
+    }
+
+    /// 提取页内第 n 张图字节（JPEG 原样 / 其它编成 PNG）
+    ///
+    /// 失败返回明确错误（含滤镜名），**绝不**返回空字节（T3：禁止空图入缓存）。
+    pub fn extract_page_image(&self, page_index: usize, img_index: usize) -> Result<Vec<u8>> {
+        use lopdf::Object;
+        let xobjs = self
+            .page_resources_xobjects(page_index)
+            .ok_or_else(|| anyhow!("页无 XObject"))?;
+        let mut idx = 0usize;
+        for (_name, obj) in xobjs.iter() {
+            let id = match obj {
+                Object::Reference(id) => *id,
+                _ => continue,
+            };
+            let Ok(Object::Stream(stream)) = self.doc.get_object(id) else {
+                continue;
+            };
+            let dict = &stream.dict;
+            let is_image = dict
+                .get(b"Subtype")
+                .ok()
+                .map(|s| s.as_name().map(|n| n == b"Image").unwrap_or(false))
+                .unwrap_or(false);
+            if !is_image {
+                continue;
+            }
+            if idx != img_index {
+                idx += 1;
+                continue;
+            }
+            let width = dict.get(b"Width").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0).max(0) as u32;
+            let height = dict.get(b"Height").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0).max(0) as u32;
+            let bits = dict
                 .get(b"BitsPerComponent")
                 .ok()
                 .and_then(|o| o.as_i64().ok())
                 .unwrap_or(8) as u8;
-            let data = if is_jpeg {
-                // DCTDecode：流内容即 JPEG 比特流
-                stream
-                    .get_plain_content_with_limit(64 * 1024 * 1024)
-                    .or_else(|_e| -> Result<Vec<u8>> { Ok(stream.content.clone()) })
-                    .map_err(|e| anyhow::anyhow!("读 JPEG 失败: {e}"))?
+
+            let filters = resolve_filter_names(&self.doc, dict).unwrap_or_default();
+            let filter_label = if filters.is_empty() {
+                "Raw".to_string()
             } else {
-                stream
-                    .decompressed_content_with_limit(64 * 1024 * 1024)
-                    .map_err(|e| anyhow::anyhow!("解压图像失败: {e}"))?
+                filters.join("+")
             };
-            if is_jpeg {
-                return Ok(data);
+
+            let data = self
+                .decode_image_stream(stream, &filters, width, height, bits)
+                .map_err(|e| anyhow!("本页无法解码（滤镜 {filter_label}）: {e}"))?;
+
+            if data.is_empty() {
+                bail!("本页无法解码（滤镜 {filter_label}）: 解出空数据");
             }
-            // 原始位图 → PNG（8bit Gray/RGB）
-            let png = encode_raw_png(&data, width, height, bits)?;
-            return Ok(png);
+            return Ok(data);
         }
         anyhow::bail!("页内无图: {page_index}#{img_index}")
     }
+
+    /// 按滤镜链解码图像流 → JPEG 字节或 PNG 字节
+    fn decode_image_stream(
+        &self,
+        stream: &Stream,
+        filters: &[String],
+        width: u32,
+        height: u32,
+        bits: u8,
+    ) -> Result<Vec<u8>> {
+        use lopdf::Object;
+        let mut data = stream.content.clone();
+        let mut i = 0usize;
+        while i < filters.len() {
+            let name = filters[i].as_str();
+            let parms = resolve_decode_parms(&self.doc, &stream.dict, i, filters.len());
+            match name {
+                "DCTDecode" => {
+                    // JPEG 比特流即结果（后续不应再有压缩滤镜）
+                    if i + 1 < filters.len() {
+                        bail!("DCTDecode 后还有滤镜 {}", &filters[i + 1..].join("+"));
+                    }
+                    return Ok(data);
+                }
+                "JPXDecode" => {
+                    bail!("本页为 JPEG2000（JPXDecode），暂不支持");
+                }
+                "CCITTFaxDecode" => {
+                    let params = ccitt_params_from(parms.as_ref(), width);
+                    let img = decode_ccitt(&data, &params)?;
+                    // T.4 输出 1=黑；直接出灰度 PNG
+                    let png = encode_1bpp_png(&img.data, img.width, img.height)?;
+                    return Ok(png);
+                }
+                "FlateDecode" | "LZWDecode" | "ASCIIHexDecode" | "ASCII85Decode"
+                | "RunLengthDecode" | "BrotliDecode" => {
+                    data = decode_simple_filter(name, &data, parms.as_ref())?;
+                }
+                other => bail!("不支持的滤镜 {other}"),
+            }
+            i += 1;
+        }
+        // 无图像压缩滤镜：原始采样 → PNG
+        if bits == 1 {
+            return encode_1bpp_png(&data, width, height);
+        }
+        encode_raw_png(&data, width, height, bits)
+    }
+}
+
+/// 解析 Filter 名列表（Name / Array / **间接引用**）
+fn resolve_filter_names(doc: &lopdf::Document, dict: &lopdf::Dictionary) -> Result<Vec<String>> {
+    use lopdf::Object;
+    let mut obj = dict
+        .get(b"Filter")
+        .map_err(|_| anyhow!("图像无 Filter"))?;
+    for _ in 0..8 {
+        match obj {
+            Object::Reference(id) => {
+                obj = doc
+                    .get_object(*id)
+                    .map_err(|e| anyhow!("Filter 引用解析失败: {e}"))?;
+            }
+            _ => break,
+        }
+    }
+    match obj {
+        Object::Name(n) => Ok(vec![String::from_utf8_lossy(n).into_owned()]),
+        Object::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for item in arr {
+                let mut it = item;
+                for _ in 0..8 {
+                    match it {
+                        Object::Reference(id) => {
+                            it = doc
+                                .get_object(*id)
+                                .map_err(|e| anyhow!("Filter 数组项引用失败: {e}"))?;
+                        }
+                        _ => break,
+                    }
+                }
+                match it {
+                    Object::Name(n) => out.push(String::from_utf8_lossy(n).into_owned()),
+                    other => bail!("Filter 数组项不是 Name: {other:?}"),
+                }
+            }
+            Ok(out)
+        }
+        other => bail!("Filter 类型非法: {other:?}"),
+    }
+}
+
+/// 取第 i 层滤镜的 DecodeParms（兼容 Reference 与 Array）
+fn resolve_decode_parms(
+    doc: &lopdf::Document,
+    dict: &lopdf::Dictionary,
+    filter_index: usize,
+    filter_count: usize,
+) -> Option<lopdf::Dictionary> {
+    use lopdf::Object;
+    let mut obj = dict.get(b"DecodeParms").ok()?;
+    for _ in 0..8 {
+        match obj {
+            Object::Reference(id) => obj = doc.get_object(*id).ok()?,
+            _ => break,
+        }
+    }
+    match obj {
+        Object::Dictionary(d) => {
+            if filter_count <= 1 {
+                Some(d.clone())
+            } else {
+                None
+            }
+        }
+        Object::Array(arr) => {
+            let mut it = arr.get(filter_index)?;
+            for _ in 0..8 {
+                match it {
+                    Object::Reference(id) => it = doc.get_object(*id).ok()?,
+                    Object::Null => return None,
+                    _ => break,
+                }
+            }
+            match it {
+                Object::Dictionary(d) => Some(d.clone()),
+                _ => None,
+            }
+        }
+        Object::Null => None,
+        _ => None,
+    }
+}
+
+fn dict_i64(d: &lopdf::Dictionary, key: &[u8], default: i64) -> i64 {
+    d.get(key).ok().and_then(|o| o.as_i64().ok()).unwrap_or(default)
+}
+
+fn dict_bool(d: &lopdf::Dictionary, key: &[u8], default: bool) -> bool {
+    use lopdf::Object;
+    match d.get(key).ok() {
+        Some(Object::Boolean(b)) => *b,
+        Some(Object::Integer(i)) => *i != 0,
+        _ => default,
+    }
+}
+
+/// 单层非图像滤镜解码（借 lopdf 临时 Stream）
+fn decode_simple_filter(
+    name: &str,
+    input: &[u8],
+    parms: Option<&lopdf::Dictionary>,
+) -> Result<Vec<u8>> {
+    use lopdf::Object;
+    let mut d = lopdf::Dictionary::new();
+    d.set("Filter", Object::Name(name.as_bytes().to_vec()));
+    if let Some(p) = parms {
+        d.set("DecodeParms", Object::Dictionary(p.clone()));
+    }
+    let stream = Stream::new(d, input.to_vec());
+    stream
+        .decompressed_content_with_limit(MAX_DECODED)
+        .with_context(|| format!("滤镜 {name} 解压失败"))
+}
+
+/// CCITT DecodeParms
+fn ccitt_params_from(parms: Option<&lopdf::Dictionary>, width_hint: u32) -> CcittParams {
+    let mut p = CcittParams {
+        columns: if width_hint > 0 {
+            width_hint
+        } else {
+            1728
+        },
+        ..Default::default()
+    };
+    if let Some(d) = parms {
+        p.k = dict_i64(d, b"K", 0) as i32;
+        let cols = dict_i64(d, b"Columns", 0);
+        if cols > 0 {
+            p.columns = cols as u32;
+        }
+        p.rows = dict_i64(d, b"Rows", 0).max(0) as u32;
+        p.black_is1 = dict_bool(d, b"BlackIs1", false);
+        p.encoded_byte_align = dict_bool(d, b"EncodedByteAlign", false);
+    }
+    p
+}
+
+/// 1bpp（T.4 解码输出，**恒为 1=黑**）→ 8bit 灰度 PNG
+///
+/// PDF `BlackIs1` 描述的是样本极性，T.4 游程解码后视觉极性固定为 1=黑；
+/// 显示端（PNG 0=黑/255=白）直接按 1=黑 映射即可。
+fn encode_1bpp_png(packed: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 {
+        bail!("图像尺寸非法");
+    }
+    let row_bytes = ((width as usize) + 7) / 8;
+    if packed.len() < row_bytes * height as usize {
+        bail!("1bpp 数据长度不足");
+    }
+    let n = width as usize * height as usize;
+    let mut gray = vec![255u8; n];
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let byte = packed[y * row_bytes + x / 8];
+            let bit = (byte >> (7 - (x % 8))) & 1;
+            if bit == 1 {
+                gray[y * width as usize + x] = 0;
+            }
+        }
+    }
+    encode_raw_png(&gray, width, height, 8)
+}
+
+/// 是否为可显示的图片字节（JPEG/PNG 魔数，且非空）
+pub fn is_valid_image_bytes(b: &[u8]) -> bool {
+    if b.len() < 8 {
+        return false;
+    }
+    // JPEG
+    if b[0] == 0xFF && b[1] == 0xD8 {
+        return true;
+    }
+    // PNG
+    if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return true;
+    }
+    // GIF
+    if b.starts_with(b"GIF8") {
+        return true;
+    }
+    // WEBP
+    if b.len() >= 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        return true;
+    }
+    false
 }
 
 /// 原始采样 → PNG（8bit Gray 或 RGB）
@@ -614,5 +898,56 @@ mod tests {
         assert_eq!(imgs[0].height, 2);
         let bytes = p.get_resource(&imgs[0].href).expect("取扫描图");
         assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']), "应为 PNG");
+    }
+
+    /// T4：有效图魔数嗅探
+    #[test]
+    fn is_valid_image_bytes_sniff() {
+        assert!(is_valid_image_bytes(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0]));
+        assert!(is_valid_image_bytes(&[
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A
+        ]));
+        assert!(!is_valid_image_bytes(&[]));
+        assert!(!is_valid_image_bytes(&[0x00, 0x01, 0x02, 0x03, 0, 0, 0, 0]));
+    }
+
+    /// T3：不支持的滤镜 → 明确错误文案，且不含空字节成功
+    #[test]
+    fn extract_unsupported_filter_error_message() {
+        let mut s = String::from("%PDF-1.4\n");
+        let objs: Vec<String> = vec![
+            "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n".into(),
+            "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n".into(),
+            "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Resources<< /XObject<< /Im1 5 0 R >> >> >>endobj\n".into(),
+            "4 0 obj<< /Length 6 >>stream\nBT ET\nendstream\nendobj\n".into(),
+            // JPXDecode：当前明确报「暂不支持」
+            "5 0 obj<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /JPXDecode /Length 4 >>stream\nXXXX\nendstream\nendobj\n".into(),
+        ];
+        let mut body = s.clone().into_bytes();
+        let mut offsets = Vec::new();
+        for o in &objs {
+            offsets.push(body.len());
+            body.extend_from_slice(o.as_bytes());
+        }
+        let xref_pos = body.len();
+        let mut xref = String::from("xref\n0 6\n0000000000 65535 f \n");
+        for off in &offsets {
+            xref.push_str(&format!("{:010} 00000 n \n", off));
+        }
+        xref.push_str(&format!(
+            "trailer<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            xref_pos
+        ));
+        body.extend_from_slice(xref.as_bytes());
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("jpx.pdf");
+        std::fs::write(&path, &body).unwrap();
+        let p = PdfParser::from_file(&path).expect("打开");
+        let err = p.extract_page_image(0, 0).unwrap_err().to_string();
+        assert!(
+            err.contains("本页无法解码") || err.contains("JPX") || err.contains("JPEG2000"),
+            "错误文案应可读，实得: {err}"
+        );
     }
 }

@@ -481,7 +481,13 @@ class PageContentRenderer {
             entry.height,
           );
           final imageState = BookImageStore.instance.state(href);
-          _drawImagePlaceholder(canvas, rect, imageState, theme);
+          _drawImagePlaceholder(
+            canvas,
+            rect,
+            imageState,
+            theme,
+            errorText: BookImageStore.instance.error(href),
+          );
           BookImageStore.instance.ensureLoaded(href, onImageNeeded);
         }
         continue;
@@ -763,22 +769,23 @@ class PageContentRenderer {
   }
 
   /// 阶段3优化：根据图片加载状态绘制占位符
-  /// 
+  ///
   /// - loading: 浅灰圆角块 + 旋转加载指示器
-  /// - failed: 深灰圆角块 + 错误图标（×）
+  /// - failed: 深灰圆角块 + 错误图标（×）+ 失败文案（如「本页无法解码…」）
   /// - null（未请求）: 浅灰圆角块（兜底）
   static void _drawImagePlaceholder(
     Canvas canvas,
     Rect rect,
     BookImageState? state,
-    ReaderTheme theme,
-  ) {
+    ReaderTheme theme, {
+    String? errorText,
+  }) {
     final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
-    
+
     if (state == BookImageState.loading) {
       // 加载中：浅灰背景 + 深灰圆环指示器
       canvas.drawRRect(rrect, Paint()..color = theme.placeholderColor);
-      
+
       final center = rect.center;
       final radius = (rect.width < rect.height ? rect.width : rect.height) / 6;
       if (radius > 4) {  // 只在足够大的占位框内绘制指示器
@@ -798,12 +805,12 @@ class PageContentRenderer {
         );
       }
     } else if (state == BookImageState.failed) {
-      // 失败：深灰背景 + 错误标记（×）
+      // 失败：深灰背景 + 错误标记（×）+ 文案
       canvas.drawRRect(
         rrect,
         Paint()..color = theme.placeholderColor.withValues(alpha: 0.7),
       );
-      
+
       final center = rect.center;
       final size = (rect.width < rect.height ? rect.width : rect.height) / 4;
       if (size > 6) {  // 只在足够大的占位框内绘制错误标记
@@ -824,6 +831,28 @@ class PageContentRenderer {
           Offset(center.dx - size / 2, center.dy + size / 2),
           paint,
         );
+      }
+      // T3：失败文案（如「本页无法解码（滤镜 …）」）
+      if (errorText != null &&
+          errorText.isNotEmpty &&
+          rect.width > 80 &&
+          rect.height > 36) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: errorText,
+            style: TextStyle(
+              color: theme.placeholderColor.withValues(alpha: 0.9),
+              fontSize: 12,
+              height: 1.3,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          maxLines: 3,
+          ellipsis: '…',
+        )..layout(maxWidth: rect.width - 16);
+        final dx = center.dx - tp.width / 2;
+        final dy = center.dy + size / 2 + 8;
+        tp.paint(canvas, Offset(dx, dy));
       }
     } else {
       // 未请求或其他状态：简单浅灰占位框

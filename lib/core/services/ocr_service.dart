@@ -30,10 +30,16 @@ class OcrService {
         TextRecognizer(script: TextRecognitionScript.chinese);
   }
 
-  /// 图片字节 → 文本；失败/不支持返回空串
+  /// 图片字节 → 文本；失败/不支持/无效图返回空串
   /// 预处理：放大 + 灰度 + 对比度（扫描件提精度）
+  ///
+  /// T4：仅对有效图（JPEG/PNG 魔数）做识别；空图/解码失败字节跳过。
   Future<String> recognizeImage(Uint8List bytes) async {
     if (!_supported || bytes.isEmpty) return '';
+    if (!_isDecodableImage(bytes)) {
+      debugPrint('OcrService: skip invalid image bytes len=${bytes.length}');
+      return '';
+    }
     File? tmp;
     try {
       final dir = await getTemporaryDirectory();
@@ -53,6 +59,19 @@ class OcrService {
         await tmp?.delete();
       } catch (_) {}
     }
+  }
+
+  /// JPEG/PNG 魔数嗅探（禁止空图/垃圾字节进 OCR）
+  static bool _isDecodableImage(Uint8List b) {
+    if (b.length < 8) return false;
+    if (b[0] == 0xFF && b[1] == 0xD8) return true; // JPEG
+    if (b[0] == 0x89 &&
+        b[1] == 0x50 &&
+        b[2] == 0x4E &&
+        b[3] == 0x47) {
+      return true; // PNG
+    }
+    return false;
   }
 
   /// 扫描件预处理：放大到宽≥1400、灰度、对比度增强

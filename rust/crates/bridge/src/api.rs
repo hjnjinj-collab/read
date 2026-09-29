@@ -450,12 +450,27 @@ fn process_pdf_chapter(
                             });
                     }
                     // 本机引擎兜底（桌面 tesseract）
+                    // T4：仅对成功解码的有效图做 OCR；空图/解码失败跳过
                     if ocr_text.is_none() && ocr_ready {
                         if let (Some(mgr), Some(img)) = (ocr.as_ref(), img_opt.as_ref()) {
-                            if let Ok(bytes) = pdf.get_resource(&img.href) {
-                                let engine = mgr.build_engine();
-                                if engine.is_ready() {
-                                    ocr_text = engine.recognize(&bytes).ok();
+                            match pdf.get_resource(&img.href) {
+                                Ok(bytes)
+                                    if book_parser::pdf_parser::is_valid_image_bytes(&bytes) =>
+                                {
+                                    let engine = mgr.build_engine();
+                                    if engine.is_ready() {
+                                        ocr_text = engine.recognize(&bytes).ok();
+                                    }
+                                }
+                                Ok(bytes) => {
+                                    log::warn!(
+                                        "ocr skip invalid image {} len={}",
+                                        img.href,
+                                        bytes.len()
+                                    );
+                                }
+                                Err(e) => {
+                                    log::warn!("ocr skip failed extract {}: {e}", img.href);
                                 }
                             }
                         }

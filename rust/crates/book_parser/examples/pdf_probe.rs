@@ -26,11 +26,42 @@ fn main() {
             // 试第 0 页图
             let imgs: Vec<_> = parser.list_page_images(0).collect();
             println!("page0 images={}", imgs.len());
-            if let Some(img) = imgs.first() {
-                println!("img0 {:?}", img);
-                match parser.get_resource(&img.href) {
-                    Ok(b) => println!("img0 bytes={}", b.len()),
-                    Err(e) => println!("img0 ERR {}", e),
+            // 多页抽样：滤镜 + 解码结果
+            for p in [0usize, 1, 2, 10, 11, 20, 50, 100] {
+                if p >= meta.total_chapters * 50 && p > 20 {
+                    // 页数粗估；实际用 list 判空
+                }
+                let list: Vec<_> = parser.list_page_images(p).collect();
+                if list.is_empty() {
+                    println!("p{} no images", p);
+                    continue;
+                }
+                for img in list.iter().take(1) {
+                    println!(
+                        "p{} {} meta={}x{}",
+                        p, img.href, img.width, img.height
+                    );
+                    println!("  info {}", parser.debug_image_filters(p, 0));
+                    match parser.extract_page_image(p, 0) {
+                        Ok(b) => {
+                            let jpeg = b.starts_with(&[0xFF, 0xD8]);
+                            let png = b.starts_with(&[0x89, b'P']);
+                            let head: Vec<String> =
+                                b.iter().take(8).map(|x| format!("{:02x}", x)).collect();
+                            println!(
+                                "  extract bytes={} jpeg={} png={} head={}",
+                                b.len(),
+                                jpeg,
+                                png,
+                                head.join(" ")
+                            );
+                            // 导出供目视检查
+                            let out = format!("pdf_probe_p{p}.bin");
+                            std::fs::write(&out, &b).ok();
+                            println!("  wrote {out}");
+                        }
+                        Err(e) => println!("  extract ERR {}", e),
+                    }
                 }
             }
         }

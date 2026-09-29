@@ -70,6 +70,8 @@ class BookImageStore {
   /// 超过 [_maxFailureAttempts] 后回到稳定 failed：恒画占位，直到 bind/clear。
   final Map<String, int> _failureCounts = {};
   final Map<String, DateTime> _retryNotBefore = {};
+  /// T3：失败原因（展示用文案，如「本页无法解码（滤镜 …）」）
+  final Map<String, String> _errors = {};
   static const int _maxFailureAttempts = 3;
 
   /// 失败重试退避表（@visibleForTesting：测试可归零避免真实等待）
@@ -141,6 +143,9 @@ class BookImageStore {
   /// 状态查询别名，避免调用方需要依赖内部缓存结构。
   BookImageState? status(String resourceHref) => state(resourceHref);
 
+  /// T3：失败文案（无则 null）。failed 占位可显示「本页无法解码…」
+  String? error(String resourceHref) => _errors[_key(resourceHref)];
+
   /// 异步加载并解码；完成后经 [onReady] 通知重绘（幂等：进行中不重复发起）。
   ///
   /// A28 修复：命中进行中（_loading）时 onReady 不再被丢弃，而是挂入
@@ -211,6 +216,7 @@ class BookImageStore {
         // 成功后清空失败记录，允许后续失败重新计次
         _failureCounts.remove(key);
         _retryNotBefore.remove(key);
+        _errors.remove(key);
         readerTrace(
           'image.ready',
           {'href': resourceHref, 'epoch': requestEpoch},
@@ -221,10 +227,15 @@ class BookImageStore {
         onReady();
         _notifyPending(key);
       });
-    } catch (_) {
+    } catch (e) {
       if (requestEpoch == _epoch && bookId == _bookId) {
         final attempts = (_failureCounts[key] ?? 0) + 1;
         _failureCounts[key] = attempts;
+        // T3：记录可展示的失败文案（FFI/解码错误含「本页无法解码（滤镜 …）」）
+        final msg = e.toString();
+        if (msg.isNotEmpty) {
+          _errors[key] = msg.replaceFirst('Exception: ', '');
+        }
         if (attempts < _maxFailureAttempts) {
           final backoff =
               retryBackoff[(attempts - 1).clamp(0, retryBackoff.length - 1)];
@@ -236,6 +247,7 @@ class BookImageStore {
           'href': resourceHref,
           'epoch': requestEpoch,
           'attempts': attempts,
+          'error': _errors[key],
         });
         // A28：失败也通知多播等待方（不自增 imageReadyTick——失败 ≠ 就绪），
         // 让挂着重绘回调的页面立即重绘出 failed 占位（×），而非停在灰块
@@ -349,6 +361,7 @@ class BookImageStore {
     _loading.clear();
     _failureCounts.clear();
     _retryNotBefore.clear();
+    _errors.clear();
     _pinned.clear();
     // A28：旧书的多播回调全部作废（回调闭包持有旧页引用，新书不得触发）
     _pendingCallbacks.clear();
