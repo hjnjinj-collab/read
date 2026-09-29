@@ -127,6 +127,7 @@ fn process_comic_chapter(
             align: None,
             bleed: true,   // 整页图贴边
             gallery: true, // 一页一图
+            fill_page: false, // 漫画仍按 60% 阈值拉伸/拼页
         })
         .collect();
 
@@ -486,6 +487,7 @@ fn process_pdf_chapter(
                         align: None,
                         bleed: true,
                         gallery: true,
+                        fill_page: true, // PDF 扫描/插画：整页拉伸（宽=页宽高=页高）
                     });
                 }
             }
@@ -3149,6 +3151,7 @@ fn blocks_to_layout_items_inner(
                     }),
                     bleed: *bleed,
                     gallery: *gallery,
+                    fill_page: false, // EPUB 正文图/画廊不强制整页
                 });
             }
             ContentBlock::List { items, ordered, .. } => {

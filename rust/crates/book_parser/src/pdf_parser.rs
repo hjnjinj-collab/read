@@ -213,13 +213,15 @@ impl PdfParser {
             .unwrap_or(0)
     }
 
-    /// 页类型：有字→Text；有图→Image；否则 Blank
+    /// 页类型：**轻量**判定（扫描 PDF 禁止逐页解码内容流）
+    ///
+    /// 有内嵌大图 → Image（扫描/插画）；否则再看文本。
     pub fn page_kind(&self, page_index: usize) -> PdfPageKind {
-        if self.page_text_len(page_index) >= 1 {
-            return PdfPageKind::Text;
-        }
         if self.list_page_images(page_index).next().is_some() {
             return PdfPageKind::Image;
+        }
+        if self.page_text_len(page_index) >= 1 {
+            return PdfPageKind::Text;
         }
         PdfPageKind::Blank
     }

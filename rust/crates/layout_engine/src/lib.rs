@@ -284,6 +284,8 @@ pub enum LayoutItem {
         bleed: bool,
         /// 画廊图：图后强制分页（每图一页）
         gallery: bool,
+        /// 强制铺满整页（宽=页宽、高=页高，不保持比例）；PDF 扫描页用
+        fill_page: bool,
     },
     Table(TableInput),
     /// 水平装饰线（标题 border-bottom / 未来的 hr 视觉升级）
@@ -874,6 +876,7 @@ impl LayoutEngine {
                     align,
                     bleed,
                     gallery,
+                    fill_page,
                 } => {
                     let ratio = if *aspect > 0.01 { *aspect } else { 0.75 };
                     let (mut img_width, mut img_x) = if *bleed {
@@ -894,23 +897,25 @@ impl LayoutEngine {
                         (w, x)
                     };
                     let mut img_height = img_width / ratio;
-                    // 漫画/扫描页经典排版（gallery+bleed）：
-                    // - 整宽下自然高 **≥ 60% 页高** → 独占整页**拉伸铺满**（不留空）
-                    // - 否则（半页级）→ 整宽自然高上下拼页
-                    let comic_pack = *gallery && *bleed;
+                    // fill_page：PDF 扫描页强制整页（宽=页宽、高=页高）
+                    // comic_pack：漫画 gallery+bleed，≥60% 页高拉伸，否则拼页
+                    let comic_pack = *gallery && *bleed && !*fill_page;
                     let mut comic_solo_full = false;
-                    if comic_pack {
+                    if *fill_page {
+                        img_width = self.config.width;
+                        img_x = 0.0;
+                        img_height = self.config.height;
+                        comic_solo_full = true;
+                    } else if comic_pack {
                         let page_h = self.config.height;
                         let full_w = self.config.width;
                         let nat_h = full_w / ratio;
                         img_width = full_w;
                         img_x = 0.0;
                         if nat_h >= page_h * 0.60 {
-                            // 大图（含约 65% 页高封面）：独占一页拉伸填满
                             comic_solo_full = true;
                             img_height = page_h;
                         } else {
-                            // 小图：按自然高度拼页
                             img_height = nat_h;
                         }
                     } else if *gallery {
@@ -2252,6 +2257,7 @@ mod tests {
             align: Some(LayoutAlign::Center),
             bleed: false,
             gallery: false,
+        fill_page: false,
         }
     }
 
@@ -2278,6 +2284,7 @@ mod tests {
             align: Some(LayoutAlign::Center),
             bleed: true,
             gallery: false,
+        fill_page: false,
         }];
         let pages = engine.layout_items(&items, 0).unwrap();
         let e = match &pages[0].entries[0] {
@@ -3181,6 +3188,7 @@ mod tests {
                 align: Some(LayoutAlign::Center),
                 bleed: false,
                 gallery: true,
+                    fill_page: false,
             },
             LayoutItem::text("图说甲"),
             LayoutItem::Image {
@@ -3190,6 +3198,7 @@ mod tests {
                 align: Some(LayoutAlign::Center),
                 bleed: false,
                 gallery: true,
+                    fill_page: false,
             },
             LayoutItem::text("图说乙"),
         ];
@@ -3224,6 +3233,32 @@ mod tests {
         assert!(img0.height > 0.0);
     }
 
+    /// PDF 扫描页 fill_page：无论宽高比，强制铺满整窗
+    #[test]
+    fn fill_page_forces_full_window() {
+        let (engine, cfg) = create_test_engine();
+        let items = vec![LayoutItem::Image {
+            resource_href: "scan.jpg".into(),
+            aspect: 2.0, // 扁图，旧逻辑会只占约半页
+            width_percent: None,
+            align: None,
+            bleed: true,
+            gallery: true,
+            fill_page: true,
+        }];
+        let pages = engine.layout_items(&items, 0).unwrap();
+        let img = pages[0]
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                PageEntry::Image(i) => Some(i),
+                _ => None,
+            })
+            .unwrap();
+        assert!((img.width - cfg.width).abs() < 1.0);
+        assert!((img.height - cfg.height).abs() < 1.0);
+    }
+
     /// 漫画 gallery+bleed：≥60% 页高的图独占整页拉伸
     #[test]
     fn gallery_bleed_tall_image_fills_full_page() {
@@ -3235,6 +3270,7 @@ mod tests {
             align: None,
             bleed: true,
             gallery: true,
+                    fill_page: false,
         }];
         let pages = engine.layout_items(&items, 0).unwrap();
         let img = pages[0]
@@ -3267,6 +3303,7 @@ mod tests {
             align: None,
             bleed: true,
             gallery: true,
+                    fill_page: false,
         }];
         let pages = engine.layout_items(&items, 0).unwrap();
         let img = pages[0]
@@ -3298,6 +3335,7 @@ mod tests {
                 align: None,
                 bleed: true,
                 gallery: true,
+                    fill_page: false,
             },
             LayoutItem::Image {
                 resource_href: "s2.jpg".into(),
@@ -3306,6 +3344,7 @@ mod tests {
                 align: None,
                 bleed: true,
                 gallery: true,
+                    fill_page: false,
             },
         ];
         let pages = engine.layout_items(&items, 0).unwrap();
