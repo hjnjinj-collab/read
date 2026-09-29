@@ -99,16 +99,8 @@ void main() async {
   try {
     final support = await getApplicationSupportDirectory();
     await BookService().setOcrModelDir('${support.path}/ocr');
-    // 启动即请求通知权限（下载时才请求易错过）
-    const MethodChannel('legado/notify').invokeMethod('showProgress', {
-      'id': 0x0C12,
-      'title': 'Legado',
-      'text': '通知已就绪',
-      'progress': 100,
-      'max': 100,
-      'indeterminate': false,
-      'done': true,
-    });
+    // 仅申请通知权限，不弹「已就绪」等无关通知
+    const MethodChannel('legado/notify').invokeMethod('requestPermission');
   } catch (_) {}
 
   runApp(ProviderScope(

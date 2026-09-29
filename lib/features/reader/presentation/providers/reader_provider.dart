@@ -1390,65 +1390,35 @@ class ReaderNotifier extends Notifier<ReadingState> {
     });
 
     try {
-      // 分流：EPUB 结构化分页 / TXT 文本分页
-      var page;
-      if (usesStructuredLayout) {
-        // PDF 扫描页：后台 ML Kit 预识别（不挡翻页；每章只跑一次）
-        if (_isPdf) {
-          unawaited(() async {
-            try {
-              final n = await OcrService.instance
-                  .preOcrPdfChapter(requestedBookId, requestedChapterIndex);
-              // 首次识别成功后刷新一次，让用户看到文字重排
-              if (n > 0 && state.bookId == requestedBookId) {
-                _invalidateFrames(reason: 'pdf-ocr');
-                await _loadCurrentPage(
-                  anchorCharOffset: state.currentPage?.startCharIndex,
-                );
-              }
-            } catch (_) {}
-          }());
-        }
-        // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
-        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
-            ? 1
-            : _chineseConvert == ChineseConvertType.t2s
-            ? 2
-            : 0;
-        page = await _bookService.getPageStructured(
-          requestedBookId,
-          requestedChapterIndex,
-          requestedPageIndex,
-          width: _screenWidth,
-          height: _screenHeight,
-          fontSize: _fontSize,
-          lineHeightMultiplier: _lineHeight,
-          paddingLeft: layoutPadH,
-          paddingTop: _padTop,
-          paddingRight: layoutPadH,
-          paddingBottom: _paddingVertical,
-          fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
-          anchorCharOffset: anchorCharOffset,
-          chineseConvert: chineseConvertCode,
-          pageFillThreshold: _pageFillThreshold,
-          showComments: _showComments,
-          paraFormatHash: _paraFormatHash,
-          removeDuplicateTitle: _removeDuplicateTitle, // A30c：EPUB 去重标题同口径
-          replaceRules: _replaceRules, // A30b：EPUB 净化规则同口径下发
-          reSegment: _reSegment, // 统一智能分段：EPUB 与 TXT 同核
-          segmentRules: _segmentRules,
-        );
-        // 首翻两遍：喂入 Skia 前缀宽后清 structured 缓存重排一次，
-        // 使本章断行与 TXT 同级（MeasureCache 命中 = 实测宽）
-        final warmKey = '$requestedBookId/$requestedChapterIndex';
-        if (!_measureWarmedChapters.contains(warmKey)) {
-          _feedPageMeasurePrefixes(page);
-          await MeasureTextService.instance.flushToRust();
-          _measureWarmedChapters.add(warmKey);
-          await _bookService.clearStructuredPaginationCache(requestedBookId);
-          // 首翻 warm-up 改变 Rust 侧实测宽与分页结果；页数缓存必须同步失效。
-          _invalidatePageCountCache();
-          page = await _bookService.getPageStructured(
+      // 简繁编码与 TXT 同口径（0=无 1=简→繁 2=繁→简）
+      int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
+          ? 1
+          : _chineseConvert == ChineseConvertType.t2s
+          ? 2
+          : 0;
+
+      // PDF 扫描页：后台 ML Kit 预识别（不挡翻页；每章只跑一次）
+      // 原图模式跳过，避免大图解码拖死 FFI 加载
+      if (_isPdf && usesStructuredLayout && !_pdfImageMode) {
+        unawaited(() async {
+          try {
+            final n = await OcrService.instance
+                .preOcrPdfChapter(requestedBookId, requestedChapterIndex);
+            if (n > 0 && state.bookId == requestedBookId) {
+              _invalidateFrames(reason: 'pdf-ocr');
+              await _loadCurrentPage(
+                anchorCharOffset:
+                    state.currentPage?.startCharIndex ?? anchorCharOffset,
+              );
+            }
+          } catch (_) {}
+        }());
+      }
+
+      // FFI 超时保底：防「一直加载」卡死（PDF 大章/锁竞争）
+      Future<PageInfo> loadPage() {
+        if (usesStructuredLayout) {
+          return _bookService.getPageStructured(
             requestedBookId,
             requestedChapterIndex,
             requestedPageIndex,
@@ -1472,16 +1442,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
             segmentRules: _segmentRules,
           );
         }
-      } else {
-        // 转换简繁设置为数字代码
-        int chineseConvertCode = _chineseConvert == ChineseConvertType.s2t
-            ? 1
-            : _chineseConvert == ChineseConvertType.t2s
-            ? 2
-            : 0;
-
-        // 使用带预处理的 API
-        page = await _bookService.getPageProcessed(
+        return _bookService.getPageProcessed(
           requestedBookId,
           requestedChapterIndex,
           requestedPageIndex,
@@ -1493,16 +1454,38 @@ class ReaderNotifier extends Notifier<ReadingState> {
           paddingTop: _padTop,
           paddingRight: layoutPadH,
           paddingBottom: _paddingVertical,
-          fontName: ReaderFont.family, // M11：与 MeasureCache key 对齐
+          fontName: ReaderFont.family,
           removeDuplicateTitle: _removeDuplicateTitle,
-          reSegment: _reSegment, // A35-L1：智能分段增强
+          reSegment: _reSegment,
           chineseConvert: chineseConvertCode,
           replaceRules: _replaceRules,
-          segmentRules: _segmentRules, // A35-L2：分段规则
+          segmentRules: _segmentRules,
           anchorCharOffset: anchorCharOffset,
           pageFillThreshold: _pageFillThreshold,
           paraFormatHash: _paraFormatHash,
         );
+      }
+
+      var page = await loadPage().timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => throw TimeoutException('页面加载超时（12s）'),
+      );
+
+      if (usesStructuredLayout) {
+        // 首翻两遍：喂入 Skia 前缀宽后清 structured 缓存重排一次，
+        // 使本章断行与 TXT 同级（MeasureCache 命中 = 实测宽）
+        final warmKey = '$requestedBookId/$requestedChapterIndex';
+        if (!_measureWarmedChapters.contains(warmKey)) {
+          _feedPageMeasurePrefixes(page);
+          await MeasureTextService.instance.flushToRust();
+          _measureWarmedChapters.add(warmKey);
+          await _bookService.clearStructuredPaginationCache(requestedBookId);
+          _invalidatePageCountCache();
+          page = await loadPage().timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw TimeoutException('页面重排超时（12s）'),
+          );
+        }
       }
 
       // 结果回写前校验请求代际和阅读会话，防止旧请求覆盖新页。
@@ -1621,11 +1604,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
         }
       }
     } catch (e) {
-      readerTrace('page.next.error', {
+      readerTrace('page.load.error', {
         'error': e.toString(),
+        'generation': generation,
         'current': '${state.currentChapterIndex}/${state.currentPageIndex}',
       });
-      state = state.copyWith(error: e.toString());
+      // 超时/失败也要结束 loading，避免永久转圈
+      if (state.isLoading) {
+        state = state.copyWith(isLoading: false, error: e.toString());
+      } else {
+        state = state.copyWith(error: e.toString());
+      }
     }
   }
 

@@ -31,6 +31,10 @@ class MainActivity : FlutterActivity() {
             channelName
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "requestPermission" -> {
+                    ensureNotifyPermission()
+                    result.success(true)
+                }
                 "showProgress" -> {
                     val id = call.argument<Int>("id") ?: 1
                     val title = call.argument<String>("title") ?: "下载"
@@ -49,6 +53,10 @@ class MainActivity : FlutterActivity() {
                     val text = call.argument<String>("text") ?: ""
                     val failed = call.argument<Boolean>("failed") ?: false
                     showNotification(id, title, text, 100, 100, false, true, failed)
+                    // 完成态 5s 后自动取消，避免反复残留/重复感知
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        try { nm().cancel(id) } catch (_: Throwable) {}
+                    }, 5000)
                     result.success(true)
                 }
                 "cancel" -> {
