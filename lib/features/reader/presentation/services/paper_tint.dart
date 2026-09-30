@@ -33,6 +33,23 @@ class PaperTint {
 
   static bool get active => enabled && imagesNeedTint;
 
+  /// 等比 contain 目标矩形（居中）：避免 fill 非等比把竖画压细。
+  /// 多出的边由调用方纸色底露出。
+  static Rect fitContain(Rect dest, double imgW, double imgH) {
+    if (imgW <= 0 || imgH <= 0) return dest;
+    final sx = dest.width / imgW;
+    final sy = dest.height / imgH;
+    final s = sx < sy ? sx : sy;
+    final w = imgW * s;
+    final h = imgH * s;
+    return Rect.fromLTWH(
+      dest.center.dx - w / 2,
+      dest.center.dy - h / 2,
+      w,
+      h,
+    );
+  }
+
   /// 空白边权重：1=整行/列白，0=有内容（与 shader 同式）
   @visibleForTesting
   static double blankBandAmount(

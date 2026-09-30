@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:legado_flutter/features/reader/presentation/services/paper_tint.dart';
 
@@ -44,6 +45,32 @@ void main() {
       expect(PaperTint.pdfMappedLuma(0.0), closeTo(0.0, 0.02));
       expect(PaperTint.pdfMappedLuma(0.6), greaterThan(0.6));
       expect(PaperTint.pdfMappedLuma(0.4), lessThan(0.4));
+    });
+  });
+
+  group('fitContain 等比缩放', () {
+    test('页比屏更宽时按宽度适配，高度留边', () {
+      final dest = Rect.fromLTWH(0, 0, 1080, 2400);
+      final f = PaperTint.fitContain(dest, 1570, 2480);
+      expect(f.width, closeTo(1080, 0.5));
+      expect(f.height, closeTo(1080 * 2480 / 1570, 0.5));
+      expect(f.center.dx, closeTo(540, 0.5));
+      expect(f.center.dy, closeTo(1200, 0.5));
+    });
+
+    test('横竖缩放比一致（修笔画粗细）', () {
+      final dest = Rect.fromLTWH(0, 0, 1080, 2400);
+      final f = PaperTint.fitContain(dest, 1570, 2480);
+      final sx = f.width / 1570;
+      final sy = f.height / 2480;
+      expect(sx, closeTo(sy, 0.001));
+    });
+
+    test('已在框内则等同原图比例', () {
+      final dest = Rect.fromLTWH(0, 0, 200, 100);
+      final f = PaperTint.fitContain(dest, 100, 100);
+      expect(f.width, closeTo(100, 0.01));
+      expect(f.height, closeTo(100, 0.01));
     });
   });
 
