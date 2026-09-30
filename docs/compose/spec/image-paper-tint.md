@@ -3,25 +3,25 @@ feature: image-paper-tint
 status: delivered
 updated: 2026-09-29
 branch: master
-commits: 56222a6..HEAD
+commits: 56222a6..3d274b7
 ---
 
 # 图片纸色适配（漫画白边 / PDF 原图纸白）
 
 ## Report
 
-**What was built** — 图内近白像素映射为当前 `paperColor`（非整图染色）：`shaders/paper_tint.frag` 用 smoothstep(0.82–0.90) 将 luma≈白 的像素 mix 到纸色，线稿与彩块保留。漫画（gallery）与 PDF 原图（fill_page）默认启用；EPUB 插图默认不染。设置「背景」区增加「图片纸色适配」开关（`imagePaperTint`，默认开），持久化到 reader settings。shader 加载/绘制失败回退 `paintImage`。
+**What was built** — 图片纸色适配分两套算法（shader `paper_tint.frag` 的 `uMode`）：**漫画**只把「图边近白」映射为纸色（四周约 14% 边缘带 + 高亮度低色度），图内白底/高光不动；**PDF** 对低色度像素做 `luma → (ink, paper)` 两端重映射并轻微抬对比，纸白吃背景、墨色吃正文色，暗色下字迹仍清晰。设置「图片纸色适配」可关；shader 失败回退 `paintImage`。
 
 **Verification** —
-- `dart analyze`（paper_tint / settings / provider / page widget / visual sheet / test）：PASS（仅 5 条既有 info）
-- `flutter test test/paper_tint_test.dart --no-pub`：5 passed（纯白映射、暗色不映射、阈值过渡、strength、active 门控）
-- `.\build_apk.ps1 -Abis arm64-v8a`：`app-arm64-v8a-release.apk` 64.4MB PASS（含 paper_tint.frag）
+- `dart analyze`（paper_tint / page widget / provider）：PASS（2 条既有 info）
+- `flutter test test/paper_tint_test.dart --no-pub`：覆盖 边缘纯白映射 / 图内白不动 / 淡彩不动 / 线稿不动 / 边缘衰减 / PDF 低色度 / 彩色不映射 / 对比提升 / active 门控
+- APK 见本轮交付（含新版 shader）
 
 **Journey log** —
-1. 用户否决「整图 WPS 绿膜」与「只裁白边」；定为近白映射，彩画面保留。
-2. ColorFilter.matrix 做不了阈值，必须 FragmentShader；uniform 顺序 = uRect(0-3) / uPaper(4-7) / thr(8) / strength(9) + sampler0。
-3. `flutter pub get` 易因镜像挂起；验证用 `flutter test --no-pub` + `dart analyze`。
-4. 适用范围用打开书时的 format 标志（comic|pdf）而不是改 FFI entry 字段，避免 Rust 重签。
+1. v1 全局近白映射会误伤**图内白底**；改为漫画只动 UV 边缘带。
+2. PDF 暗色下「白→深纸 + 黑字仍黑」对比崩掉；改为墨色↔纸色两端重映射（正文色进 shader）。
+3. 阈值收紧到 0.93 + 低色度门控，排除米白高光与淡彩。
+4. `flutter pub get` 易挂起；验证用 `flutter test --no-pub` + `dart analyze`。
 
 ## [S1] Problem
 
@@ -29,44 +29,46 @@ commits: 56222a6..HEAD
 2. **PDF 原图**：扫描页以纸白为主，暗色主题下整页发白。
 3. 用户对照 WPS「护眼」：即使 PDF 也会把纸面压成主题色；但明确要求**不要盖住画面**，只适配空白/纸白。
 
+**v1 反馈（本修订）**：
+- 全局近白映射会把**图内白色背景**也改掉（误伤）。
+- PDF 原图模式**字迹发虚/不清晰**（反锯齿灰被混向纸色，或黑字未跟正文色）。
+
 ## [S2] Design
 
 ### 目标
-图内**近白像素**映射为当前阅读器 `paperColor`（日间纸色/夜间深灰/自定义护眼绿），彩色内容尽量保留。
+只适配「纸/留白」，不毁画面；PDF 暗色下字迹对比与正文阅读一致。
 
 ### 合同
 
-**A. 近白映射（非整图染色）**
-- 片元着色器 `shaders/paper_tint.frag`：
-  - `luma = dot(rgb, (0.299,0.587,0.114))`
-  - `t = smoothstep(threshold - 0.08, threshold, luma) * strength`
-  - `rgb' = mix(rgb, paper.rgb, t)`，alpha 不变
-- 默认 `threshold=0.90`、`strength=1.0`：纯白/近白 → 纸色；线稿黑、彩漫色保留。
-- 纸色取 `PageContentRenderer.paperColor`（含用户纸色覆盖 + 透明度），随主题即时变化。
+**A. 双模式 shader（`shaders/paper_tint.frag`）**
 
-**B. 适用范围（默认开）**
-- 漫画（`format==comic`，gallery 图）与 **PDF 原图/对照**（`fill_page` 扫描图）。
-- EPUB 正文插图默认**不**染（`paperTintImages=false`）。
-- 设置开关 `imagePaperTint`（默认 true）；关闭走原 `paintImage`。
+| 模式 | 规则 |
+|------|------|
+| `TintMode.comic` | `band = 1-smoothstep(0.55m, m, edgeDist)`，`m≈0.14`；`white = smoothstep(0.89,0.93,luma)*(1-smoothstep(0.05,0.12,chroma))`；`mix → paper` 仅当 `white*band` |
+| `TintMode.pdf` | `doc = 1-smoothstep(0.10,0.22,chroma)`；`g=(luma-0.5)*1.08+0.5`；`mapped=mix(ink,paper,g)`；`mix(c,mapped,doc)` |
+
+- **漫画**：边缘留白变纸色；图内白底、米白高光、淡彩不动。
+- **PDF**：纸白→`paperColor`，墨黑→`textColor`，对比略抬；彩色插图/批注不映射。
+
+**B. 适用范围**
+- `format==comic` → comic 模式；`format==pdf` → pdf 模式；EPUB 不染。
+- 设置 `imagePaperTint`（默认 true）关闭则 `paintImage`。
 
 **C. 绘制**
-- 有 shader 且开关开且当前书需要 → `drawRect` + FragmentShader 采样。
-- shader 加载失败 → 回退 `paintImage`（行为与现网一致）。
-
-**D. 设置持久化**
-- `reader_settings`：`imagePaperTint` bool，进出 JSON；视觉设置「背景」区增加开关。
+- `PaperTint.paint(..., paper, ink, fallback)`；shader 失败回退。
 
 ### 测试
-- 单元：`paperTintAmount` 阈值边界（纯白/暗色/过渡/strength/active 门控）。
-- 暗色主题 + 纯白图：输出接近 paperColor；luma 低的像素不变。
-- 开关关闭与 shader 失败时与旧绘制一致。
+- 漫画：边缘纯白映射、图内白/淡彩/线稿不映射、边缘→中心衰减。
+- PDF：低色度文档感、彩色不映射、luma 0/0.5/1 重映射与对比方向。
+- 门控：enabled × imagesNeedTint。
 
 ## [S3] Out of Scope
-- 整图 WPS 式绿膜（可二期作「强度」滑杆）
-- 裁切白边改变布局（只改颜色，不改几何）
-- OCR/预处理管线里的纸色处理
+- 整图 WPS 式绿膜
+- 裁切白边改变布局
+- OCR 预处理纸色
 
 ## Tasks
 - [x] T1: paper_tint.frag + 绘制封装（阈值/强度/paper 色） — acceptance: 近白→纸色、暗色不变 (covers: S2)
 - [x] T2: 漫画/PDF 默认启用 + 设置开关持久化 — acceptance: comic/pdf 生效，开关可关 (covers: S2)
 - [x] T3: 回退与测试 — acceptance: shader 失败走 paintImage；阈值用例过 (covers: S2)
+- [x] T4: 算法修订——漫画边缘带 + PDF 墨/纸重映射 — acceptance: 图内白不动、PDF 字迹清晰 (covers: S2)

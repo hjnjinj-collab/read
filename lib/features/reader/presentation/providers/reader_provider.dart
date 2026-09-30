@@ -1308,8 +1308,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
       _isEpub = format == 'epub';
       _isComic = format == 'comic';
       _isPdf = format == 'pdf';
-      // 漫画白边 / PDF 纸白：近白→纸色（EPUB 插图默认不染）
+      // 漫画：只动边缘留白；PDF：文档重映射保字迹
       PaperTint.imagesNeedTint = _isComic || _isPdf;
+      PaperTint.mode = _isPdf && !_isComic ? TintMode.pdf : TintMode.comic;
       PaperTint.warmUp();
       if (_isEpub || _isComic || _isPdf) {
         BookImageStore.instance.bind(_bookService, bookId);

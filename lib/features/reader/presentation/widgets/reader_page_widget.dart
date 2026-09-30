@@ -489,6 +489,7 @@ class PageContentRenderer {
               dest,
               image,
               PageContentRenderer.paperColor,
+              PageContentRenderer.textColor,
               fallback: paintPlain,
             );
           } else {
