@@ -33,13 +33,14 @@ class PaperTint {
 
   static bool get active => enabled && imagesNeedTint;
 
-  /// 等比 contain 目标矩形（居中）：避免 fill 非等比把竖画压细。
-  /// 多出的边由调用方纸色底露出。
-  static Rect fitContain(Rect dest, double imgW, double imgH) {
+  /// 等比 **cover** 目标矩形（居中）：短边贴满、长边溢出裁切。
+  /// 比 contain 少留白边；仍保持横竖缩放比一致（不压笔画）。
+  /// 扫描页左右多为纸边，裁掉通常不伤正文。
+  static Rect fitCover(Rect dest, double imgW, double imgH) {
     if (imgW <= 0 || imgH <= 0) return dest;
     final sx = dest.width / imgW;
     final sy = dest.height / imgH;
-    final s = sx < sy ? sx : sy;
+    final s = sx > sy ? sx : sy;
     final w = imgW * s;
     final h = imgH * s;
     return Rect.fromLTWH(

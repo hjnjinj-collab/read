@@ -48,29 +48,33 @@ void main() {
     });
   });
 
-  group('fitContain 等比缩放', () {
-    test('页比屏更宽时按宽度适配，高度留边', () {
+  group('fitCover 等比放大贴满', () {
+    test('竖长页：按高度贴满，宽向溢出居中裁', () {
       final dest = Rect.fromLTWH(0, 0, 1080, 2400);
-      final f = PaperTint.fitContain(dest, 1570, 2480);
-      expect(f.width, closeTo(1080, 0.5));
-      expect(f.height, closeTo(1080 * 2480 / 1570, 0.5));
+      final f = PaperTint.fitCover(dest, 1570, 2480);
+      // sy=2400/2480> sx=1080/1570 → 取 sy
+      expect(f.height, closeTo(2400, 0.5));
+      expect(f.width, closeTo(1570 * 2400 / 2480, 0.5));
+      expect(f.width, greaterThan(1080)); // 溢出裁切
       expect(f.center.dx, closeTo(540, 0.5));
-      expect(f.center.dy, closeTo(1200, 0.5));
     });
 
-    test('横竖缩放比一致（修笔画粗细）', () {
+    test('横竖缩放比一致（不压笔画）', () {
       final dest = Rect.fromLTWH(0, 0, 1080, 2400);
-      final f = PaperTint.fitContain(dest, 1570, 2480);
+      final f = PaperTint.fitCover(dest, 1570, 2480);
       final sx = f.width / 1570;
       final sy = f.height / 2480;
       expect(sx, closeTo(sy, 0.001));
     });
 
-    test('已在框内则等同原图比例', () {
-      final dest = Rect.fromLTWH(0, 0, 200, 100);
-      final f = PaperTint.fitContain(dest, 100, 100);
-      expect(f.width, closeTo(100, 0.01));
-      expect(f.height, closeTo(100, 0.01));
+    test('比 contain 更大（少留边）', () {
+      final dest = Rect.fromLTWH(0, 0, 1080, 2400);
+      final cover = PaperTint.fitCover(dest, 1570, 2480);
+      // contain 尺寸 = 宽贴满
+      final containW = 1080.0;
+      final containH = 1080.0 * 2480 / 1570;
+      expect(cover.width, greaterThanOrEqualTo(containW - 0.5));
+      expect(cover.height, greaterThan(containH + 1));
     });
   });
 

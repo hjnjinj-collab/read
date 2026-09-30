@@ -465,30 +465,34 @@ class PageContentRenderer {
       if (href != null) {
         final image = BookImageStore.instance.get(href);
         if (image != null) {
-          // 等比 contain 居中：fill_page 铺满窗时禁止非等比拉伸
-          // （横压得比竖狠 → 竖画变淡/缺画）。留边露纸色。
-          // 漫画白边 / PDF 纸白：blank 行或墨/纸重映射（可关）
+          // 等比 cover 居中：短边贴满少留白边，长边裁纸边；
+          // 横竖缩放比一致，不再压细竖画（缺画问题已消）。
           final dest = Rect.fromLTWH(
             entry.x,
             entry.y,
             entry.width,
             entry.height,
           );
-          final fitted = PaperTint.fitContain(
+          final fitted = PaperTint.fitCover(
             dest,
             image.width.toDouble(),
             image.height.toDouble(),
           );
           void paintPlain() {
+            canvas.save();
+            canvas.clipRect(dest);
             paintImage(
               canvas: canvas,
               rect: fitted,
               image: image,
-              fit: BoxFit.fill, // 已在 fitted 等比矩形内，fill=正确比例
+              fit: BoxFit.fill,
             );
+            canvas.restore();
           }
 
           if (PaperTint.active) {
+            canvas.save();
+            canvas.clipRect(dest);
             PaperTint.paint(
               canvas,
               fitted,
@@ -497,6 +501,7 @@ class PageContentRenderer {
               PageContentRenderer.textColor,
               fallback: paintPlain,
             );
+            canvas.restore();
           } else {
             paintPlain();
           }
