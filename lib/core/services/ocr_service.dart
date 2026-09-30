@@ -131,11 +131,13 @@ class OcrService {
   final Set<String> _doneChapters = {};
   final Set<String> _inflight = {};
 
-  /// 预识别 PDF 章扫描页；[blocking]=false 时后台跑不挡翻页
+  /// 预识别 PDF 章扫描页；[blocking]=false 时后台跑不挡翻页。
+  /// [onProgress]：`已完成/总数`（含缓存命中计数）。
   Future<int> preOcrPdfChapter(
     String bookId,
     int chapterIndex, {
     bool blocking = false,
+    void Function(int done, int total)? onProgress,
   }) async {
     if (!_supported) return 0;
     final key = '$bookId#$chapterIndex';
@@ -144,15 +146,23 @@ class OcrService {
     try {
       final hrefs = await BookService().pdfImageHrefs(bookId, chapterIndex);
       var ok = 0;
-      for (final href in hrefs) {
+      final total = hrefs.length;
+      onProgress?.call(0, total);
+      for (var i = 0; i < hrefs.length; i++) {
+        final href = hrefs[i];
         try {
           // 已有缓存则跳过（性能）
           final cached = await BookService().getOcrPageText(href);
           if (cached.trim().isNotEmpty) {
             ok++;
+            onProgress?.call(i + 1, total);
             continue;
           }
           final bytes = await BookService().getBookResource(bookId, href);
+          if (bytes.isEmpty) {
+            onProgress?.call(i + 1, total);
+            continue;
+          }
           final text = await recognizeImage(bytes);
           if (text.isNotEmpty) {
             await BookService().putOcrPageText(href, text);
@@ -161,9 +171,10 @@ class OcrService {
         } catch (e) {
           debugPrint('preOcr $href: $e');
         }
+        onProgress?.call(i + 1, total);
       }
       _doneChapters.add(key);
-      debugPrint('preOcrPdfChapter ch=$chapterIndex ok=$ok/${hrefs.length}');
+      debugPrint('preOcrPdfChapter ch=$chapterIndex ok=$ok/$total');
       if (ok > 0) {
         // 批量完成后一次失效分页缓存（不要每页 clear）
         try {
