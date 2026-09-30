@@ -3,10 +3,12 @@ import 'dart:collection';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Rect;
 
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/models/simple_models.dart';
 import '../diagnostics/reader_trace.dart';
+import 'paper_tint.dart';
 
 /// 图片资源加载状态。ready/failed 都是稳定终态，直到 bind/clear。
 enum BookImageState { loading, ready, failed }
@@ -146,6 +148,10 @@ class BookImageStore {
   /// T3：失败文案（无则 null）。failed 占位可显示「本页无法解码…」
   String? error(String resourceHref) => _errors[_key(resourceHref)];
 
+  /// 墨迹内容框（图像像素）；未分析时为 null
+  Rect? contentBox(String resourceHref) =>
+      PaperTint.contentBox(_key(resourceHref));
+
   /// 异步加载并解码；完成后经 [onReady] 通知重绘（幂等：进行中不重复发起）。
   ///
   /// A28 修复：命中进行中（_loading）时 onReady 不再被丢弃，而是挂入
@@ -217,6 +223,13 @@ class BookImageStore {
         _failureCounts.remove(key);
         _retryNotBefore.remove(key);
         _errors.remove(key);
+        // 墨迹内容框：用于等比放大少留边且不裁字（异步，失败不影响显示）
+        unawaited(() async {
+          final box = await PaperTint.estimateContentBox(frame.image);
+          if (box != null && requestEpoch == _epoch) {
+            PaperTint.setContentBox(key, box);
+          }
+        }());
         readerTrace(
           'image.ready',
           {'href': resourceHref, 'epoch': requestEpoch},
@@ -362,6 +375,7 @@ class BookImageStore {
     _failureCounts.clear();
     _retryNotBefore.clear();
     _errors.clear();
+    PaperTint.clearContentBoxes();
     _pinned.clear();
     // A28：旧书的多播回调全部作废（回调闭包持有旧页引用，新书不得触发）
     _pendingCallbacks.clear();

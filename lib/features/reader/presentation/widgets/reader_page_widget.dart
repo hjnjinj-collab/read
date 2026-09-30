@@ -465,18 +465,18 @@ class PageContentRenderer {
       if (href != null) {
         final image = BookImageStore.instance.get(href);
         if (image != null) {
-          // 等比 cover 居中：短边贴满少留白边，长边裁纸边；
-          // 横竖缩放比一致，不再压细竖画（缺画问题已消）。
+          // 等比适配墨迹内容框：少留边且不裁字（无框时退化为限幅 cover）
           final dest = Rect.fromLTWH(
             entry.x,
             entry.y,
             entry.width,
             entry.height,
           );
-          final fitted = PaperTint.fitCover(
+          final fitted = PaperTint.fitContent(
             dest,
             image.width.toDouble(),
             image.height.toDouble(),
+            BookImageStore.instance.contentBox(href),
           );
           void paintPlain() {
             canvas.save();
