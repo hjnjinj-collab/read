@@ -1672,6 +1672,8 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   final _urlCtrl = TextEditingController(text: _defaultOcrUrl);
   static const _channel = MethodChannel('legado/notify');
   static const _notifyId = 0x0C12;
+  /// 成功/失败终态后禁止再刷「下载中」进度（防看起来像重新下载）
+  bool _notifyTerminal = false;
 
   @override
   void initState() {
@@ -1688,6 +1690,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
 
   Future<void> _notifyProgress(int pct, String text,
       {bool indeterminate = false}) async {
+    if (_notifyTerminal) return;
     try {
       await _channel.invokeMethod('showProgress', {
         'id': _notifyId,
@@ -1702,11 +1705,14 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
   }
 
   Future<void> _notifyDone(String text, {bool failed = false}) async {
+    _notifyTerminal = true;
     try {
+      // 先清掉进度条，再发终态——避免「又变回下载中」的观感
+      await _channel.invokeMethod('cancel', {'id': _notifyId});
       await _channel.invokeMethod('showDone', {
         'id': _notifyId,
         'title': failed ? 'OCR 下载失败' : 'OCR 模型已就绪',
-        'text': text,
+        'text': failed ? text : '$text（无需再下载）',
         'failed': failed,
       });
     } catch (_) {}
@@ -1797,9 +1803,11 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
       try {
         await file.delete();
       } catch (_) {}
+      // 同步扫描模式：必须走 readerProvider（会 _invalidateFrames），
+      // 只调 BookService 会导致 Dart _pdfImageMode 与 Rust 不一致 → 纹理交替
       if (_mode != 'compare') {
-        setState(() => _mode = 'reflow');
-        await BookService().setPdfScanMode(0);
+        if (mounted) setState(() => _mode = 'reflow');
+        ref.read(readerProvider.notifier).setPdfScanMode(0);
       }
       await _notifyDone('已写入：$installedPath');
     } finally {
@@ -1902,6 +1910,7 @@ class _PdfOcrPanelState extends ConsumerState<_PdfOcrPanel> {
                         final url = _urlCtrl.text.trim();
                         if (url.isEmpty) return;
                         setState(() => _busy = true);
+                        _notifyTerminal = false;
                         await _notifyProgress(0, '开始下载…', indeterminate: true);
                         try {
                           await _downloadAndInstall(url);

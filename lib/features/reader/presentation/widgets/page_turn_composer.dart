@@ -420,20 +420,18 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
 
   /// 快照缓存键：页实例身份 + 章节页码 + 视口尺寸 + dpr + 渲染参数。
-  /// 任一变化即新键——实例重建（重排）/设置变更/窗口缩放都不会命中
-  /// 过时内容。
+  /// 含 PDF 扫描模式——原图/文字快照不得互相命中。
   String _snapshotKey(PageInfo page) {
     final size = _viewport;
     final dpr = View.of(context).devicePixelRatio;
     final notifier = ref.read(readerProvider.notifier);
-    // 2026-09-04 P1 暗黑主题：主题分量入键——深浅两套快照天然隔离，
-    // 切主题后旧条目不命中（由 LRU 淘汰），门控按新主题重新生成
     return '${readerPageId(page)}|${page.chapterIndex}/${page.pageIndex}'
         '|${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}'
         '|$dpr|${notifier.fontSize}|${notifier.lineHeight}'
         '|${notifier.boldEnabled}|${notifier.italicEnabled}'
         '|${notifier.boldEnabled && !notifier.renderAsEpub}'
-        '|${PageContentRenderer.theme.name}';
+        '|${PageContentRenderer.theme.name}'
+        '|pdfImg=${notifier.pdfImageMode ? 1 : 0}';
   }
 
   /// 计算页面快照生成时仍未就绪（未解码完成）的图片依赖集合（A28）

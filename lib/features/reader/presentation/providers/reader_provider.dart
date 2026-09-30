@@ -275,8 +275,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _pdfImageMode = mode == 1;
     unawaited(() async {
       await BookService().setPdfScanMode(mode);
-      // 立即生效：清分页缓存并按新模式重载当前页（并恢复该模式进度）
+      // 立即生效：清分页缓存 + **作废旧 FrameSet/纹理**（防原图/文字交替）
+      // 再按新模式重载当前页（并恢复该模式进度）
       if (_isPdf && wasImage != _pdfImageMode) {
+        _invalidateFrames(reason: 'pdf-scan-mode');
         try {
           await BookService().clearStructuredPaginationCache(state.bookId ?? '');
         } catch (_) {}
@@ -2857,6 +2859,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         '${_chineseConvert.index}_'
         '${_replaceRulesFingerprint()}_'
         '${_reSegment ? 1 : 0}'
+        // PDF 原图/文字分属不同分页结果，必须入指纹，否则 FrameSet/缓存串页
+        '_${_isPdf ? (_pdfImageMode ? 1 : 0) : 2}'
         '_${_paraFormatHash}';
   }
 
