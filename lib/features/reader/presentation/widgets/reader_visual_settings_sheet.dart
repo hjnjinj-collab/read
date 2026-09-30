@@ -957,6 +957,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   Color? _darkText;
   String _preset = '';
   bool _imagePaperTint = true;
+  double _tintStrength = 1.0;
 
   @override
   void initState() {
@@ -970,6 +971,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     _darkText = n.darkTextColor != null ? Color(n.darkTextColor!) : null;
     _preset = n.bgPreset;
     _imagePaperTint = n.imagePaperTint;
+    _tintStrength = n.imagePaperTintStrength;
   }
 
   void _applyPreset(_BgPreset p) {
@@ -1186,6 +1188,33 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
             ref.read(readerProvider.notifier).setImagePaperTint(v);
           },
         ),
+        if (_imagePaperTint) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('适配强度', style: TextStyle(fontSize: 13)),
+              Expanded(
+                child: Slider(
+                  value: _tintStrength,
+                  min: 0,
+                  max: 1,
+                  divisions: 20,
+                  label: '${(_tintStrength * 100).round()}%',
+                  onChanged: (v) {
+                    setState(() => _tintStrength = v);
+                    ref
+                        .read(readerProvider.notifier)
+                        .setImagePaperTintStrength(v);
+                  },
+                ),
+              ),
+              Text(
+                '${(_tintStrength * 100).round()}%',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 24),
         _SectionTitle('预设主题', scheme,
             line: ReaderMenuIcons.lineTheme, fill: ReaderMenuIcons.fillTheme),

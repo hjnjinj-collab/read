@@ -81,6 +81,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _bgPreset = persisted.bgPreset;
     _imagePaperTint = persisted.imagePaperTint;
     PaperTint.enabled = _imagePaperTint;
+    PaperTint.strength = persisted.imagePaperTintStrength;
     _themeMode = persisted.themeMode;
     _systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
         Brightness.dark;
@@ -623,6 +624,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'bgOpacity': _bgOpacity,
         'bgPreset': _bgPreset,
         'imagePaperTint': _imagePaperTint,
+        'imagePaperTintStrength': PaperTint.strength,
         'lightTextColor': _lightTextColor,
         'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,
@@ -922,6 +924,18 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _imagePaperTint = on;
     PaperTint.enabled = on;
     PaperTint.warmUp();
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 纸色适配强度 0–1（0=不映射）
+  double get imagePaperTintStrength => PaperTint.strength;
+
+  void setImagePaperTintStrength(double v) {
+    final s = v.clamp(0.0, 1.0);
+    if ((PaperTint.strength - s).abs() < 0.001) return;
+    PaperTint.strength = s;
     PageContentRenderer.themeRevision++;
     _persistSettings();
     state = state.copyWith();

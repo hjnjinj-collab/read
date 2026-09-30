@@ -140,6 +140,9 @@ class ReaderSettings {
   /// 图片纸色适配（漫画白边 / PDF 纸白 → 纸色；默认开）
   final bool imagePaperTint;
 
+  /// 纸色适配强度 0–1
+  final double imagePaperTintStrength;
+
   /// 正文文字色（ARGB int；null = 主题默认）
   /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
   final int? lightTextColor;
@@ -198,6 +201,7 @@ class ReaderSettings {
     required this.bgOpacity,
     required this.bgPreset,
     required this.imagePaperTint,
+    required this.imagePaperTintStrength,
     required this.lightTextColor,
     required this.darkTextColor,
     required this.accentColor,
@@ -248,6 +252,7 @@ class ReaderSettings {
         bgOpacity: 1.0,
         bgPreset: '',
         imagePaperTint: true,
+        imagePaperTintStrength: 1.0,
         lightTextColor: null,
         darkTextColor: null,
         accentColor: null,
@@ -316,6 +321,11 @@ class ReaderSettings {
         imagePaperTint: j['imagePaperTint'] is bool
             ? j['imagePaperTint'] as bool
             : true,
+        imagePaperTintStrength: () {
+          final v = j['imagePaperTintStrength'];
+          if (v is num) return v.toDouble().clamp(0.0, 1.0);
+          return 1.0;
+        }(),
         lightTextColor: j['lightTextColor'] is int
             ? j['lightTextColor'] as int
             : (j['textColor'] is int ? j['textColor'] as int : null),

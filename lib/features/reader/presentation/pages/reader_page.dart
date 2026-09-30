@@ -74,6 +74,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   bool _longPressTriggered = false;
   /// PointerDown 时间戳（ms）——用于快速移动提前判定
   int _pointerDownMs = 0;
+  int _lastTapMs = 0;
+  double _lastTapX = 0;
+  double _lastTapY = 0;
   /// 选区扩展节流（60fps = 16ms）
   int _lastSelectionUpdateMs = 0;
   /// A31-v6 P4: 笔记模式标志（激活后完全屏蔽翻页手势）
@@ -560,6 +563,39 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   /// 其余区域点击翻页（坍塌中心=真实点击点）
   void _handleTapGesture(double dx, double dy, Offset tapPos) {
     const microGestureThreshold = 3.0; // 3px 微手势阈值
+
+    // 双击图片 → 全屏缩放（长按之外的快捷入口）
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final near = (tapPos.dx - _lastTapX).abs() < 48 &&
+        (tapPos.dy - _lastTapY).abs() < 48;
+    if (nowMs - _lastTapMs < 320 && near) {
+      _lastTapMs = 0;
+      final page = ref.read(readerProvider).currentPage;
+      if (page != null) {
+        final href = PageContentRenderer.hitImage(
+          page,
+          tapPos,
+          forZoom: true,
+        );
+        if (href != null && BookImageStore.instance.get(href) != null) {
+          final img = BookImageStore.instance.get(href)!;
+          img.toByteData(format: ui.ImageByteFormat.png).then((bd) {
+            if (bd != null && mounted) {
+              ImageZoomViewer.open(
+                context,
+                bd.buffer.asUint8List(),
+                heroTag: href,
+              );
+            }
+          }).catchError((_) {});
+          return;
+        }
+      }
+    } else {
+      _lastTapMs = nowMs;
+      _lastTapX = tapPos.dx;
+      _lastTapY = tapPos.dy;
+    }
 
     // A34：脚注引用优先——命中则弹层，不翻页/不开菜单
     // A35：正文小图点按放大（整页图不拦截单击——点图要能开菜单）
