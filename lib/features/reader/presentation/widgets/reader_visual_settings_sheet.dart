@@ -956,6 +956,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   Color? _lightText;
   Color? _darkText;
   String _preset = '';
+  bool _imagePaperTint = true;
 
   @override
   void initState() {
@@ -968,6 +969,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     _lightText = n.lightTextColor != null ? Color(n.lightTextColor!) : null;
     _darkText = n.darkTextColor != null ? Color(n.darkTextColor!) : null;
     _preset = n.bgPreset;
+    _imagePaperTint = n.imagePaperTint;
   }
 
   void _applyPreset(_BgPreset p) {
@@ -1171,6 +1173,18 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 onTap: () => _applyPreset(p),
               ),
           ],
+        ),
+        const SizedBox(height: 16),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.linePreset,
+          fill: ReaderMenuIcons.fillPreset,
+          title: '图片纸色适配',
+          subtitle: '漫画白边 / PDF 纸白映射为当前纸色（暗色更舒适）',
+          value: _imagePaperTint,
+          onChanged: (v) {
+            setState(() => _imagePaperTint = v);
+            ref.read(readerProvider.notifier).setImagePaperTint(v);
+          },
         ),
         const SizedBox(height: 24),
         _SectionTitle('预设主题', scheme,

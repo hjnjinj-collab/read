@@ -137,6 +137,9 @@ class ReaderSettings {
   /// 内置背景预设键（parchment/linen/xuan/night/deepBlue/warmGray/''）
   final String bgPreset;
 
+  /// 图片纸色适配（漫画白边 / PDF 纸白 → 纸色；默认开）
+  final bool imagePaperTint;
+
   /// 正文文字色（ARGB int；null = 主题默认）
   /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
   final int? lightTextColor;
@@ -194,6 +197,7 @@ class ReaderSettings {
     required this.darkPaperColor,
     required this.bgOpacity,
     required this.bgPreset,
+    required this.imagePaperTint,
     required this.lightTextColor,
     required this.darkTextColor,
     required this.accentColor,
@@ -243,6 +247,7 @@ class ReaderSettings {
         darkPaperColor: null,
         bgOpacity: 1.0,
         bgPreset: '',
+        imagePaperTint: true,
         lightTextColor: null,
         darkTextColor: null,
         accentColor: null,
@@ -308,6 +313,9 @@ class ReaderSettings {
             j['darkPaperColor'] is int ? j['darkPaperColor'] as int : null,
         bgOpacity: _d(j, 'bgOpacity', 1.0).clamp(0.15, 1.0),
         bgPreset: _s(j, 'bgPreset', ''),
+        imagePaperTint: j['imagePaperTint'] is bool
+            ? j['imagePaperTint'] as bool
+            : true,
         lightTextColor: j['lightTextColor'] is int
             ? j['lightTextColor'] as int
             : (j['textColor'] is int ? j['textColor'] as int : null),

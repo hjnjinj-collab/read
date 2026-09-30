@@ -11,6 +11,7 @@ import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/ocr_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
+import '../services/paper_tint.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/reader_page_widget.dart';
 import 'page_frame.dart';
@@ -78,6 +79,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _darkPaperColor = persisted.darkPaperColor;
     _bgOpacity = persisted.bgOpacity;
     _bgPreset = persisted.bgPreset;
+    _imagePaperTint = persisted.imagePaperTint;
+    PaperTint.enabled = _imagePaperTint;
     _themeMode = persisted.themeMode;
     _systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
         Brightness.dark;
@@ -227,6 +230,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? _darkPaperColor;
   double _bgOpacity = 1.0;
   String _bgPreset = '';
+  bool _imagePaperTint = true;
 
   // 颜色：日/夜正文 + 强调
   int? _lightTextColor;
@@ -331,6 +335,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
   int? get darkPaperColor => _darkPaperColor;
   double get bgOpacity => _bgOpacity;
   String get bgPreset => _bgPreset;
+
+  /// 图片纸色适配（漫画/PDF 近白→纸色）
+  bool get imagePaperTint => _imagePaperTint;
   int? get lightTextColor => _lightTextColor;
   int? get darkTextColor => _darkTextColor;
   int? get accentColor => _accentColor;
@@ -613,6 +620,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'darkPaperColor': _darkPaperColor,
         'bgOpacity': _bgOpacity,
         'bgPreset': _bgPreset,
+        'imagePaperTint': _imagePaperTint,
         'lightTextColor': _lightTextColor,
         'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,
@@ -904,6 +912,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _lightPaperColor = light;
     _darkPaperColor = dark;
     _applyPaperAndPersist();
+  }
+
+  /// 图片纸色适配开关（漫画白边 / PDF 纸白）
+  void setImagePaperTint(bool on) {
+    if (_imagePaperTint == on) return;
+    _imagePaperTint = on;
+    PaperTint.enabled = on;
+    PaperTint.warmUp();
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
   }
 
   void _applyPaperAndPersist() {
@@ -1289,6 +1308,9 @@ class ReaderNotifier extends Notifier<ReadingState> {
       _isEpub = format == 'epub';
       _isComic = format == 'comic';
       _isPdf = format == 'pdf';
+      // 漫画白边 / PDF 纸白：近白→纸色（EPUB 插图默认不染）
+      PaperTint.imagesNeedTint = _isComic || _isPdf;
+      PaperTint.warmUp();
       if (_isEpub || _isComic || _isPdf) {
         BookImageStore.instance.bind(_bookService, bookId);
         // 封面落盘供书架显示（异步，不阻塞打开）

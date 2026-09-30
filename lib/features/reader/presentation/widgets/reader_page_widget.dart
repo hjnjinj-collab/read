@@ -7,6 +7,7 @@ import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
+import '../services/paper_tint.dart';
 import '../diagnostics/reader_trace.dart';
 
 class ReaderPageWidget extends StatefulWidget {
@@ -466,12 +467,33 @@ class PageContentRenderer {
         if (image != null) {
           // 拉伸铺满目标矩形：大图整页时宽=页宽、高=页高（不保持比例）；
           // 拼页小图矩形已含正确纵横比，fill≈原等比
-          paintImage(
-            canvas: canvas,
-            rect: Rect.fromLTWH(entry.x, entry.y, entry.width, entry.height),
-            image: image,
-            fit: BoxFit.fill,
+          // 漫画白边 / PDF 纸白：近白→paperColor（可关；shader 失败回退）
+          final dest = Rect.fromLTWH(
+            entry.x,
+            entry.y,
+            entry.width,
+            entry.height,
           );
+          void paintPlain() {
+            paintImage(
+              canvas: canvas,
+              rect: dest,
+              image: image,
+              fit: BoxFit.fill,
+            );
+          }
+
+          if (PaperTint.active) {
+            PaperTint.paint(
+              canvas,
+              dest,
+              image,
+              PageContentRenderer.paperColor,
+              fallback: paintPlain,
+            );
+          } else {
+            paintPlain();
+          }
         } else {
           // 阶段3优化：根据加载状态显示不同的占位
           final rect = Rect.fromLTWH(
