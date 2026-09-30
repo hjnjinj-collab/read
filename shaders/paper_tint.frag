@@ -1,17 +1,20 @@
-// 图片纸色适配：漫画边缘留白 / PDF 文档重映射
+// 图片纸色适配 v3：整行/整列白 → 空白边
 //
-// 模式（uMode）：
-//   0 = 漫画：只改靠近图边的近白（上下/左右白边），图内白底、高光不动
-//   1 = PDF 文档：低色度像素做 亮度→(墨色,纸色) 两端重映射，字迹对比保留
+// 用户算法：检测每一行白色像素占比；整行连续近白 = 还不是画面，整行改纸色。
+// 图内有内容的行（哪怕行里有白块）一律不动。列同理（左右白边）。
+//
+// uMode:
+//   0 = 漫画空白边（行/列白占比）
+//   1 = PDF 文档（低色度 亮度→墨色/纸色，保字迹）
 //
 // uniform 顺序（Dart setFloat / setImageSampler 同序）：
-// 0-3  uRect: left, top, width, height
-// 4-7  uPaper: r, g, b, a（0-1）
-// 8-11 uInk:   r, g, b, a（正文色；暗色=浅、亮色=深）
-// 12   uMode（0/1）
-// 13   uStrength（0-1）
-// 14   uThreshold（漫画白阈值，默认 0.93）
-// 15   uMargin（漫画边缘带宽，UV 半宽，默认 0.14）
+// 0-3  uRect
+// 4-7  uPaper
+// 8-11 uInk
+// 12   uMode
+// 13   uStrength
+// 14   uThreshold（近白亮度，默认 0.90）
+// 15   uBlankRatio（行/列白占比阈值，默认 0.97）
 
 #version 460 core
 
@@ -25,10 +28,16 @@ uniform vec4 uInk;
 uniform float uMode;
 uniform float uStrength;
 uniform float uThreshold;
-uniform float uMargin;
+uniform float uBlankRatio;
 uniform sampler2D uTexture;
 
 out vec4 fragColor;
+
+bool isNearWhite(vec3 rgb) {
+  float luma = dot(rgb, vec3(0.299, 0.587, 0.114));
+  float chroma = max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b));
+  return luma >= uThreshold && chroma <= 0.10;
+}
 
 void main() {
   vec2 uv = (FlutterFragCoord().xy - uRect.xy) / uRect.zw;
@@ -37,18 +46,26 @@ void main() {
     return;
   }
   vec4 c = texture(uTexture, uv);
-  float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-  float chroma = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
 
   if (uMode < 0.5) {
-    // 漫画：仅边缘留白
-    float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    float band = 1.0 - smoothstep(uMargin * 0.55, uMargin, edge);
-    float white = smoothstep(uThreshold - 0.04, uThreshold, luma)
-                * (1.0 - smoothstep(0.05, 0.12, chroma));
-    fragColor = vec4(mix(c.rgb, uPaper.rgb, white * band * uStrength), c.a);
+    // ── 漫画：整行/整列近白 = 空白边 ──
+    // 沿行采 16 点、沿列采 16 点，统计近白占比
+    float rowWhite = 0.0;
+    float colWhite = 0.0;
+    for (int i = 0; i < 16; i++) {
+      float t = (float(i) + 0.5) / 16.0;
+      if (isNearWhite(texture(uTexture, vec2(t, uv.y)).rgb)) rowWhite += 1.0;
+      if (isNearWhite(texture(uTexture, vec2(uv.x, t)).rgb)) colWhite += 1.0;
+    }
+    rowWhite /= 16.0;
+    colWhite /= 16.0;
+    // 整行白 或 整列白 → 本像素视为空白边，改纸色
+    float blank = max(step(uBlankRatio, rowWhite), step(uBlankRatio, colWhite));
+    fragColor = vec4(mix(c.rgb, uPaper.rgb, blank * uStrength), c.a);
   } else {
-    // PDF 文档：低色度做墨色↔纸色重映射（保字迹对比）
+    // ── PDF：低色度做墨色↔纸色重映射 ──
+    float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+    float chroma = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
     float doc = 1.0 - smoothstep(0.10, 0.22, chroma);
     float g = clamp((luma - 0.5) * 1.08 + 0.5, 0.0, 1.0);
     vec3 mapped = mix(uInk.rgb, uPaper.rgb, g);

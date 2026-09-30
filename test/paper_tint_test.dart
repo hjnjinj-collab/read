@@ -2,37 +2,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:legado_flutter/features/reader/presentation/services/paper_tint.dart';
 
 void main() {
-  group('PaperTint.comicTintAmount（漫画边缘留白）', () {
-    test('图边纯白 → 接近全量映射', () {
-      final t = PaperTint.comicTintAmount(1.0, 0.0, 0.0);
-      expect(t, greaterThan(0.9));
+  group('漫画空白边：整行/整列白占比', () {
+    test('整行白 → 空白边，改纸色', () {
+      expect(PaperTint.blankBandAmount(1.0, 0.2), 1.0);
     });
 
-    test('图内纯白（edge=0.3）不动 — 防止误伤白底', () {
-      final t = PaperTint.comicTintAmount(1.0, 0.0, 0.30);
-      expect(t, lessThan(0.05));
+    test('整列白（左右边）→ 空白边', () {
+      expect(PaperTint.blankBandAmount(0.3, 1.0), 1.0);
     });
 
-    test('图边淡彩/米白（chroma 高）不动', () {
-      final t = PaperTint.comicTintAmount(0.96, 0.20, 0.0);
-      expect(t, lessThan(0.15));
+    test('有内容的行（白占比 0.8）不动 — 即使行里有白块', () {
+      expect(PaperTint.blankBandAmount(0.80, 0.40), 0.0);
     });
 
-    test('图边线稿黑不动', () {
-      final t = PaperTint.comicTintAmount(0.15, 0.0, 0.0);
-      expect(t, lessThan(0.05));
+    test('略低于阈值不整行改（0.95 < 0.97）', () {
+      expect(PaperTint.blankBandAmount(0.95, 0.95), 0.0);
     });
 
-    test('从边缘到内容区平滑衰减', () {
-      final edge = PaperTint.comicTintAmount(1.0, 0.0, 0.02);
-      final mid = PaperTint.comicTintAmount(1.0, 0.0, 0.10);
-      final inside = PaperTint.comicTintAmount(1.0, 0.0, 0.25);
-      expect(edge, greaterThan(mid));
-      expect(mid, greaterThan(inside));
+    test('达到阈值（0.97）才当空白', () {
+      expect(PaperTint.blankBandAmount(0.97, 0.5), 1.0);
+    });
+
+    test('近白：高亮度且低色度', () {
+      expect(PaperTint.isNearWhite(0.95, 0.02), isTrue);
+      expect(PaperTint.isNearWhite(0.85, 0.02), isFalse); // 不够白
+      expect(PaperTint.isNearWhite(0.95, 0.25), isFalse); // 米白/淡彩
     });
   });
 
-  group('PaperTint.pdf 文档重映射', () {
+  group('PDF 文档重映射', () {
     test('低色度文档感高', () {
       expect(PaperTint.pdfDocAmount(0.02), greaterThan(0.9));
     });
@@ -41,17 +39,16 @@ void main() {
       expect(PaperTint.pdfDocAmount(0.35), lessThan(0.1));
     });
 
-    test('纸白映射到 1（纸端），墨黑到 0（墨端），中间抬对比', () {
+    test('纸白→1、墨黑→0、中间抬对比', () {
       expect(PaperTint.pdfMappedLuma(1.0), closeTo(1.0, 0.02));
       expect(PaperTint.pdfMappedLuma(0.0), closeTo(0.0, 0.02));
-      // 0.5 仍在中点；略偏亮的灰经对比提升会略变亮
       expect(PaperTint.pdfMappedLuma(0.6), greaterThan(0.6));
       expect(PaperTint.pdfMappedLuma(0.4), lessThan(0.4));
     });
   });
 
   group('门控', () {
-    test('active 受开关与书籍类型共同控制', () {
+    test('active = enabled × imagesNeedTint', () {
       PaperTint.enabled = true;
       PaperTint.imagesNeedTint = true;
       expect(PaperTint.active, isTrue);

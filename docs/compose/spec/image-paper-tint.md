@@ -44,11 +44,16 @@ commits: 56222a6..3d274b7
 
 | 模式 | 规则 |
 |------|------|
-| `TintMode.comic` | `band = 1-smoothstep(0.55m, m, edgeDist)`，`m≈0.14`；`white = smoothstep(0.89,0.93,luma)*(1-smoothstep(0.05,0.12,chroma))`；`mix → paper` 仅当 `white*band` |
-| `TintMode.pdf` | `doc = 1-smoothstep(0.10,0.22,chroma)`；`g=(luma-0.5)*1.08+0.5`；`mapped=mix(ink,paper,g)`；`mix(c,mapped,doc)` |
+| `TintMode.comic` | **整行/整列白占比**：沿行、列各采 16 点；`rowWhite≥0.97` 或 `colWhite≥0.97` → 该像素属空白边，`mix→paper`。有内容的行（白占比&lt;0.97）完全不动，行内白块保留 |
+| `TintMode.pdf` | `doc = 1-smoothstep(0.10,0.22,chroma)`；`g=(luma-0.5)*1.08+0.5`；`mapped=mix(ink,paper,g)` |
 
-- **漫画**：边缘留白变纸色；图内白底、米白高光、淡彩不动。
-- **PDF**：纸白→`paperColor`，墨黑→`textColor`，对比略抬；彩色插图/批注不映射。
+- **漫画**：上下/左右空白条变纸色；画面行（含对话框白底）不动。
+- **PDF**：纸白→`paperColor`，墨黑→`textColor`；彩色插图不映射。
+
+**A2. 算法演进（用户反馈）**
+- v1 全局近白 → 误伤图内白底
+- v2 UV 边缘带 → 仍可能碰到图内靠边白块
+- **v3（现行）**：行/列白占比判定「还不是画面」——最简单、最贴漫画白边
 
 **B. 适用范围**
 - `format==comic` → comic 模式；`format==pdf` → pdf 模式；EPUB 不染。
