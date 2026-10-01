@@ -98,27 +98,50 @@ class PaperTint {
     }
   }
 
-  /// 等比适配 **内容框**：让墨迹区域尽量贴合 [dest]，少留边且不裁字。
-  /// [content] 为图像像素坐标；无内容框时退化为 [fitSafeCover]。
+  /// 映射用纸色：明亮主题纸色偏白时加深一档，保证 PDF/漫画白边可见。
+  /// 暗色或已是有色纸（羊皮纸/护眼绿）原样返回。
+  static Color effectivePaperColor(Color paper) {
+    // 近白：与扫描纸白几乎无法区分 → 向暖米色靠，肉眼可辨
+    if (paper.r > 0.92 && paper.g > 0.90 && paper.b > 0.85) {
+      return Color.lerp(paper, const Color(0xFFD9CBA8), 0.72)!;
+    }
+    return paper;
+  }
+
+  /// 等比适配 **内容框**：向 cover 方向抬升缩放，短边尽量贴满、少留白。
+  /// [fillBoost] 0=contain（完全不裁）、1=cover（可能裁）。默认 0.55。
+  /// 超出 dest 由调用方 clip（裁的多半是页边空白）。
   static Rect fitContent(
     Rect dest,
     double imgW,
     double imgH, [
     Rect? content,
+    double fillBoost = 0.55,
   ]) {
+    final Rect box;
     if (content == null || content.width < 2 || content.height < 2) {
-      return fitSafeCover(dest, imgW, imgH);
+      // 无内容框：整图 contain/cover 插值，限制水平裁切
+      return fitSafeCover(
+        dest,
+        imgW,
+        imgH,
+        maxSideCrop: 0.06 + 0.04 * fillBoost.clamp(0.0, 1.0),
+      );
     }
     final cw = content.width.clamp(1.0, imgW);
     final ch = content.height.clamp(1.0, imgH);
     final sx = dest.width / cw;
     final sy = dest.height / ch;
-    final s = sx < sy ? sx : sy;
+    final sMin = sx < sy ? sx : sy;
+    final sMax = sx > sy ? sx : sy;
+    final boost = fillBoost.clamp(0.0, 1.0);
+    final s = sMin + (sMax - sMin) * boost;
     final w = imgW * s;
     final h = imgH * s;
     final cx = content.center.dx * s;
     final cy = content.center.dy * s;
-    return Rect.fromLTWH(dest.center.dx - cx, dest.center.dy - cy, w, h);
+    box = Rect.fromLTWH(dest.center.dx - cx, dest.center.dy - cy, w, h);
+    return box;
   }
 
   /// 等比 cover，但限制水平裁切不超过 [maxSideCrop]（防切到正文）。

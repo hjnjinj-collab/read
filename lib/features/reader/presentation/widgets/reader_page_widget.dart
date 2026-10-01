@@ -501,7 +501,8 @@ class PageContentRenderer {
               canvas,
               fitted,
               image,
-              PageContentRenderer.paperColor,
+              // 明亮主题纸色过白时加深，保证纸色适配可见（日/夜都生效）
+              PaperTint.effectivePaperColor(PageContentRenderer.paperColor),
               PageContentRenderer.textColor,
               fallback: paintPlain,
             );

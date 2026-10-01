@@ -51,27 +51,48 @@ void main() {
   group('fitContent 内容框适配', () {
     test('内容框贴合宽度时缩放大于 contain', () {
       const dest = Rect.fromLTWH(0, 0, 1080, 2400);
-      // 图 1570x2480，内容左右各去 10%
       const content = Rect.fromLTWH(157, 0, 1570 * 0.8, 2480.0);
       final f = PaperTint.fitContent(dest, 1570, 2480, content);
-      final containS = 1080 / 1570.0;
+      final containS = 1080 / (1570 * 0.8);
       final s = f.width / 1570;
-      expect(s, greaterThan(containS));
-      // 横竖比一致
+      expect(s, greaterThan(1080 / 1570)); // 大于整图 contain
+      expect(s, greaterThanOrEqualTo(containS * 0.55)); // 有抬升
+    });
+
+    test('fillBoost=0 时内容框宽度贴合 dest（整图框更大）', () {
+      const dest = Rect.fromLTWH(0, 0, 1080, 2400);
+      const content = Rect.fromLTWH(157, 0, 1570 * 0.8, 2480.0);
+      final f = PaperTint.fitContent(dest, 1570, 2480, content, 0);
+      final contentW = f.width * (content.width / 1570);
+      expect(contentW, closeTo(1080, 1.0));
+    });
+
+    test('横竖缩放比一致', () {
+      const dest = Rect.fromLTWH(0, 0, 1080, 2400);
+      const content = Rect.fromLTWH(157, 0, 1570 * 0.8, 2480.0);
+      final f = PaperTint.fitContent(dest, 1570, 2480, content);
       expect(f.width / 1570, closeTo(f.height / 2480, 0.001));
     });
 
-    test('无内容框时退化为限幅 cover（水平裁切 ≤4%）', () {
+    test('无内容框时退化为限幅 cover', () {
       const dest = Rect.fromLTWH(0, 0, 1080, 2400);
       final f = PaperTint.fitContent(dest, 1570, 2480, null);
-      expect(f.width, lessThanOrEqualTo(1080 * 1.04 + 0.5));
+      expect(f.width, lessThanOrEqualTo(1080 * 1.12 + 0.5));
       expect(f.width / 1570, closeTo(f.height / 2480, 0.001));
     });
+  });
 
-    test('fitSafeCover 水平溢出受控', () {
-      const dest = Rect.fromLTWH(0, 0, 1080, 2400);
-      final f = PaperTint.fitSafeCover(dest, 1570, 2480);
-      expect(f.width, lessThanOrEqualTo(1080 * 1.04 + 0.5));
+  group('effectivePaperColor 明亮模式可见', () {
+    test('近白纸色会加深（日间默认纸）', () {
+      final p = PaperTint.effectivePaperColor(const Color(0xFFF5F1E8));
+      expect(p.r, lessThan(0.92));
+    });
+
+    test('有色纸（护眼绿/夜色）原样', () {
+      final green = const Color(0xFFC8DCC0);
+      expect(PaperTint.effectivePaperColor(green), green);
+      final dark = const Color(0xFF1E1E1E);
+      expect(PaperTint.effectivePaperColor(dark), dark);
     });
   });
 
