@@ -463,6 +463,12 @@ class UserThemePreset {
   final double bgOpacity;
   final String bgPreset;
 
+  /// 风景背景图 id（''=纯色纸；'custom'=用户壁纸）——应用主题时必须一并恢复
+  final String bgImagePreset;
+
+  /// 背景蒙版强度 0–1
+  final double bgScrimStrength;
+
   const UserThemePreset({
     required this.name,
     required this.dark,
@@ -473,6 +479,8 @@ class UserThemePreset {
     this.accentColor,
     this.bgOpacity = 1.0,
     this.bgPreset = '',
+    this.bgImagePreset = '',
+    this.bgScrimStrength = 0.35,
   });
 
   Map<String, dynamic> toJson() => {
@@ -485,6 +493,8 @@ class UserThemePreset {
         'accentColor': accentColor,
         'bgOpacity': bgOpacity,
         'bgPreset': bgPreset,
+        'bgImagePreset': bgImagePreset,
+        'bgScrimStrength': bgScrimStrength,
       };
 
   static UserThemePreset? tryParse(Map<String, dynamic> j) {
@@ -509,6 +519,11 @@ class UserThemePreset {
           ? (j['bgOpacity'] as num).toDouble().clamp(0.15, 1.0)
           : 1.0,
       bgPreset: j['bgPreset'] is String ? j['bgPreset'] as String : '',
+      bgImagePreset:
+          j['bgImagePreset'] is String ? j['bgImagePreset'] as String : '',
+      bgScrimStrength: j['bgScrimStrength'] is num
+          ? (j['bgScrimStrength'] as num).toDouble().clamp(0.0, 1.0)
+          : 0.35,
     );
   }
 }

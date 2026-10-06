@@ -92,6 +92,11 @@ class ReaderNotifier extends Notifier<ReadingState> {
     BgImageStore.instance.customPath = _bgCustomPath;
     BgImageStore.instance.selectedId = _bgImageId;
     BgImageStore.instance.isDark = _themeDark;
+    // 异步解码完成后必须重绘阅读页——否则换书/应用主题后背景迟迟不出现
+    BgImageStore.instance.onImageReady = () {
+      PageContentRenderer.themeRevision++;
+      state = state.copyWith();
+    };
     BgImageStore.instance.warmUp();
     _themeMode = persisted.themeMode;
     _systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
@@ -1095,6 +1100,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
       accentColor: _accentColor,
       bgOpacity: _bgOpacity,
       bgPreset: _bgPreset,
+      bgImagePreset: _bgImageId,
+      bgScrimStrength: _bgScrimStrength,
     );
     _userThemes = [
       entry,
@@ -1104,7 +1111,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     state = state.copyWith();
   }
 
-  /// 应用命名主题（纸色/文字色/透明度 + 日夜）
+  /// 应用命名主题（纸色/文字色/透明度 + 日夜 + 风景背景图）
   void applyUserTheme(UserThemePreset t) {
     _lightPaperColor = t.lightPaper;
     _darkPaperColor = t.darkPaper;
@@ -1115,8 +1122,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _bgPreset = t.bgPreset;
     _themeMode = t.dark ? 'dark' : 'light';
     _themeDark = t.dark;
+    // 风景背景图 + 蒙版：必须一并恢复，否则换书/重进后「应用主题」不切底图
+    _bgImageId = t.bgImagePreset;
+    _bgScrimStrength = t.bgScrimStrength;
+    BgImageStore.scrimStrength = _bgScrimStrength;
+    BgImageStore.instance.setDark(_themeDark);
+    if (_bgImageId == BgImageStore.customId &&
+        BgImageStore.instance.customPath != _bgCustomPath) {
+      BgImageStore.instance.customPath = _bgCustomPath;
+    }
+    BgImageStore.instance.select(_bgImageId);
     _syncThemeToRenderer();
     _persistSettings();
+    PageContentRenderer.themeRevision++;
     state = state.copyWith();
   }
 

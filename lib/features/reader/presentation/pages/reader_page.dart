@@ -127,12 +127,24 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   void _volumePrev() {
     if (!mounted) return;
-    ref.read(readerProvider.notifier).previousPage();
+    // 走 PageTurnComposer：卷曲/水波/坍塌等动画模式才有翻页动画
+    // （直接 nextPage 只适合 scroll 类瞬时翻）
+    final bridge = _composerKey.currentState;
+    if (bridge != null && bridge.isIdle && !bridge.hasPendingTurn) {
+      bridge.tapTurn(PageDirection.prev);
+    } else {
+      ref.read(readerProvider.notifier).previousPage();
+    }
   }
 
   void _volumeNext() {
     if (!mounted) return;
-    ref.read(readerProvider.notifier).nextPage();
+    final bridge = _composerKey.currentState;
+    if (bridge != null && bridge.isIdle && !bridge.hasPendingTurn) {
+      bridge.tapTurn(PageDirection.next);
+    } else {
+      ref.read(readerProvider.notifier).nextPage();
+    }
   }
 
   void _loadCoverTint() {

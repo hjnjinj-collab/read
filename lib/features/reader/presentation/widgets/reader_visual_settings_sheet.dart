@@ -1456,6 +1456,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                           t.darkTextColor != null ? Color(t.darkTextColor!) : null;
                       _opacity = t.bgOpacity;
                       _preset = t.bgPreset;
+                      _bgImageId = t.bgImagePreset;
+                      _bgScrim = t.bgScrimStrength;
                     });
                   },
                   onDeleted: () {
@@ -2665,32 +2667,61 @@ class _BgGridItem extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.grey.withValues(alpha: 0.3),
-              width: selected ? 2 : 1,
-            ),
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? scheme.primary : Colors.grey.withValues(alpha: 0.35),
+            width: selected ? 2.5 : 1,
           ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: color.computeLuminance() > 0.5
-                    ? Colors.black54
-                    : Colors.white70,
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: scheme.primary.withValues(alpha: 0.35),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color.computeLuminance() > 0.5
+                      ? Colors.black54
+                      : Colors.white70,
+                ),
               ),
             ),
-          ),
+            if (selected)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
+                ),
+              ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _BgImageTile extends StatelessWidget {
@@ -2713,11 +2744,20 @@ class _BgImageTile extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? scheme.primary : Colors.grey.withValues(alpha: 0.3),
-            width: selected ? 2 : 1,
+            color: selected ? scheme.primary : Colors.grey.withValues(alpha: 0.35),
+            width: selected ? 2.5 : 1,
           ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: scheme.primary.withValues(alpha: 0.35),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -2732,6 +2772,19 @@ class _BgImageTile extends StatelessWidget {
               )
             else
               ColoredBox(color: scheme.surfaceContainerHighest),
+            if (selected)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
+                ),
+              ),
             Align(
               alignment: Alignment.bottomCenter,
               child: Container(
