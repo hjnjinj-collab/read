@@ -1850,7 +1850,36 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
             page.backgroundHref ?? '',
           ]),
           'summary': readerPageSummary(page.entries),
+          'bg': BgImageStore.instance.image != null,
         });
+      }
+      // 与 PagePainter 同层：纸色 → 风景图 → 蒙版 → 正文。
+      // 翻页定格（CurlPainter isSettled 短路）长期走本回调，缺底图会
+      // 「翻页时有背景、翻完只剩纯色」。
+      canvas.drawRect(
+        Offset.zero & canvasSize,
+        Paint()..color = PageContentRenderer.paperColor,
+      );
+      final bgImg = BgImageStore.instance.image;
+      if (bgImg != null) {
+        paintImage(
+          canvas: canvas,
+          rect: Offset.zero & canvasSize,
+          image: bgImg,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          filterQuality: FilterQuality.medium,
+        );
+        final scrim = PageContentRenderer.paperColor.withValues(
+          alpha: BgImageStore.scrimAlpha(
+            BgImageStore.scrimStrength,
+            PageContentRenderer.paperOpacity,
+          ),
+        );
+        canvas.drawRect(
+          Offset.zero & canvasSize,
+          Paint()..color = scrim,
+        );
       }
       PageContentRenderer.paintPage(
         canvas,
