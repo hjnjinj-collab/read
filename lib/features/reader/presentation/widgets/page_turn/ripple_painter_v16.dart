@@ -134,7 +134,7 @@ class RipplePainterV16 extends CustomPainter {
           Rect.fromLTWH(0, 0, foldingPageImage!.width.toDouble(),
                         foldingPageImage!.height.toDouble()),
           Rect.fromLTWH(0, 0, size.width, size.height),
-          Paint()..filterQuality = FilterQuality.medium,
+          Paint()..filterQuality = FilterQuality.high,
         );
       } else {
         // 实时直绘旧页（纸色底/参数由 _paintPage 统一处理，v16.9.5）

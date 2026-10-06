@@ -964,6 +964,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   double _tintStrength = 1.0;
   String _bgImageId = '';
   double _bgScrim = 0.35;
+  bool _volumePageTurn = false;
 
   Future<void> _pickCustomBg() async {
     try {
@@ -1025,6 +1026,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     _tintStrength = n.imagePaperTintStrength;
     _bgImageId = n.bgImageId;
     _bgScrim = n.bgScrimStrength;
+    _volumePageTurn = n.volumePageTurn;
   }
 
   void _applyPreset(_BgPreset p) {
@@ -1302,6 +1304,18 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
             style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
           ),
         ],
+        const SizedBox(height: 16),
+        _GlassSwitchRow(
+          line: ReaderMenuIcons.linePreset,
+          fill: ReaderMenuIcons.fillPreset,
+          title: '音量键翻页',
+          subtitle: '音量上=上一页，音量下=下一页（开启后媒体音量由系统侧调节）',
+          value: _volumePageTurn,
+          onChanged: (v) {
+            setState(() => _volumePageTurn = v);
+            ref.read(readerProvider.notifier).setVolumePageTurn(v);
+          },
+        ),
         const SizedBox(height: 16),
         _GlassSwitchRow(
           line: ReaderMenuIcons.linePreset,

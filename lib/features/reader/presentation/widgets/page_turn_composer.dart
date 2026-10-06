@@ -160,6 +160,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 当前自动播放方向：true=正向翻完，false=回弹
   bool _autoIsTurn = true;
 
+  /// 拖拽驱动中（手指未松）：卷曲触点必须用真实 localTouch，不得插值
+  bool _isDragDriving = false;
+
   /// 自动动画起始时的控制器进度（触点插值映射 [from→1] 或 [from→0] 用）
   double _autoFromProgress = 0;
 
@@ -698,6 +701,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // TickerFuture 被取消后永不完成 → _turnEndInFlight 永久 true →
     // 所有后续手势被吞 → 界面永久冻结在中途帧（600ms 中档必现）。
     if (_turnController!.isAnimating) return;
+    _isDragDriving = true;
     _lastTouchLocal = localTouch;
     _turnController!.dragTo(progress.clamp(0.0, 1.0));
   }
@@ -770,6 +774,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     }
     _turnEndInFlight = true;
     readerTrace('turn.end', {'shouldTurn': shouldTurn});
+    _isDragDriving = false; // 松手：触点改走自动插值
     _releaseTouch = _lastTouchLocal;
     try {
       await _runAuto(shouldTurn);
@@ -1373,6 +1378,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   Future<void> _runAuto(bool shouldTurn) async {
     final controller = _turnController;
     if (controller == null) return;
+    _isDragDriving = false;
     _autoIsTurn = shouldTurn;
     _autoFromProgress = controller.progress;
     if (shouldTurn) {
@@ -1720,7 +1726,12 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     // 折缝光影随自动收尾线性淡出：末帧光影归零，与干净定格页无缝衔接
     // （回弹时折叠仍可见，光影保持）
     var washScale = 1.0;
-    if (_isActive || _holdingFinalFrame) {
+    // 拖拽驱动中：触点=真实手指（跟手角度）；仅松手后自动收尾才插值
+    final drivingByFinger = _isDragDriving && !_holdingFinalFrame && !_turnEndInFlight;
+    if (drivingByFinger) {
+      effTouch = _lastTouchLocal;
+      washScale = 1.0;
+    } else if (_isActive || _holdingFinalFrame) {
       final from = _autoFromProgress.clamp(0.0, 1.0);
       var t = 0.0;
       if (_holdingFinalFrame) {

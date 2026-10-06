@@ -110,7 +110,7 @@ class CollapsePainter extends CustomPainter {
           Rect.fromLTWH(0, 0, foldingPageImage!.width.toDouble(),
                         foldingPageImage!.height.toDouble()),
           Rect.fromLTWH(0, 0, size.width, size.height),
-          Paint()..filterQuality = FilterQuality.medium,
+          Paint()..filterQuality = FilterQuality.high,
         );
       } else {
         _paintPage(canvas, foldingPage, size);

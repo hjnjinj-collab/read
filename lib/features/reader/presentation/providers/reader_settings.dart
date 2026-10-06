@@ -152,6 +152,9 @@ class ReaderSettings {
   /// 背景图纸色蒙版强度 0–1（默认 0.35）
   final double bgScrimStrength;
 
+  /// 音量键翻页（默认关，避免抢媒体音量）
+  final bool volumePageTurn;
+
   /// 正文文字色（ARGB int；null = 主题默认）
   /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
   final int? lightTextColor;
@@ -214,6 +217,7 @@ class ReaderSettings {
     required this.bgImagePreset,
     this.bgCustomPath = '',
     this.bgScrimStrength = 0.35,
+    this.volumePageTurn = false,
     required this.lightTextColor,
     required this.darkTextColor,
     required this.accentColor,
@@ -268,6 +272,7 @@ class ReaderSettings {
         bgImagePreset: '',
         bgCustomPath: '',
         bgScrimStrength: 0.35,
+        volumePageTurn: false,
         lightTextColor: null,
         darkTextColor: null,
         accentColor: null,
@@ -346,6 +351,7 @@ class ReaderSettings {
             : '',
         bgCustomPath: _s(j, 'bgCustomPath', ''),
         bgScrimStrength: _d(j, 'bgScrimStrength', 0.35).clamp(0.0, 1.0),
+        volumePageTurn: _b(j, 'volumePageTurn', false),
         lightTextColor: j['lightTextColor'] is int
             ? j['lightTextColor'] as int
             : (j['textColor'] is int ? j['textColor'] as int : null),

@@ -31,6 +31,10 @@ import org.json.JSONObject
 class MainActivity : FlutterActivity() {
     private val channelName = "legado/notify"
     private var channelId = "ocr_download"
+    private val keysChannelName = "legado/keys"
+    private var keysChannel: MethodChannel? = null
+    /** 音量键翻页：仅阅读页且用户开启时拦截 */
+    private var volumePageTurnEnabled = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -78,6 +82,38 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // 音量键翻页通道：Dart 下发 enabled，原生按键事件回推
+        keysChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            keysChannelName
+        ).also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setEnabled" -> {
+                        volumePageTurnEnabled = call.argument<Boolean>("enabled") ?: false
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+    }
+
+    /** 音量键=翻页（仅 enabled 时拦截，否则走系统音量） */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (volumePageTurnEnabled && event.action == android.view.KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                    keysChannel?.invokeMethod("volumeUp", null)
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    keysChannel?.invokeMethod("volumeDown", null)
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun nm(): NotificationManager =

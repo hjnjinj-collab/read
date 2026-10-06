@@ -14,6 +14,7 @@ import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../providers/reader_provider.dart';
 import '../services/book_image_store.dart';
+import '../services/volume_page_keys.dart';
 import '../widgets/book_search_dialog.dart';
 import '../widgets/chapter_list_dialog.dart';
 import '../widgets/image_zoom_viewer.dart';
@@ -117,6 +118,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifier?.openBook(widget.filePath, widget.bookName);
     });
+    // 音量键翻页：仅设置开启时拦截
+    VolumePageKeys.onPrev = _volumePrev;
+    VolumePageKeys.onNext = _volumeNext;
+    final volOn = ref.read(readerProvider.notifier).volumePageTurn;
+    unawaited(VolumePageKeys.setEnabled(volOn));
+  }
+
+  void _volumePrev() {
+    if (!mounted) return;
+    ref.read(readerProvider.notifier).previousPage();
+  }
+
+  void _volumeNext() {
+    if (!mounted) return;
+    ref.read(readerProvider.notifier).nextPage();
   }
 
   void _loadCoverTint() {
@@ -131,6 +147,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
   @override
   void dispose() {
+    VolumePageKeys.onPrev = null;
+    VolumePageKeys.onNext = null;
+    unawaited(VolumePageKeys.setEnabled(false));
     _longPressTimer?.cancel();
     _menuVisible.dispose();
     _pageBrightness.dispose();

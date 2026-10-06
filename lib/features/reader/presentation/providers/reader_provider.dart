@@ -12,6 +12,7 @@ import '../../../../core/services/ocr_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
 import '../services/bg_image_store.dart';
+import '../services/volume_page_keys.dart';
 import '../services/paper_tint.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/reader_page_widget.dart';
@@ -87,6 +88,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _bgCustomPath = persisted.bgCustomPath;
     _bgScrimStrength = persisted.bgScrimStrength;
     BgImageStore.scrimStrength = _bgScrimStrength;
+    _volumePageTurn = persisted.volumePageTurn;
     BgImageStore.instance.customPath = _bgCustomPath;
     BgImageStore.instance.selectedId = _bgImageId;
     BgImageStore.instance.isDark = _themeDark;
@@ -244,6 +246,17 @@ class ReaderNotifier extends Notifier<ReadingState> {
   String _bgImageId = '';
   String _bgCustomPath = '';
   double _bgScrimStrength = 0.35;
+  bool _volumePageTurn = false;
+
+  bool get volumePageTurn => _volumePageTurn;
+
+  void setVolumePageTurn(bool v) {
+    if (_volumePageTurn == v) return;
+    _volumePageTurn = v;
+    unawaited(VolumePageKeys.setEnabled(v));
+    _persistSettings();
+    state = state.copyWith();
+  }
 
   /// 内置背景图预设 id（'' = 纯色）
   String get bgImageId => _bgImageId;
@@ -685,6 +698,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'bgImagePreset': _bgImageId,
         'bgCustomPath': _bgCustomPath,
         'bgScrimStrength': _bgScrimStrength,
+        'volumePageTurn': _volumePageTurn,
         'lightTextColor': _lightTextColor,
         'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,
