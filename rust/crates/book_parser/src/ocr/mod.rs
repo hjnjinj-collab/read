@@ -238,7 +238,12 @@ impl OcrPageCache {
 
     fn path_for(&self, key: &str) -> Option<PathBuf> {
         let dir = self.dir.lock().unwrap().clone()?;
-        Some(dir.join(format!("{key}.txt")))
+        // href 形如 `pdfimg:0:0`——Windows 禁止文件名含 `:`，统一净化
+        let safe: String = key
+            .chars()
+            .map(|c| if matches!(c, ':' | '/' | '\\' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+            .collect();
+        Some(dir.join(format!("{safe}.txt")))
     }
 
     pub fn get(&self, key: &str) -> Option<String> {
@@ -315,6 +320,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let m = OcrModelManager::new(tmp.path());
         assert_eq!(m.status(), OcrModelStatus::NotInstalled);
+    }
+
+    #[test]
+    fn page_cache_sanitizes_windows_illegal_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = OcrPageCache::default();
+        cache.set_dir(tmp.path());
+        // href 含冒号：Windows 文件名非法，必须净化后仍可读写
+        cache.put_text("pdfimg:0:0", "扫描页识别文本足够长").unwrap();
+        assert_eq!(
+            cache.get_cached_text("pdfimg:0:0").as_deref(),
+            Some("扫描页识别文本足够长")
+        );
     }
 
     #[test]

@@ -396,63 +396,51 @@ fn assign_char_anchors(pages: &mut [crate::PageInfo]) {
     }
 }
 
-/// PDF 分页：文字页/OCR 重排走排版，对照模式走 gallery 图
-fn process_pdf_chapter(
-    handle: &crate::BookHandle,
-    chapter_index: usize,
-    config: &LayoutConfig,
-) -> anyhow::Result<Vec<crate::PageInfo>> {
+/// OCR 缓存查询（href / pdf:href 双键，与预识别写入对称）
+fn pdf_cached_ocr_text(href: &str) -> Option<String> {
+    OCR_PAGE_CACHE
+        .get_cached_text(href)
+        .or_else(|| OCR_PAGE_CACHE.get_cached_text(&format!("pdf:{href}")))
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// 单页 → 布局项。展示与搜索同源：
+/// - `ocr_text`：已解析文本（展示可现场识别；搜索只吃缓存）
+/// - `live_ocr`：允许本机引擎兜底识别（搜索 false，避免全书搜索现场 OCR）
+/// - `allow_image`：OCR 不足时回退整页图（展示 true；搜索 false——图无可搜字符）
+fn pdf_page_items(
+    pdf: &book_parser::pdf_parser::PdfParser,
+    page: usize,
+    want_ocr: bool,
+    ocr_text: Option<String>,
+    live_ocr: bool,
+    allow_image: bool,
+) -> anyhow::Result<Vec<layout_engine::LayoutItem>> {
     use book_parser::pdf_parser::PdfPageKind;
-    let pdf = handle
-        .pdf
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("非 PDF 句柄"))?;
-    let chs = pdf.get_chapter_list()?;
-    let ch = chs
-        .get(chapter_index)
-        .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
-    let start = ch.start_byte_offset.unwrap_or(0);
-    let end = ch.end_byte_offset.unwrap_or(start + 1);
-
-    let mode = pdf_scan_mode();
-    let ocr = ocr_manager();
-    let ocr_ready = ocr
-        .as_ref()
-        .map(|m| m.build_engine().is_ready())
-        .unwrap_or(false);
-
-    let mut items: Vec<layout_engine::LayoutItem> = Vec::new();
-    for p in start..end {
-        let kind = pdf.page_kind(p);
-        match kind {
-            PdfPageKind::Text => {
-                let text = pdf.extract_pages_text(p, p + 1)?;
-                if !text.trim().is_empty() {
-                    // 与 TXT 同路径：缩进/重分段 + 章节标题识别
-                    items.extend(pdf_text_items(text.trim_end()));
-                }
+    let mut items = Vec::new();
+    match pdf.page_kind(page) {
+        PdfPageKind::Text => {
+            let text = pdf.extract_pages_text(page, page + 1)?;
+            if !text.trim().is_empty() {
+                // 与 TXT 同路径：缩进/重分段 + 章节标题识别
+                items.extend(pdf_text_items(text.trim_end()));
             }
-            PdfPageKind::Image => {
-                let img_opt = pdf.list_page_images(p).next();
-                let mut ocr_text: Option<String> = None;
+        }
+        PdfPageKind::Image => {
+            let img_opt = pdf.list_page_images(page).next();
+            let mut ocr_text = ocr_text;
 
-                // 原图模式：一律走图，**禁止**再用 OCR 缓存/识别
-                let want_ocr = matches!(mode, PdfScanMode::Reflow)
-                    || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
-
-                if want_ocr {
-                    if let Some(img) = img_opt.as_ref() {
-                        ocr_text = OCR_PAGE_CACHE
-                            .get_cached_text(&img.href)
-                            .or_else(|| {
-                                OCR_PAGE_CACHE
-                                    .get_cached_text(&format!("pdf:{}", img.href))
-                            });
+            if want_ocr {
+                if let Some(img) = img_opt.as_ref() {
+                    if ocr_text.is_none() {
+                        ocr_text = pdf_cached_ocr_text(&img.href);
                     }
-                    // 本机引擎兜底（桌面 tesseract）
-                    // T4：仅对成功解码的有效图做 OCR；空图/解码失败跳过
-                    if ocr_text.is_none() && ocr_ready {
-                        if let (Some(mgr), Some(img)) = (ocr.as_ref(), img_opt.as_ref()) {
+                }
+                // 本机引擎兜底（桌面 tesseract）
+                // T4：仅对成功解码的有效图做 OCR；空图/解码失败跳过
+                if live_ocr && ocr_text.is_none() {
+                    if let Some(img) = img_opt.as_ref() {
+                        if let Some(mgr) = ocr_manager() {
                             match pdf.get_resource(&img.href) {
                                 Ok(bytes)
                                     if book_parser::pdf_parser::is_valid_image_bytes(&bytes) =>
@@ -460,6 +448,13 @@ fn process_pdf_chapter(
                                     let engine = mgr.build_engine();
                                     if engine.is_ready() {
                                         ocr_text = engine.recognize(&bytes).ok();
+                                        // 现场识别结果回写缓存：展示/搜索同源，
+                                        // 否则「展示有字、搜索无词」
+                                        if let Some(t) = ocr_text.as_ref() {
+                                            if !t.trim().is_empty() {
+                                                let _ = OCR_PAGE_CACHE.put_text(&img.href, t);
+                                            }
+                                        }
                                     }
                                 }
                                 Ok(bytes) => {
@@ -476,19 +471,19 @@ fn process_pdf_chapter(
                         }
                     }
                 }
+            }
 
-                let text_ok = want_ocr
-                    && ocr_text
-                        .as_deref()
-                        .map(|t| !t.trim().is_empty() && !is_illustration_text(t))
-                        .unwrap_or(false);
+            let text_ok = want_ocr
+                && ocr_text
+                    .as_deref()
+                    .map(|t| !t.trim().is_empty() && !is_illustration_text(t))
+                    .unwrap_or(false);
 
-                if text_ok {
-                    // 文字足够多：重排（缩进/重分段/章节标题，同 TXT）
-                    items.extend(pdf_text_items(
-                        ocr_text.as_deref().unwrap_or("").trim(),
-                    ));
-                } else if let Some(img) = img_opt {
+            if text_ok {
+                // 文字足够多：重排（缩进/重分段/章节标题，同 TXT）
+                items.extend(pdf_text_items(ocr_text.as_deref().unwrap_or("").trim()));
+            } else if allow_image {
+                if let Some(img) = img_opt {
                     // 原图模式 / 插画 / 短文本：保留原图
                     let aspect = if img.height > 0 {
                         img.width as f32 / img.height as f32
@@ -506,14 +501,57 @@ fn process_pdf_chapter(
                     });
                 }
             }
-            PdfPageKind::Blank => {
-                items.push(layout_engine::LayoutItem::text(format!(
-                    "（第 {} 页）",
-                    p + 1
-                )));
-            }
+        }
+        PdfPageKind::Blank => {
+            items.push(layout_engine::LayoutItem::text(format!("（第 {} 页）", page + 1)));
         }
     }
+    Ok(items)
+}
+
+/// PDF 章内布局项（展示/搜索同源入口）
+fn pdf_chapter_items(
+    pdf: &book_parser::pdf_parser::PdfParser,
+    start: usize,
+    end: usize,
+    live_ocr: bool,
+    allow_image: bool,
+) -> anyhow::Result<Vec<layout_engine::LayoutItem>> {
+    let mode = pdf_scan_mode();
+    let ocr_ready = ocr_manager()
+        .map(|m| m.build_engine().is_ready())
+        .unwrap_or(false);
+    // 原图模式：一律走图，**禁止**再用 OCR 缓存/识别
+    let want_ocr = matches!(mode, PdfScanMode::Reflow)
+        || (matches!(mode, PdfScanMode::Auto) && ocr_ready);
+
+    let mut items = Vec::new();
+    for p in start..end {
+        items.extend(pdf_page_items(
+            pdf, p, want_ocr, None, live_ocr, allow_image,
+        )?);
+    }
+    Ok(items)
+}
+
+/// PDF 分页：文字页/OCR 重排走排版，对照模式走 gallery 图
+fn process_pdf_chapter(
+    handle: &crate::BookHandle,
+    chapter_index: usize,
+    config: &LayoutConfig,
+) -> anyhow::Result<Vec<crate::PageInfo>> {
+    let pdf = handle
+        .pdf
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("非 PDF 句柄"))?;
+    let chs = pdf.get_chapter_list()?;
+    let ch = chs
+        .get(chapter_index)
+        .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
+    let start = ch.start_byte_offset.unwrap_or(0);
+    let end = ch.end_byte_offset.unwrap_or(start + 1);
+
+    let items = pdf_chapter_items(pdf, start, end, true, true)?;
 
     let font_manager = FONT_MANAGER.lock().unwrap().clone();
     let engine = build_layout_engine(config.clone(), font_manager);
@@ -4147,6 +4185,15 @@ pub fn search_in_book(
             ),
             // 漫画无正文可搜
             "comic" => Ok(()),
+            // 扫描/文字 PDF：与 process_pdf_chapter 同源条目流（OCR 只吃缓存）
+            "pdf" => search_pdf_chapter(
+                &book_id,
+                chapter_index,
+                chinese_convert,
+                &needles,
+                &mut hits,
+                max_hits,
+            ),
             _ => search_txt_chapter(
                 &book_id,
                 chapter_index,
@@ -4252,6 +4299,89 @@ fn build_excerpt(text_chars: &[char], match_start: usize, match_len: usize) -> (
     let to = (match_start + match_len + SEARCH_EXCERPT_CONTEXT_CHARS).min(text_chars.len());
     let excerpt: String = text_chars[from..to].iter().collect();
     (excerpt, match_start - from)
+}
+
+/// PDF 章节搜索：条目流与 `process_pdf_chapter` 同源（文本层 + OCR 缓存 +
+/// `pdf_text_items` 标题/缩进），字符累加与 `layout_items` / `search_epub_chapter`
+/// 同口径（Text = chars()+1 段落 newline；Image = 0）。不现场 OCR，避免全书
+/// 搜索阻塞；Compare 模式展示为图，`want_ocr=false` 时文本层仍可搜。
+fn search_pdf_chapter(
+    book_id: &str,
+    chapter_index: usize,
+    _chinese_convert: u8,
+    needles: &[Vec<char>],
+    hits: &mut Vec<SearchHit>,
+    max_hits: usize,
+) -> anyhow::Result<()> {
+    let items = {
+        let books = BOOKS.read().unwrap();
+        let handle = books
+            .get(book_id)
+            .ok_or_else(|| anyhow::anyhow!("Book not found"))?;
+        let pdf = handle
+            .pdf
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("非 PDF 句柄"))?;
+        let chs = pdf.get_chapter_list()?;
+        let ch = chs
+            .get(chapter_index)
+            .ok_or_else(|| anyhow::anyhow!("章节不存在: {chapter_index}"))?;
+        let start = ch.start_byte_offset.unwrap_or(0);
+        let end = ch.end_byte_offset.unwrap_or(start + 1);
+        // 搜索吃缓存 OCR + 文本层；不回退整页图（图无可搜字符）
+        pdf_chapter_items(pdf, start, end, false, false)?
+    };
+
+    // 与 search_epub_chapter / layout_items 同锚点口径
+    let mut accumulated = 0usize;
+    for item in &items {
+        if hits.len() >= max_hits {
+            return Ok(());
+        }
+        match item {
+            layout_engine::LayoutItem::Text(t) => {
+                let text_chars: Vec<char> = t.text.chars().collect();
+                if text_chars.is_empty() {
+                    // 空段仍占 +1 段落 newline？layout_items 对 empty laid 跳过
+                    // 整项（continue），不累计——搜索同口径跳过。
+                    continue;
+                }
+                merge_needle_hits(
+                    &text_chars,
+                    needles,
+                    hits,
+                    chapter_index,
+                    accumulated,
+                    max_hits,
+                );
+                accumulated += text_chars.len() + 1;
+            }
+            layout_engine::LayoutItem::Image { .. } => {}
+            layout_engine::LayoutItem::Hr { .. } => {}
+            layout_engine::LayoutItem::Table(table) => {
+                for row in &table.rows {
+                    for cell in row {
+                        for titem in &cell.items {
+                            let text_chars: Vec<char> = titem.text.chars().collect();
+                            if text_chars.is_empty() {
+                                continue;
+                            }
+                            merge_needle_hits(
+                                &text_chars,
+                                needles,
+                                hits,
+                                chapter_index,
+                                accumulated,
+                                max_hits,
+                            );
+                            accumulated += text_chars.len() + 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// TXT 章节搜索：processed + 段落格式化后文本（与 layout_text 输入同源，
@@ -6236,6 +6366,269 @@ mod tests {
                 page_text
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 最小文字层 PDF：1 页 + 指定 ASCII 词
+    fn minimal_text_pdf(needle: &str) -> Vec<u8> {
+        let content = format!("BT /F1 12 Tf 10 100 Td ({needle}) Tj ET\n");
+        let s = String::from("%PDF-1.4\n");
+        let objs: Vec<String> = vec![
+            "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n".into(),
+            "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n".into(),
+            "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n".into(),
+            format!(
+                "4 0 obj<< /Length {} >>stream\n{}endstream\nendobj\n",
+                content.len(),
+                content
+            ),
+            "5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n".into(),
+        ];
+        let mut body = s.clone().into_bytes();
+        let mut offsets = Vec::new();
+        for o in &objs {
+            offsets.push(body.len());
+            body.extend_from_slice(o.as_bytes());
+        }
+        let xref_pos = body.len();
+        let mut xref = format!("xref\n0 6\n0000000000 65535 f \n");
+        for off in &offsets {
+            xref.push_str(&format!("{:010} 00000 n \n", off));
+        }
+        xref.push_str(&format!(
+            "trailer<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            xref_pos
+        ));
+        body.extend_from_slice(xref.as_bytes());
+        body
+    }
+
+    /// 扫描页 PDF：无文字层 + 内嵌未压缩 2x2 图（OCR 缓存可挂）
+    fn minimal_scanned_pdf() -> Vec<u8> {
+        let raw = [255u8, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]; // 2x2 RGB
+        let s = String::from("%PDF-1.4\n");
+        let objs: Vec<String> = vec![
+            "1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n".into(),
+            "2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n".into(),
+            "3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] /Resources<< /XObject<< /Im1 5 0 R >> >> >>endobj\n".into(),
+            "4 0 obj<< /Length 6 >>stream\nBT ET\nendstream\nendobj\n".into(),
+            format!(
+                "5 0 obj<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>stream\n",
+                raw.len()
+            ),
+        ];
+        let mut body = s.clone().into_bytes();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(body.len());
+            body.extend_from_slice(o.as_bytes());
+            if i == 4 {
+                body.extend_from_slice(&raw);
+                body.extend_from_slice(b"\nendstream\nendobj\n");
+            }
+        }
+        let xref_pos = body.len();
+        let mut xref = format!("xref\n0 6\n0000000000 65535 f \n");
+        for off in &offsets {
+            xref.push_str(&format!("{:010} 00000 n \n", off));
+        }
+        xref.push_str(&format!(
+            "trailer<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            xref_pos
+        ));
+        body.extend_from_slice(xref.as_bytes());
+        body
+    }
+
+    /// 文字层 PDF：search_in_book 走 "pdf" 分派，锚点落页含命中词
+    #[test]
+    fn search_in_book_pdf_text_layer_anchor_alignment() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+        set_pdf_scan_mode(0); // Reflow：文本层恒进字流
+
+        let dir = std::env::temp_dir().join(format!("pdf_search_txt_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.pdf");
+        std::fs::write(&path, minimal_text_pdf("SearchNeedleWord")).unwrap();
+        let book_id =
+            parse_txt_file(path.to_string_lossy().to_string(), None).expect("PDF 导入失败");
+        assert_eq!(get_book_format(book_id.clone()).unwrap(), "pdf");
+
+        let hits = search_in_book(
+            book_id.clone(),
+            "SearchNeedleWord".into(),
+            false,
+            false,
+            0,
+            Vec::new(),
+            Vec::new(),
+            100,
+        )
+        .expect("搜索失败");
+        assert!(!hits.is_empty(), "文字层 PDF 应命中：{:?}", hits);
+
+        let params = StructuredParams::from_args(
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0, "TestFont".to_string(), 0, 0.9,
+            true, 0, false, Vec::new(), false, Vec::new(),
+        );
+        for hit in &hits {
+            let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)
+                .expect("分页失败")
+                .expect("前台语义恒 Some");
+            let page_idx = locate_structured_page(&pages, hit.anchor_char_offset);
+            let page_text: String = pages[page_idx]
+                .entries
+                .iter()
+                .filter_map(|e| e.text.clone())
+                .collect();
+            assert!(
+                page_text.contains("SearchNeedleWord"),
+                "anchor={} 定位页应包含命中词，实际：{}",
+                hit.anchor_char_offset,
+                page_text
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 扫描页 OCR 缓存：搜索命中缓存文本，锚点与重排分页对齐
+    #[test]
+    fn search_pdf_ocr_cache_hits() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+        set_pdf_scan_mode(0); // Reflow：吃 OCR 缓存
+
+        let dir = std::env::temp_dir().join(format!("pdf_search_ocr_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // OCR 磁盘缓存必须先 set_dir，否则 put 静默丢弃
+        set_ocr_model_dir(dir.join("ocr").to_string_lossy().to_string());
+        let path = dir.join("scan.pdf");
+        std::fs::write(&path, minimal_scanned_pdf()).unwrap();
+        let book_id =
+            parse_txt_file(path.to_string_lossy().to_string(), None).expect("PDF 导入失败");
+
+        // 预置 OCR 缓存（与 OcrService.putOcrPageText 同入口）
+        // ≥24 非空白字：低于阈值会被 is_illustration_text 当插画丢弃
+        let ocr_text = "本页是扫描件重排文本，其中包含独特词云鲸星。\
+识别结果需要足够长才能进入文字重排而不是当插画丢弃，这里补足长度。";
+        put_ocr_page_text("pdfimg:0:0".into(), ocr_text.into()).expect("写 OCR 缓存");
+
+        let hits = search_in_book(
+            book_id.clone(),
+            "云鲸星".into(),
+            false,
+            false,
+            0,
+            Vec::new(),
+            Vec::new(),
+            100,
+        )
+        .expect("搜索失败");
+        assert_eq!(hits.len(), 1, "OCR 缓存应命中一次：{:?}", hits);
+
+        let hit = &hits[0];
+        let params = StructuredParams::from_args(
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0, "TestFont".to_string(), 0, 0.9,
+            true, 0, false, Vec::new(), false, Vec::new(),
+        );
+        let pages = process_structured_chapter(&book_id, hit.chapter_index, &params, false)
+            .expect("分页失败")
+            .expect("前台语义恒 Some");
+        let page_idx = locate_structured_page(&pages, hit.anchor_char_offset);
+        let page_text: String = pages[page_idx]
+            .entries
+            .iter()
+            .filter_map(|e| e.text.clone())
+            .collect();
+        assert!(
+            page_text.contains("云鲸星"),
+            "anchor={} 定位页应包含 OCR 命中词，实际：{}",
+            hit.anchor_char_offset,
+            page_text
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 重排页 Text 条目必须带递增 char 区间——选区/笔记/复制的锚点前提
+    #[test]
+    fn pdf_reflow_pages_carry_selection_char_ranges() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+        set_pdf_scan_mode(0);
+
+        let dir = std::env::temp_dir().join(format!("pdf_sel_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_ocr_model_dir(dir.join("ocr").to_string_lossy().to_string());
+        let path = dir.join("scan.pdf");
+        std::fs::write(&path, minimal_scanned_pdf()).unwrap();
+        let book_id = parse_txt_file(path.to_string_lossy().to_string(), None).unwrap();
+        put_ocr_page_text(
+            "pdfimg:0:0".into(),
+            "扫描重排正文足够长可以建立选区，这里是第一句，后面还有第二句内容。".into(),
+        )
+        .unwrap();
+
+        let params = StructuredParams::from_args(
+            360.0, 640.0, 18.0, 1.5, 20.0, 20.0, 20.0, 20.0, "TestFont".to_string(), 0, 0.9,
+            true, 0, false, Vec::new(), false, Vec::new(),
+        );
+        let pages = process_structured_chapter(&book_id, 0, &params, false)
+            .unwrap()
+            .unwrap();
+        let mut text_entries = 0usize;
+        let mut prev_end = 0usize;
+        for p in pages.iter() {
+            assert!(p.start_char_index <= p.end_char_index);
+            for e in &p.entries {
+                if e.text.is_some() {
+                    text_entries += 1;
+                    assert!(
+                        e.end_char_index > e.start_char_index,
+                        "文本条目必须有非空字符区间供选区"
+                    );
+                    assert!(e.start_char_index >= prev_end, "字符区间必须单调");
+                    prev_end = e.end_char_index;
+                }
+            }
+        }
+        assert!(text_entries > 0, "重排页应有可选中文本条目");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 字体/字号走同一 LayoutConfig：改 font_size 应改变分页结果（排版生效）
+    #[test]
+    fn pdf_font_size_changes_pagination() {
+        let _serial = PRELOAD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = load_font_file("TestFont".into(), r"C:\Windows\Fonts\simsun.ttc".into());
+        set_pdf_scan_mode(0);
+
+        let dir = std::env::temp_dir().join(format!("pdf_font_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.pdf");
+        // 长文：字号变化必然影响折行/页数
+        let long = "SearchNeedleWord ".repeat(80);
+        std::fs::write(&path, minimal_text_pdf(&long)).unwrap();
+        let book_id = parse_txt_file(path.to_string_lossy().to_string(), None).unwrap();
+
+        let mk = |font_size: f32| {
+            StructuredParams::from_args(
+                360.0, 640.0, font_size, 1.5, 20.0, 20.0, 20.0, 20.0, "TestFont".to_string(),
+                0, 0.9, true, 0, false, Vec::new(), false, Vec::new(),
+            )
+        };
+        let small = process_structured_chapter(&book_id, 0, &mk(12.0), false)
+            .unwrap()
+            .unwrap();
+        let large = process_structured_chapter(&book_id, 0, &mk(28.0), false)
+            .unwrap()
+            .unwrap();
+        assert!(
+            large.len() > small.len(),
+            "大字号应多分页：small={} large={}",
+            small.len(),
+            large.len()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

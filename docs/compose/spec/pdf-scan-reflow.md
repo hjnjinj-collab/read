@@ -1,101 +1,89 @@
 ---
 feature: pdf-scan-reflow
-status: designed
-updated: 2026-09-27
+status: delivered
+updated: 2026-10-01
 branch: master
-commits: # leave empty while in progress
+commits: 14a4d88..HEAD
 ---
 
-# 扫描件 PDF 优化（背景/字体/排版）
+# 扫描件 PDF 文字化收口（全链路当字读）
 
 ## Report
 
+**What was built** — 扫描 PDF 从「看得清」收到「当字读」：①书内搜索与展示同源——`pdf_chapter_items` 统一条目流（文本层 + OCR 缓存/现场识别 + `pdf_text_items`），`search_pdf_chapter` 按 `layout_items` 同口径累计锚点，命中可跳转；live OCR 结果回写 `OCR_PAGE_CACHE`，避免「展示有字、搜索无词」。②Windows 下 OCR 缓存键 `pdfimg:0:0` 含冒号写盘失败，`path_for` 净化非法文件名字符。③选区/笔记/复制：重排页 Text 条目携带递增 char 区间（与 TXT 同口径）；原图页无文本不可选。④字体/字号走同一 `LayoutConfig`，重排模式生效。
+
+**Verification** —
+- `cargo test -p bridge --lib`：PASS 23/23（含 `search_in_book_pdf_text_layer_anchor_alignment`、`search_pdf_ocr_cache_hits`、`pdf_reflow_pages_carry_selection_char_ranges`、`pdf_font_size_changes_pagination`）
+- `cargo test -p book_parser --lib`：PASS 149（含 `page_cache_sanitizes_windows_illegal_key`）
+- `flutter analyze --no-pub`：31 issues，与既有基线一致，无本轮新增
+- `build_apk.ps1 -Abis arm64-v8a`：PASS，`app-arm64-v8a-release.apk`
+
+**Journey log** —
+- 搜索不能走 `get_chapter_content`（PDF 无净化 parser，且仅文本层）；必须与 `process_pdf_chapter` 共用条目构建
+- OCR 磁盘缓存键含 `:` 在 Windows 非法；Android 可用但桌面断
+- `is_illustration_text` 阈值 24 字：短 OCR 文当插画丢弃，不进字流
+- live OCR 回写缓存是展示/搜索同源的关键一环
+- PDF 分页用 `process_structured_chapter`，不是 TXT 的 `process_and_layout_chapter`
+
 ## [S1] Problem
 
-真机测试扫描版 PDF（图片页）暴露三点（用户原话归纳）：
+扫描版 PDF 已能 OCR 重排出「像字一样的正文」，但还没真正**当字读**：
 
-1. **背景是原有的**——扫描纸色/脏底写在位图里，主题纸色/夜间模式盖不住。
-2. **字体不能更换**——页是像素图，不是文字对象，字体/字号/字距设置无效。
-3. **按图片处理**——走漫画 gallery 整页图，无法进入文字工作流（搜索、选中、两端对齐、重排）。
+1. **书内搜索搜不到**：`search_in_book` 对 PDF 走 `extract_pages_text`（纯文本层），扫描页文本层为空，OCR 重排文本不进搜索草堆。
+2. **选区/笔记/复制**依赖展示字符流与 `PageInfo` 锚点一致——重排路径需确认与 TXT 同口径可选中。
+3. **字体/字号/字距**在重排模式应走同一 `TextStyle`；对照（原图）模式仍不可改字。
 
-根因：`page_kind==Image` 时只提取 XObject 位图，没有文字层，也没有主题化处理。
+根因：展示走 `process_pdf_chapter` → OCR/文本层 → `layout_items`；搜索走 `get_chapter_content` → 仅文本层。两条链不同源。
 
 ## [S2] Design
 
-### 目标行为
+### 收口目标（本轮）
 
-| 能力 | 现状 | 目标 |
-|------|------|------|
-| 背景 | 扫描原图 | 跟随阅读主题纸色 |
-| 字体/字号/字距 | 无效 | 与 TXT/EPUB 相同生效 |
-| 排版/折行 | 无 | 重排进 layout_text |
-| 原版面 | 整页图 | **可选**保留（对照模式） |
+| 能力 | 文字重排模式 | 原图对照模式 |
+|------|--------------|--------------|
+| 书内搜索 | 命中 OCR/文本层展示同源文本，锚点可跳转 | 不要求（无文字层） |
+| 选区/笔记/复制 | 与 TXT 同口径（charOffset） | 不支持 |
+| 字体/字号/字距/行距 | 与 TXT 同一路径生效 | 不生效（图） |
+| 主题纸色 | 纸色底 | 图上叠色（已有） |
 
-### 方案：扫描页 OCR 重排（主路径）
+### 合同
 
-**核心**：扫描页 → OCR 文字层 → 当普通文本进现有排版/主题，而不是当图。
+**A. 搜索与展示同源（PDF）**
 
-```
-扫描页 Image
-  → 页光栅（已有 extract_page_image）
-  → OCR（按页、后台、可缓存）
-  → 文本块
-  → process_pdf 文字路径（layout_text）
-  → 主题纸色 + 用户字体
-```
+1. 新 `search_pdf_chapter`：章内按页组装与 `process_pdf_chapter` 相同的 `LayoutItem` 序列（文本页 `extract_pages_text` + 图像页 OCR 缓存/`pdf_text_items`，含标题缩放项）。
+2. 字符流累加规则与 `search_epub_chapter` / `layout_items` 一致：`Text` = `chars()+1`（段落 newline）；`Image` = 0。
+3. `search_in_book` 分派：`"pdf"` → `search_pdf_chapter`（不再落入 TXT 路径）。
+4. 跳转：`SearchHit.anchor_char_offset` 经 `locate_page_for_offset` 落页，与进度恢复同机制。
+5. 未 OCR 的扫描页：搜索时**同步**尝试 OCR 缓存读取；无缓存不阻塞整书搜索（跳过该页），不强制现场识别。
+6. live OCR 结果**回写** `OCR_PAGE_CACHE`，后续搜索/展示同源。
 
-#### 1. OCR 引擎选型（可插拔）
+**B. 选区/笔记/复制**
 
-| 选项 | 优点 | 代价 |
-|------|------|------|
-| **A. 系统/云端 OCR（推荐一期）** | Windows 有内置 OCR；Android 可用系统或轻量模型 | 质量因系统而异；需平台适配 |
-| B. 本地模型（如 RapidOCR / tesseract） | 效果稳定、可离线 | 包体 +5～30MB；NDK 交叉编译成本 |
-| C. 仅增强图片（滤镜去底） | 实现快 | **字体仍不能换**，不满足需求 |
+- 重排文本页必须是 `LayoutItem::Text`（已有）；`beginSelection`/`noteAtCharOffset`/摘录走 `PageInfo.startCharIndex` 偏移，与 TXT 相同。
+- 页内无文本（原图/空 OCR）不建立选区（已有页尾空选区防御）。
 
-一期建议 **A（平台 OCR）+ 失败降级 B 或纯图对照**；接口统一 `OcrEngine::recognize(image_bytes) -> String`。
+**C. 字体解除限制**
 
-#### 2. 页模式（设置项「PDF 扫描页」）
+- 文字重排模式：排版设置（字体/字号/字重/字距/行距/段距）与 TXT 同一 setter；切换后带锚点重排。
+- 对照模式：设置可保留但不影响像素字（现状）；UI 文案标明「原图模式不可改字」。
 
-| 模式 | 行为 |
-|------|------|
-| **重排（默认）** | OCR → 文本流；背景=主题；字体可调 |
-| **对照** | 整页图（现状）+ 可选背景柔化 |
-| 自动 | 有文本层用文本层；纯扫描页走 OCR 重排 |
+**D. 测试边界**
 
-#### 3. 背景与字体
-
-- 重排模式：**不绘制扫描原图**（或仅作可选水印级底图，默认关）；`PageContentRenderer.paperColor` 即底。
-- 字体/字重/字距/行距：与文字书同一 `TextStyle` 路径，设置页不再禁用。
-- 对照模式：图上叠半透明主题纸色（可调透明度）降低刺眼，仍不可改字。
-
-#### 4. OCR 缓存与大文件
-
-- 键：`book_id + page + ocr_model_ver`；磁盘缓存（app support）。
-- 按章后台 OCR，不阻塞打开；已 OCR 页立即出字。
-- 识别文本走既有 `content_cleaner` OCR 错字表（已有 `fix_ocr_errors`）。
-
-#### 5. 工作流并入
-
-- 章节/页码/进度与现 PDF 一致。
-- 搜索、选中、笔记：重排后自动可用（文字路径）。
-- 扫描页无 OCR 时占位「本页为扫描件，识别中/失败可切换对照」。
-
-### 测试边界
-
-- 假图（纯色+已知短语）OCR mock：得到指定字符串并进 layout_text。
-- 模式切换：重排页宽度随字号变化；对照页 rect 为整页。
-- 缓存：同页二次识别不再调引擎。
+- `search_pdf_chapter`：假 OCR 缓存文本 → 命中词 → `anchor_char_offset` 与 layout 字符流对齐（同 EPUB 锚点测试形态）。
+- 分派：`get_book_format=="pdf"` 不再走 `search_txt_chapter`。
+- 选区：重排页 Text 条目 char 区间非空且单调；原图页无文本。
+- 字体：改 `font_size` 改变分页结果。
 
 ## [S3] Out of Scope
 
 - 保留原版面的「OCR 文字层覆盖在扫描图上」精确对齐（二期）。
-- 表格/公式版面还原。
-- 手写体专项优化。
+- 表格/公式版面还原、手写体专项。
+- 对照模式搜索/选中。
+- OCR 识别质量专项（错字表/分栏）。
 
 ## Tasks
 
-- [ ] T1: `OcrEngine` trait + 平台实现/降级；页光栅 → 文本 — acceptance: 单测 mock OCR 出字 (covers: S2)
-- [ ] T2: PDF 扫描页「重排/对照/自动」模式与设置项 — acceptance: 切换后背景/字体生效路径正确 (covers: S2; depends: T1)
-- [ ] T3: OCR 磁盘缓存 + 后台按章识别 — acceptance: 同页二次不重复 OCR (covers: S2; depends: T1)
-- [ ] T4: 重排文本进 layout_text + 排版设置解除对 PDF 限制 — acceptance: 扫描 PDF 改字体/字号可见生效 (covers: S2; depends: T2)
-- [ ] T5: 对照模式主题叠色 + 测试/构建 — acceptance: 测试过；文档含真机清单 (covers: S2; depends: T2)
+- [x] T1: `search_pdf_chapter` + 分派接入 — acceptance: 扫描 PDF 书内搜索命中 OCR 文本且锚点可跳转 (covers: S2)
+- [x] T2: 选区/笔记/复制在重排页回归 — acceptance: 重排页可选中复制加笔记；原图页不可 (covers: S2)
+- [x] T3: 字体/字号在重排模式生效确认/解除限制 — acceptance: 改字体即时重排可见 (covers: S2)
+- [x] T4: 单测 + 真机清单 + 规格收口 — acceptance: 测试过；Report 含验证命令 (covers: S2; depends: T1,T2,T3)
