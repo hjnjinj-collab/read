@@ -13,6 +13,7 @@ use crate::traits::{
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::time::Instant;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -370,6 +371,7 @@ impl ComicArchiveParser {
 
     /// 构建章节/页映射（文件夹=章，自然排序）
     fn build_chapters(&mut self) -> Result<()> {
+        let started = Instant::now();
         let entries = self.reader.list_entries()?;
         // path → size（仅图片）
         let mut images: Vec<String> = entries
@@ -448,18 +450,26 @@ impl ComicArchiveParser {
         // 保持原样（单文件夹包即一章）
         self.chapters = chapters;
 
-        // 封面：只读头字节（缩略）；完整图走 BookImageStore
+        // 封面：**完整读单张**（仅 1 图，非全书）；截断 64KB 对 PNG 缺 IEND
+        // 会解不出。页 aspect 仍走 head 懒探测。
         if let Some(href) = cover_href {
-            if let Ok(data) = self.reader.read_entry_head(&href, IMAGE_HEAD_BYTES) {
+            if let Ok(data) = self.reader.read_entry(&href) {
                 self.cover_data = Some(data);
             }
         } else if let Some(first) = self.chapters.first().and_then(|c| c.pages.first()) {
-            if let Ok(data) = self.reader.read_entry_head(&first.href, IMAGE_HEAD_BYTES) {
+            if let Ok(data) = self.reader.read_entry(&first.href) {
                 self.cover_data = Some(data);
             }
         }
 
         let total_pages: usize = self.chapters.iter().map(|c| c.pages.len()).sum();
+        // 大文件加载诊断：懒探测次数/耗时（GB 包打开应只见 head 读）
+        // println + [READER] 前缀：与 Dart readerTrace 控制台约定一致
+        println!(
+            "[READER][archive] head_probe pages={} ms={}",
+            total_pages,
+            started.elapsed().as_millis()
+        );
         let title = self
             .path
             .file_stem()

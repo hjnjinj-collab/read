@@ -52,6 +52,7 @@ pub struct PdfParser {
 
 impl PdfParser {
     pub fn from_file(path: &Path) -> Result<Self> {
+        let started = std::time::Instant::now();
         // lopdf::load 走 OS 读；超大文件由 OS 页缓存托管，不额外复制 Vec
         let doc = lopdf::Document::load(path)
             .map_err(|e| anyhow::anyhow!("PDF 解析失败: {e}"))
@@ -61,6 +62,12 @@ impl PdfParser {
         if page_count == 0 {
             anyhow::bail!("PDF 没有页面");
         }
+        // println + [READER] 前缀：与 Dart readerTrace 控制台约定一致
+        println!(
+            "[READER][pdf] open pages={} ms={}",
+            page_count,
+            started.elapsed().as_millis()
+        );
         let mut page_ids: Vec<_> = pages.values().copied().collect();
         // get_pages 的 BTreeMap key 为页对象号，不一定是页序；按 /Type /Page 顺序
         // 已由 lopdf 页树顺序保证（values 即页序）

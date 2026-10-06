@@ -1284,6 +1284,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   /// Open a book file
   Future<void> openBook(String filePath, String bookName) async {
     final openSeq = ++_openBookSeq;
+    final openSw = Stopwatch()..start();
     ++_requestGeneration;
     _invalidateFrames(reason: 'open-book');
     _rawCurrentPage = null;
@@ -1403,10 +1404,20 @@ class ReaderNotifier extends Notifier<ReadingState> {
       await _refreshCurrentChapterNotes(force: true);
       unawaited(refreshCurrentChapterPageCount());
       readerTrace('openBook.done', {'seq': openSeq});
+      // 大文件加载：打开全链路耗时（parse→meta→首页）
+      readerTrace('open.latency', {
+        'ms': openSw.elapsedMilliseconds,
+        'file': filePath,
+      });
     } catch (e) {
       if (openSeq != _openBookSeq) return;
       state = state.copyWith(isLoading: false, error: e.toString());
       readerTrace('openBook.error', {'seq': openSeq, 'error': e.toString()});
+      readerTrace('open.latency', {
+        'ms': openSw.elapsedMilliseconds,
+        'file': filePath,
+        'ok': false,
+      });
     }
   }
 
