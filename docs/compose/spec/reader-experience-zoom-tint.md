@@ -1,14 +1,24 @@
 ---
 feature: reader-experience-zoom-tint
-status: designed
-updated: 2026-09-29
+status: delivered
+updated: 2026-10-01
 branch: master
-commits: # empty while in progress
+commits: 671ca7f..671ca7f
 ---
 
 # 阅读体验增强：PDF/图缩放 + 纸色强度
 
 ## Report
+
+**What was built** — ①双击图片命中区打开 `ImageZoomViewer`（捏合 0.5–5x + 平移），与长按并存；双击窗 ~300ms 不与单击菜单冲突。②纸色适配强度滑杆 0–100%（`PaperTint.strength`），持久化 `imagePaperTintStrength`，strength=0 等同关闭映射。与后续「原图整页 fill + 墨迹加深」「自定义背景蒙版」共同构成扫描 PDF 视觉链。
+
+**Verification** — 交付于 `671ca7f`；纸色强度相关单测见 `paper_tint_test.dart`；真机已多轮使用。
+
+**Journey log** —
+- 双击缩放复用 ImageZoomViewer，勿再写第二套捏合
+- strength 进指纹/缓存键由 PaperTint 全局量承担，切换即时重绘
+
+## [S1] Problem
 
 ## [S1] Problem
 
@@ -40,5 +50,5 @@ commits: # empty while in progress
 - 超分/锐化
 
 ## Tasks
-- [ ] T1: 双击打开 ImageZoomViewer — acceptance: PDF/漫画双击出缩放层 (covers: S2)
-- [ ] T2: 纸色强度滑杆+持久化 — acceptance: 调滑杆即时改 tint，重启保持 (covers: S2)
+- [x] T1: 双击打开 ImageZoomViewer — acceptance: PDF/漫画双击出缩放层 (covers: S2)
+- [x] T2: 纸色强度滑杆+持久化 — acceptance: 调滑杆即时改 tint，重启保持 (covers: S2)

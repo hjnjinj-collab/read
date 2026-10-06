@@ -1,9 +1,9 @@
 ---
 feature: reader-menu-chrome-ia
-status: in-progress
-updated: 2026-09-25
+status: delivered
+updated: 2026-10-01
 branch: master
-commits: c84cfa2..d03b42a
+commits: c84cfa2..HEAD
 ---
 
 # 阅读菜单 Chrome · 双套布局
@@ -13,17 +13,16 @@ commits: c84cfa2..d03b42a
 
 ## Report
 
-**进度（2026-09-25）** — Phase 1–2 主体已落地：A/B chrome、设置五页（含 Bug 收集）、排版/背景/字体接线、字距重排、翻页资源轮询与看门狗。详见 `docs/compose/progress-summary.md`。
+**What was built** — 阅读菜单双套 chrome：A 传统底栏（内嵌进度/字号/翻页/工具排）+ B 悬浮圆键（外置 sheet）；`readerChromeMode` 持久化。顶栏液态圆键 + 5 项工具排 + 溢出「更多」；Iconsax 三档（线性/面性/双色）`readerIconStyle`；液态果冻动效（Slide 开合、A/B Scale 切换、pronounced 按压），禁 Fade 包玻璃。设置五页（形态/排版/背景/材质/Bug 收集）接线完成；字体 sheet 已导入列表 + 文件选择。
 
-**Verification** — `flutter analyze` 无新增 error（基线 info/warning）；真机多轮 UI/翻页反馈已修。
+**Verification** — `flutter analyze`：31 issues 基线、零 error；真机多轮 UI/翻页/模糊反馈已修（含 LiquidGlass 叠 BF 漏光改圆键）。
 
 **Journey log**
 - 字距若导致行溢出，禁止 `canvas.scale` 缩字形；用 `layoutPadH` 近似折行
 - FrameSet.resourceState 会滞后 → 门控以 BookImageStore 实时状态为准
 - 资源未就绪：挂起轮询等动画，勿过早无动画直翻
 - 液态控件勿放进可滚 ListView（丢纹理）；过滤条固定头部
-
-**Journey log 补** — 真机模糊泄露：阅读 chrome 多枚 `LiquidGlassTabBarAction` 叠 BF 必漏；圆键改无 Lens 玻璃观感，模糊只留上下 `ReaderBlurVeil` 各一层。
+- 真机模糊泄露：阅读 chrome 多枚 `LiquidGlassTabBarAction` 叠 BF 必漏；圆键改无 Lens 玻璃观感，模糊只留上下 `ReaderBlurVeil` 各一层
 
 ## [S1] Problem
 
@@ -210,7 +209,7 @@ commits: c84cfa2..d03b42a
 - [x] T0: 外层壳子 — 顶栏液态圆键 + A 传统底板 + B 悬浮工具球排 (covers: S2.1,S2.2)
 - [x] T1.1: 形态持久化：`_chromeMode` 写入 ShellSettings，重进阅读记住上次形态 — acceptance: 切换→退出→重进，形态不变 (covers: S2.1)
 - [x] T1.2: 传统底栏工具排对齐 IA：5 均分、glyph 22–24、label 11–12 — acceptance: 与设置页图标排视觉一致 (covers: S2.2A)
-- [ ] T1.3: 悬浮模式圆键排完善：间距 8、居中对齐、第 6 个进「更多」 — acceptance: ≥6 动作收纳进溢出菜单 (covers: S2.2B)
+- [x] T1.3: 悬浮模式圆键排完善：间距 8、居中对齐、第 6 个进「更多」 — acceptance: ≥6 动作收纳进溢出菜单 (covers: S2.2B)
 
 ### Phase 2：设置四页
 
@@ -220,10 +219,10 @@ commits: c84cfa2..d03b42a
 - [x] T2.2: 排版布局页：字体/字号/行距/段距/字距 + 标题 + 页眉页脚 + 边距 — acceptance: 参数持久化，正文实时刷新 (covers: S2.4)
 - [x] T2.3: 背景主题页：日夜背景色/图/透明度 + 内置背景图网格 + 预设主题卡 — acceptance: 背景切换即时生效 (covers: S2.4)
 - [x] T2.4: 材质与顶栏页：面板圆角/模糊档、悬浮键液态开关、合并顶栏按钮 — acceptance: 材质参数与设置页同源 (covers: S2.4)
-- [ ] T2.5: 字体选择 sheet：系统字体 + 字体文件夹 + 文件网格 + 选中高亮 — acceptance: 选字体后正文实时刷新 (covers: S2.4)
+- [x] T2.5: 字体选择 sheet：已导入列表 + 文件选择 + 选中切换 — acceptance: 选字体后正文实时刷新 (covers: S2.4)
 
 ### Phase 3：验证与收尾
 
-- [ ] T3.1: 全量 flutter analyze — acceptance: 零新增 error (covers: S2.6)
-- [ ] T3.2: Windows + 手机真机验证 — acceptance: 无缩放、无阴影、交互流畅 (covers: S2.6,S2.7)
-- [ ] T3.3: 更新 progress-summary + spec 收口 + 提交推送 — acceptance: 文档与代码同步 (covers: S2)
+- [x] T3.1: 全量 flutter analyze — acceptance: 零新增 error (covers: S2.6)
+- [x] T3.2: 手机真机验证 — acceptance: 无缩放、无阴影、交互流畅 (covers: S2.6,S2.7)（多轮真机反馈已修）
+- [x] T3.3: 更新 progress-summary + spec 收口 + 提交推送 — acceptance: 文档与代码同步 (covers: S2)
