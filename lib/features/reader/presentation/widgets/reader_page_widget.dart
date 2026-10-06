@@ -488,17 +488,10 @@ class PageContentRenderer {
             entry.width,
             entry.height,
           );
-          // 漫画：铺满 entry 矩形（大图独页=全窗，小图=拼页框）
-          // PDF：按墨迹内容框等比适配，不裁字、少留边
-          final isComicFill = PaperTint.mode == TintMode.comic;
-          final fitted = isComicFill
-              ? dest
-              : PaperTint.fitContent(
-                  dest,
-                  image.width.toDouble(),
-                  image.height.toDouble(),
-                  BookImageStore.instance.contentBox(href),
-                );
+          // 漫画 / PDF 原图：统一铺满 entry 矩形（fill_page 时=整页）。
+          // 不再按内容框 fitContent——切换文字/原图时尺寸会漂移。
+          // 拉伸笔画缺口由 paper_tint PDF 分支墨迹加深补偿。
+          final fitted = dest;
           void paintPlain() {
             canvas.save();
             canvas.clipRect(dest);

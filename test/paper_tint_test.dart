@@ -46,6 +46,20 @@ void main() {
       expect(PaperTint.pdfMappedLuma(0.6), greaterThan(0.6));
       expect(PaperTint.pdfMappedLuma(0.4), lessThan(0.4));
     });
+
+    test('墨迹加深：暗部压向 ink，纸白不动', () {
+      // 近黑：inkPush 接近 0.45*strength
+      expect(PaperTint.pdfInkPush(0.05, str: 1.0), greaterThan(0.35));
+      // 近白：几乎无加深
+      expect(PaperTint.pdfInkPush(0.95, str: 1.0), lessThan(0.05));
+      // strength=0 关闭
+      expect(PaperTint.pdfInkPush(0.1, str: 0.0), 0.0);
+      // final 比 mapped 更靠 ink（更小）
+      expect(
+        PaperTint.pdfFinalLuma(0.2, str: 1.0),
+        lessThan(PaperTint.pdfMappedLuma(0.2)),
+      );
+    });
   });
 
   group('fitContent 内容框适配', () {

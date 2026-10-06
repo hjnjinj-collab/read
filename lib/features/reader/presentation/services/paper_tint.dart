@@ -206,6 +206,22 @@ class PaperTint {
     return ((luma - 0.5) * 1.08 + 0.5).clamp(0.0, 1.0);
   }
 
+  /// PDF 墨迹加深量：luma 越低越贴墨色（与 shader inkPush 同式）。
+  /// 拉伸填页后笔画易断，暗部再压向 ink 补缺口。strength=0 → 0。
+  @visibleForTesting
+  static double pdfInkPush(double luma, {double? str}) {
+    final s = str ?? strength;
+    final t = ((luma - 0.05) / (0.42 - 0.05)).clamp(0.0, 1.0);
+    final ss = t * t * (3.0 - 2.0 * t);
+    return (1.0 - ss) * s * 0.45;
+  }
+
+  /// 含墨迹加深后的最终映射灰度（shader `g - inkPush`）
+  @visibleForTesting
+  static double pdfFinalLuma(double luma, {double? str}) {
+    return (pdfMappedLuma(luma) - pdfInkPush(luma, str: str)).clamp(0.0, 1.0);
+  }
+
   static Future<void> _ensureLoaded() async {
     if (_program != null || _loadFailed) return;
     try {

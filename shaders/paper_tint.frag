@@ -63,11 +63,15 @@ void main() {
     float blank = max(step(uBlankRatio, rowWhite), step(uBlankRatio, colWhite));
     fragColor = vec4(mix(c.rgb, uPaper.rgb, blank * uStrength), c.a);
   } else {
-    // ── PDF：低色度做墨色↔纸色重映射 ──
+    // ── PDF：低色度做墨色↔纸色重映射 + 暗部墨迹加深 ──
+    // 原图整页拉伸后笔画易断：暗部再压向 ink，补笔画缺口
     float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
     float chroma = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
     float doc = 1.0 - smoothstep(0.10, 0.22, chroma);
     float g = clamp((luma - 0.5) * 1.08 + 0.5, 0.0, 1.0);
+    // inkPush：luma 越低越贴墨色（smoothstep 0.05→0.42）
+    float inkPush = (1.0 - smoothstep(0.05, 0.42, luma)) * uStrength * 0.45;
+    g = clamp(g - inkPush, 0.0, 1.0);
     vec3 mapped = mix(uInk.rgb, uPaper.rgb, g);
     fragColor = vec4(mix(c.rgb, mapped, doc * uStrength), c.a);
   }
