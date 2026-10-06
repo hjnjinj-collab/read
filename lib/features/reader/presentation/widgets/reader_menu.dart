@@ -492,6 +492,7 @@ class NoteListDialog extends ConsumerStatefulWidget {
 
 class _NoteListDialogState extends ConsumerState<NoteListDialog> {
   late Future<List<NoteListItem>> _future;
+  List<NoteListItem>? _items;
 
   static const _colorDots = [
     Color(0xFFFFD54F),
@@ -513,6 +514,81 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
     });
   }
 
+  String get _bookTitle =>
+      ref.read(readerProvider).bookTitle?.trim().isNotEmpty == true
+          ? ref.read(readerProvider).bookTitle!.trim()
+          : '未命名';
+
+  String _exportFileName() {
+    final slug = _bookTitle
+        .replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final stamp =
+        '${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}';
+    return 'notes_${slug.isEmpty ? 'book' : slug}_$stamp.md';
+  }
+
+  Future<List<NoteListItem>> _loadedItems() async {
+    // await future：加载完成前点导出不得误报「暂无笔记」
+    final items = await _future;
+    _items = items;
+    return items;
+  }
+
+  Future<void> _exportAll() async {
+    final items = await _loadedItems();
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂无笔记')),
+      );
+      return;
+    }
+    final md = formatNotesAsMarkdown(items, bookTitle: _bookTitle);
+    try {
+      final uri = await FilePicker.saveFile(
+        dialogTitle: '导出笔记',
+        fileName: _exportFileName(),
+        bytes: Uint8List.fromList(utf8.encode(md)),
+        mimeType: 'text/markdown',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(uri == null ? '已取消导出' : '已导出：$uri'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _copyAll() async {
+    final items = await _loadedItems();
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂无笔记')),
+      );
+      return;
+    }
+    final md = formatNotesAsMarkdown(items, bookTitle: _bookTitle);
+    await Clipboard.setData(ClipboardData(text: md));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已复制全部笔记，可粘贴分享'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 移动端适配：高度随屏幕自适应（小屏不溢出、大屏不留大片空白），
@@ -520,7 +596,21 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
     final media = MediaQuery.sizeOf(context);
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      title: const Text('笔记'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('笔记')),
+          TextButton.icon(
+            onPressed: _copyAll,
+            icon: const Icon(Icons.copy_all, size: 18),
+            label: const Text('复制全部'),
+          ),
+          TextButton.icon(
+            onPressed: _exportAll,
+            icon: const Icon(Icons.save_alt, size: 18),
+            label: const Text('导出'),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: double.maxFinite,
         height: (media.height * 0.55).clamp(300.0, 460.0),
@@ -536,6 +626,7 @@ class _NoteListDialogState extends ConsumerState<NoteListDialog> {
               );
             }
             final items = snap.data ?? const [];
+            _items = items;
             if (items.isEmpty) {
               return const Center(child: Text('暂无笔记\n长按文字可添加'));
             }

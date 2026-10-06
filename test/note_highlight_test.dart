@@ -159,4 +159,68 @@ void main() {
       expect(relocateNoteInText('abc', 0, '  '), isNull);
     });
   });
+
+  group('formatNotesAsMarkdown', () {
+    NoteListItem item({
+      int chapterIndex = 0,
+      int? pageIndex,
+      required String excerpt,
+      String? note,
+    }) {
+      return NoteListItem(
+        note: Note(
+          id: 1,
+          bookPath: '/b.txt',
+          chapterIndex: chapterIndex,
+          startCharOffset: 0,
+          endCharOffset: excerpt.length,
+          excerpt: excerpt,
+          colorIndex: 0,
+          note: note,
+          createdAt: DateTime(2026),
+          updatedAt: DateTime(2026),
+        ),
+        pageIndex: pageIndex,
+      );
+    }
+
+    test('含摘录/备注/章页，空列表只有标题头', () {
+      final md = formatNotesAsMarkdown(
+        [
+          item(chapterIndex: 2, pageIndex: 11, excerpt: '看见桌上的信', note: '关键伏笔'),
+          item(chapterIndex: 2, pageIndex: 12, excerpt: '窗外有雨'),
+        ],
+        bookTitle: '测试书',
+        exportedAt: DateTime(2026, 10, 1, 12),
+      );
+      expect(md, contains('# 《测试书》笔记'));
+      expect(md, contains('共 2 条'));
+      expect(md, contains('## 第 3 章 · 第 12 页'));
+      expect(md, contains('> 看见桌上的信'));
+      expect(md, contains('备注：关键伏笔'));
+      expect(md, contains('## 第 3 章 · 第 13 页'));
+      expect(md, contains('> 窗外有雨'));
+      // 无备注条目不得多出「备注：」行
+      expect('备注：'.allMatches(md).length, 1);
+
+      final empty = formatNotesAsMarkdown(
+        const [],
+        bookTitle: '空书',
+        exportedAt: DateTime(2026),
+      );
+      expect(empty, contains('# 《空书》笔记'));
+      expect(empty, contains('共 0 条'));
+      expect(empty, isNot(contains('## 第')));
+    });
+
+    test('无页码省略「第 P 页」', () {
+      final md = formatNotesAsMarkdown(
+        [item(excerpt: '只有章')],
+        bookTitle: '书',
+        exportedAt: DateTime(2026),
+      );
+      expect(md, contains('## 第 1 章\n'));
+      expect(md, isNot(contains('第 1 页')));
+    });
+  });
 }

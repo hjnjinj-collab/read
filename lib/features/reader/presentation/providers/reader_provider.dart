@@ -3518,6 +3518,39 @@ class NoteListItem {
   const NoteListItem({required this.note, this.pageIndex});
 }
 
+/// 笔记导出 Markdown（契约见 docs/compose/spec/note-export-share.md）
+String formatNotesAsMarkdown(
+  List<NoteListItem> items, {
+  required String bookTitle,
+  DateTime? exportedAt,
+}) {
+  final at = exportedAt ?? DateTime.now();
+  final buf = StringBuffer()
+    ..writeln('# 《$bookTitle》笔记')
+    ..writeln()
+    ..writeln('共 ${items.length} 条 · 导出时间 ${at.toIso8601String()}')
+    ..writeln();
+  for (final item in items) {
+    final n = item.note;
+    final pageLabel =
+        item.pageIndex != null ? ' · 第 ${item.pageIndex! + 1} 页' : '';
+    buf.writeln('## 第 ${n.chapterIndex + 1} 章$pageLabel');
+    buf.writeln();
+    // 摘录：Markdown 引用块；多行逐行加 >
+    for (final line in n.excerpt.split('\n')) {
+      buf.writeln('> $line');
+    }
+    buf.writeln();
+    if (n.note != null && n.note!.isNotEmpty) {
+      buf.writeln('备注：${n.note}');
+      buf.writeln();
+    }
+    buf.writeln('---');
+    buf.writeln();
+  }
+  return buf.toString();
+}
+
 /// 按章节分组笔记（批量定位一次 FFI/章）
 Map<int, List<Note>> groupNotesByChapter(List<Note> notes) {
   final map = <int, List<Note>>{};
