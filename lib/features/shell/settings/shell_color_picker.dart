@@ -8,6 +8,8 @@ import 'package:liquid_glass_easy/src/widgets/components/liquid_glass_segmented.
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/shell_glass_style.dart';
+import '../../reader/presentation/services/bg_image_store.dart';
+import '../../reader/presentation/widgets/reader_page_widget.dart' show PageContentRenderer;
 import '../providers/shell_settings.dart';
 import '../widgets/shell_ambient.dart';
 import 'settings_chrome.dart';
@@ -126,46 +128,75 @@ class _PaperColorPickerDialogState
                   ),
                 ),
                 const SizedBox(height: 12),
-                // 预览：当前背景色 + 正文观感
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: widget.previewBg ?? _color,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.22),
+                // 预览：真实阅读底（风景图+蒙版）或纯色 + 正文观感
+                Builder(builder: (context) {
+                  final bgImg = BgImageStore.instance.image;
+                  final base = widget.previewBg ?? _color;
+                  final scrim = base.withValues(
+                    alpha: bgImg != null
+                        ? BgImageStore.scrimAlpha(
+                            BgImageStore.scrimStrength,
+                            PageContentRenderer.paperOpacity,
+                          )
+                        : 1.0,
+                  );
+                  return Container(
+                    width: double.infinity,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: base,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.22),
+                      ),
                     ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '字有时是会骗人的',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          // 挑背景：字=正文色；挑文字：字=当前选中色
-                          color: widget.previewBg == null
-                              ? widget.textColor
-                              : _color,
-                          height: 1.5,
+                    child: Stack(
+                      children: [
+                        if (bgImg != null)
+                          Positioned.fill(
+                            child: RawImage(
+                              image: bgImg,
+                              fit: BoxFit.cover,
+                              filterQuality: FilterQuality.medium,
+                            ),
+                          ),
+                        if (bgImg != null)
+                          Positioned.fill(child: ColoredBox(color: scrim)),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '字有时是会骗人的',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  // 挑背景：字=正文色；挑文字：字=当前选中色
+                                  color: widget.previewBg == null
+                                      ? widget.textColor
+                                      : _color,
+                                  height: 1.5,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '预览 · 背景与正文色搭配',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: (widget.previewBg == null
+                                          ? widget.textColor
+                                          : _color)
+                                      .withValues(alpha: 0.72),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '预览 · 背景与正文色搭配',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: (widget.previewBg == null
-                                  ? widget.textColor
-                                  : _color)
-                              .withValues(alpha: 0.72),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                      ],
+                    ),
+                  );
+                }),
                 const SizedBox(height: 12),
                 Flexible(
                   child: SingleChildScrollView(
