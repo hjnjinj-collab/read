@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../../core/models/simple_models.dart';
 import '../../diagnostics/reader_trace.dart';
+import '../../services/bg_image_store.dart';
 import '../reader_page_widget.dart';
 
 /// 方块坍塌溶解翻页绘制器（collapse dissolve）
@@ -164,6 +165,25 @@ class CollapsePainter extends CustomPainter {
       Offset.zero & size,
       Paint()..color = PageContentRenderer.paperColor,
     );
+    // 风景背景图与 PagePainter 同层
+    final bgImg = BgImageStore.instance.image;
+    if (bgImg != null) {
+      paintImage(
+        canvas: canvas,
+        rect: Offset.zero & size,
+        image: bgImg,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.medium,
+      );
+      final scrim = PageContentRenderer.paperColor.withValues(
+        alpha: BgImageStore.scrimAlpha(
+          BgImageStore.scrimStrength,
+          PageContentRenderer.paperOpacity,
+        ),
+      );
+      canvas.drawRect(Offset.zero & size, Paint()..color = scrim);
+    }
     PageContentRenderer.paintPage(
       canvas,
       page,

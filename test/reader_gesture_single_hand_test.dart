@@ -81,19 +81,24 @@ void main() {
   });
 
   group('快照超采样', () {
-    test('2×dpr 且上限 4096', () {
+    test('2×dpr 等比适配 4096（宽高同一 scale）', () {
       // 与 PageTurnComposer.snapshotPixelSize 同式
       ({int w, int h}) snap(Size size, double dpr) {
-        final s = dpr * 2;
+        const maxSide = 4096.0;
+        final s = (dpr * 2).clamp(1.0, 8.0);
+        final rawW = size.width * s;
+        final rawH = size.height * s;
+        final k = (maxSide / (rawW > rawH ? rawW : rawH)).clamp(0.0, 1.0);
         return (
-          w: (size.width * s).round().clamp(1, 4096),
-          h: (size.height * s).round().clamp(1, 4096),
+          w: (rawW * k).round().clamp(1, 4096),
+          h: (rawH * k).round().clamp(1, 4096),
         );
       }
 
       final r = snap(const Size(400, 800), 3.0);
-      expect(r.w, 2400); // 400 * 3 * 2
-      expect(r.h, 4096); // 4800 上限
+      // 2400x4800 → k=4096/4800 → 2048x4096，宽高比保持 1:2
+      expect(r.h, 4096);
+      expect(r.w, closeTo(r.h * 400 / 800, 1.0));
     });
   });
 

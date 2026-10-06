@@ -10,6 +10,7 @@ import '../../../../core/models/simple_models.dart';
 import '../providers/page_frame.dart';
 import '../providers/reader_provider.dart';
 import '../providers/reader_render_state.dart';
+import '../services/bg_image_store.dart';
 import '../services/book_image_store.dart';
 import 'page_turn/page_turn_controller.dart';
 import 'page_turn/page_turn_types.dart';
@@ -353,13 +354,17 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 启动预热入口（main 调用）：填充进程级 program 缓存
   static Future<void> preloadShaders() => _ShaderPrograms.preload();
   
-  /// 快照像素尺寸：2×dpr 超采样（边长上限 4096），shader 变换采样不糊。
-  /// 注意：不可把 scale clamp 到 dpr，否则高 dpr 机上等于不超采样。
+  /// 快照像素尺寸：2×dpr 超采样，**等比**适配 4096 边长上限。
+  /// 宽高必须同一 scale，否则 content 被裁/拉大（真机「明显很大」）。
   static ({int w, int h}) snapshotPixelSize(Size size, double dpr) {
-    final s = dpr * 2;
+    final s = (dpr * 2).clamp(1.0, 8.0);
+    final maxSide = 4096.0;
+    final rawW = size.width * s;
+    final rawH = size.height * s;
+    final k = (maxSide / math.max(rawW, rawH)).clamp(0.0, 1.0);
     return (
-      w: (size.width * s).round().clamp(1, 4096),
-      h: (size.height * s).round().clamp(1, 4096),
+      w: (rawW * k).round().clamp(1, 4096),
+      h: (rawH * k).round().clamp(1, 4096),
     );
   }
 
@@ -378,8 +383,9 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
 
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
+      // 等比 scale（宽高共用），与 snapshotPixelSize 的 k 一致
       final scale = pixelWidth / size.width;
-      canvas.scale(scale); // 2×dpr 超采样
+      canvas.scale(scale);
 
       // v16.9.3 核心修复：先画纸色底——paintPage 不含纸色底（调用方自绘），
       // 缺失导致快照透明背景 → 文字笔画间透出下层另一页内容 = 双重文字重影
@@ -388,6 +394,25 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         Offset.zero & size,
         Paint()..color = PageContentRenderer.paperColor,
       );
+      // 风景/自定义背景图：与 PagePainter 同层，翻页中不掉成纯色
+      final bgImg = BgImageStore.instance.image;
+      if (bgImg != null) {
+        paintImage(
+          canvas: canvas,
+          rect: Offset.zero & size,
+          image: bgImg,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          filterQuality: FilterQuality.medium,
+        );
+        final scrim = PageContentRenderer.paperColor.withValues(
+          alpha: BgImageStore.scrimAlpha(
+            BgImageStore.scrimStrength,
+            PageContentRenderer.paperOpacity,
+          ),
+        );
+        canvas.drawRect(Offset.zero & size, Paint()..color = scrim);
+      }
 
       final notifier = ref.read(readerProvider.notifier);
       PageContentRenderer.paintPage(
@@ -1929,55 +1954,38 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
 
   /// 立方体过渡（cube）：Y 轴透视旋转，旧页转出 / 新页转入
+  /// 两页共用屏幕竖缝（中心）：旧页 0→-90°，新页 +90°→0
   Widget _buildCubeTransition() {
     final progress = _turnController!.progress.clamp(0.0, 1.0);
-    final size = _viewport;
     final goingNext = _turnDirection == PageDirection.next;
-    // 0 → π/2
     final angle = progress * math.pi / 2;
-    final eye = 1.0 / (size.width * 1.2);
 
-    Matrix4 faceMatrix(double yAngle, double translateX) {
+    Matrix4 faceMatrix(double yAngle) {
       return Matrix4.identity()
-        ..setEntry(3, 2, eye)
-        ..translate(translateX, 0.0, -size.width / 2)
-        ..rotateY(yAngle)
-        ..translate(size.width / 2, 0.0, 0.0);
+        ..setEntry(3, 2, 0.0012) // 透视（eye ≈ 1/0.0012）
+        ..rotateY(yAngle);
     }
 
     final Widget oldFace = _buildPage(widget.currentPage);
     final Widget newFace = _buildPage(_targetFrame!.page);
 
-    if (goingNext) {
-      // 旧页从 0 转到 -90°，新页从 +90° 转到 0
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          Transform(
-            alignment: Alignment.centerRight,
-            transform: faceMatrix(-angle, size.width / 2),
-            child: oldFace,
-          ),
-          Transform(
-            alignment: Alignment.centerLeft,
-            transform: faceMatrix(math.pi / 2 - angle, -size.width / 2),
-            child: newFace,
-          ),
-        ],
-      );
-    }
-    // prev：镜像
+    // next：旧页从 0 转到 -90°，新页从 +90° 转到 0
+    // prev：镜像（旧 +90→0，新 0→-90 的对称）
+    final double oldY = goingNext ? -angle : angle;
+    final double newY = goingNext ? (math.pi / 2 - angle) : -(math.pi / 2 - angle);
+
     return Stack(
       fit: StackFit.expand,
       children: [
         Transform(
-          alignment: Alignment.centerLeft,
-          transform: faceMatrix(angle, -size.width / 2),
+          alignment: Alignment.center,
+          transform: faceMatrix(oldY),
           child: oldFace,
         ),
+        // 新页略后画，半程后盖在旧页上
         Transform(
-          alignment: Alignment.centerRight,
-          transform: faceMatrix(-(math.pi / 2 - angle), size.width / 2),
+          alignment: Alignment.center,
+          transform: faceMatrix(newY),
           child: newFace,
         ),
       ],
