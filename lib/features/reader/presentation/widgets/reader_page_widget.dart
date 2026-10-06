@@ -510,12 +510,22 @@ class PageContentRenderer {
           if (PaperTint.active) {
             canvas.save();
             canvas.clipRect(dest);
+            // 风景/自定义背景激活时：近白映射到「蒙版色」而非实心纸色，
+            // 与阅读底同层融合（纯色纸仍走 effectivePaperColor）
+            final bgOn = BgImageStore.instance.image != null;
+            final tintPaper = bgOn
+                ? PageContentRenderer.paperColor.withValues(
+                    alpha: BgImageStore.scrimAlpha(
+                      BgImageStore.scrimStrength,
+                      PageContentRenderer.paperOpacity,
+                    ),
+                  )
+                : PaperTint.effectivePaperColor(PageContentRenderer.paperColor);
             PaperTint.paint(
               canvas,
               fitted,
               image,
-              // 明亮主题纸色过白时加深，保证纸色适配可见（日/夜都生效）
-              PaperTint.effectivePaperColor(PageContentRenderer.paperColor),
+              tintPaper,
               PageContentRenderer.textColor,
               fallback: paintPlain,
             );

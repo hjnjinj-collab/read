@@ -2705,34 +2705,37 @@ class _BgGridItem extends StatelessWidget {
               : null,
         ),
         clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color.computeLuminance() > 0.5
-                      ? Colors.black54
-                      : Colors.white70,
-                ),
-              ),
-            ),
-            if (selected)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    shape: BoxShape.circle,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color.computeLuminance() > 0.5
+                        ? Colors.black54
+                        : Colors.white70,
                   ),
-                  child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
                 ),
               ),
-          ],
+              if (selected)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2774,48 +2777,52 @@ class _BgImageTile extends StatelessWidget {
                 ]
               : null,
         ),
+        // 双保险：外层 antiAlias + 内层 ClipRRect，杜绝图/底条直角穿出圆角
         clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (asset != null)
-              Image.asset(
-                asset!,
-                fit: BoxFit.cover,
-                cacheWidth: 360,
-                errorBuilder: (_, __, ___) => Container(color: Colors.grey[300]),
-              )
-            else
-              ColoredBox(color: scheme.surfaceContainerHighest),
-            if (selected)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    shape: BoxShape.circle,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (asset != null)
+                Image.asset(
+                  asset!,
+                  fit: BoxFit.cover,
+                  cacheWidth: 360,
+                  errorBuilder: (_, __, ___) => Container(color: Colors.grey[300]),
+                )
+              else
+                ColoredBox(color: scheme.surfaceContainerHighest),
+              if (selected)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
                   ),
-                  child: Icon(Icons.check, size: 12, color: scheme.onPrimary),
+                ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  color: Colors.black45,
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
                 ),
               ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                color: Colors.black45,
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: Colors.white),
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

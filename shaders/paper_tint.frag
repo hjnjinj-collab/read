@@ -60,8 +60,11 @@ void main() {
     rowWhite /= 16.0;
     colWhite /= 16.0;
     // 整行白 或 整列白 → 本像素视为空白边，改纸色
-    float blank = max(step(uBlankRatio, rowWhite), step(uBlankRatio, colWhite));
-    fragColor = vec4(mix(c.rgb, uPaper.rgb, blank * uStrength), c.a);
+    // uPaper.a<1（风景底）时保留透明，让阅读底图透出
+    float blank = max(step(uBlankRatio, rowWhite), step(uBlankRatio, colWhite)) * uStrength;
+    vec3 rgb = mix(c.rgb, uPaper.rgb, blank);
+    float a = mix(c.a, uPaper.a, blank);
+    fragColor = vec4(rgb, a);
   } else {
     // ── PDF：低色度做墨色↔纸色重映射 + 暗部墨迹加深 ──
     // 原图整页拉伸后笔画易断：暗部再压向 ink，补笔画缺口
@@ -73,6 +76,9 @@ void main() {
     float inkPush = (1.0 - smoothstep(0.05, 0.42, luma)) * uStrength * 0.45;
     g = clamp(g - inkPush, 0.0, 1.0);
     vec3 mapped = mix(uInk.rgb, uPaper.rgb, g);
-    fragColor = vec4(mix(c.rgb, mapped, doc * uStrength), c.a);
+    // 纸侧透明度跟随 uPaper.a（风景底时 <1，透出阅读背景）
+    float mappedA = mix(1.0, uPaper.a, g);
+    float k = doc * uStrength;
+    fragColor = vec4(mix(c.rgb, mapped, k), mix(c.a, mappedA, k));
   }
 }

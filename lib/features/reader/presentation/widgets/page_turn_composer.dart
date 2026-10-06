@@ -1951,6 +1951,7 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   }
 
   /// 覆盖过渡（cover）：新页从方向侧滑入盖住旧页；旧页微缩+暗下
+  /// 底层铺满纸色/风景底——旧页缩小露出的区域不得是白/黑空洞
   Widget _buildCoverTransition() {
     final progress = _turnController!.progress.clamp(0.0, 1.0);
     final size = _viewport;
@@ -1960,6 +1961,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 全幅底：纸色 + 风景图（与 PagePainter 同层），杜绝露白
+        _buildFullBleedBackdrop(),
         // 旧页：scale 0.92 + 12% 黑罩
         Transform.scale(
           scale: 1.0 - 0.08 * progress,
@@ -1979,6 +1982,34 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
           child: _buildPage(_targetFrame!.page),
         ),
       ],
+    );
+  }
+
+  /// 全幅底（纸色+风景+蒙版）：Cover/Cube 旋转露边时的统一衬底
+  Widget _buildFullBleedBackdrop() {
+    final bgImg = BgImageStore.instance.image;
+    return ColoredBox(
+      color: PageContentRenderer.paperColor,
+      child: bgImg == null
+          ? const SizedBox.expand()
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                RawImage(
+                  image: bgImg,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                ),
+                ColoredBox(
+                  color: PageContentRenderer.paperColor.withValues(
+                    alpha: BgImageStore.scrimAlpha(
+                      BgImageStore.scrimStrength,
+                      PageContentRenderer.paperOpacity,
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 
@@ -2006,6 +2037,8 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 衬底：透视旋转露边时不得见黑/白
+        _buildFullBleedBackdrop(),
         Transform(
           alignment: Alignment.center,
           transform: faceMatrix(oldY),
