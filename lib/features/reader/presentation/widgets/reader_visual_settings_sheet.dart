@@ -1001,7 +1001,10 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
       final dest = File('${bgDir.path}/custom_bg.$suffix');
       await dest.writeAsBytes(bytes, flush: true);
       if (!mounted) return;
-      setState(() => _bgImageId = BgImageStore.customId);
+      setState(() {
+        _bgImageId = BgImageStore.customId;
+        _preset = ''; // 同级互斥
+      });
       ref.read(readerProvider.notifier).setBgCustomPath(dest.path);
     } catch (e) {
       if (!mounted) return;
@@ -1034,6 +1037,8 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
       _preset = p.key;
       _lightPaper = p.light;
       _darkPaper = p.dark;
+      // 同级互斥：选纸色 → 取消风景图
+      _bgImageId = '';
     });
     ref.read(readerProvider.notifier).setBgPreset(
           p.key,
@@ -1252,7 +1257,10 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               label: '纯色纸',
               selected: _bgImageId.isEmpty,
               onTap: () {
-                setState(() => _bgImageId = '');
+                setState(() {
+                  _bgImageId = '';
+                  // 纯色纸：回到当前纸色预设（若有）
+                });
                 ref.read(readerProvider.notifier).setBgImage('');
               },
             ),
@@ -1265,6 +1273,9 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                   ref.read(readerProvider.notifier).setBgImage('');
                 } else {
                   await _pickCustomBg();
+                  if (_bgImageId == BgImageStore.customId) {
+                    setState(() => _preset = '');
+                  }
                 }
               },
             ),
@@ -1276,7 +1287,11 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 selected: _bgImageId == p.id,
                 onTap: () {
                   final id = _bgImageId == p.id ? '' : p.id;
-                  setState(() => _bgImageId = id);
+                  setState(() {
+                    _bgImageId = id;
+                    // 同级互斥：选风景图 → 取消纸色预设选中
+                    if (id.isNotEmpty) _preset = '';
+                  });
                   ref.read(readerProvider.notifier).setBgImage(id);
                 },
               ),

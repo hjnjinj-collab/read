@@ -270,6 +270,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (_bgImageId == id) return;
     _bgImageId = id;
     BgImageStore.instance.select(id);
+    // 同级互斥：风景图生效时纸色仅作蒙版/文字底，取消纸色预设「选中」态
+    if (id.isNotEmpty && _bgPreset.isNotEmpty) {
+      _bgPreset = '';
+    }
     PageContentRenderer.themeRevision++;
     _persistSettings();
     state = state.copyWith();
@@ -989,12 +993,20 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _applyPaperAndPersist();
   }
 
-  /// 内置背景预设（羊皮纸/亚麻/宣纸/夜空/深蓝/暖灰）
+  /// 内置背景预设（羊皮纸/亚麻/宣纸/夜空/深蓝/暖灰）。
+  /// 与风景背景图**同级互斥**：选纸色即取消风景图。
   void setBgPreset(String key, {required int light, required int dark}) {
     _bgPreset = key;
     _lightPaperColor = light;
     _darkPaperColor = dark;
+    // 同级互斥：纸色预设生效时清掉风景图
+    if (_bgImageId.isNotEmpty) {
+      _bgImageId = '';
+      BgImageStore.instance.select('');
+    }
     _applyPaperAndPersist();
+    PageContentRenderer.themeRevision++;
+    state = state.copyWith();
   }
 
   /// 图片纸色适配开关（漫画白边 / PDF 纸白）
