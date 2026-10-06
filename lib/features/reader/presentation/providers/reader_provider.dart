@@ -11,6 +11,7 @@ import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/ocr_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
+import '../services/bg_image_store.dart';
 import '../services/paper_tint.dart';
 import '../widgets/page_turn/page_turn_types.dart';
 import '../widgets/reader_page_widget.dart';
@@ -82,6 +83,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _imagePaperTint = persisted.imagePaperTint;
     PaperTint.enabled = _imagePaperTint;
     PaperTint.strength = persisted.imagePaperTintStrength;
+    _bgImageId = persisted.bgImagePreset;
+    BgImageStore.instance.selectedId = _bgImageId;
+    BgImageStore.instance.isDark = _themeDark;
+    BgImageStore.instance.warmUp();
     _themeMode = persisted.themeMode;
     _systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
         Brightness.dark;
@@ -232,6 +237,19 @@ class ReaderNotifier extends Notifier<ReadingState> {
   double _bgOpacity = 1.0;
   String _bgPreset = '';
   bool _imagePaperTint = true;
+  String _bgImageId = '';
+
+  /// 内置背景图预设 id（'' = 纯色）
+  String get bgImageId => _bgImageId;
+
+  void setBgImage(String id) {
+    if (_bgImageId == id) return;
+    _bgImageId = id;
+    BgImageStore.instance.select(id);
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
 
   // 颜色：日/夜正文 + 强调
   int? _lightTextColor;
@@ -541,6 +559,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
   void _syncThemeToRenderer() {
     PageContentRenderer.theme =
         _themeDark ? ReaderTheme.dark : ReaderTheme.light;
+    BgImageStore.instance.setDark(_themeDark);
     PageContentRenderer.applyCommentColorPreset(
       _commentColorPreset,
       dark: _themeDark,
@@ -625,6 +644,7 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'bgPreset': _bgPreset,
         'imagePaperTint': _imagePaperTint,
         'imagePaperTintStrength': PaperTint.strength,
+        'bgImagePreset': _bgImageId,
         'lightTextColor': _lightTextColor,
         'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,

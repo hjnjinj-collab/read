@@ -16,6 +16,7 @@ import '../../../../core/theme/shell_glass_style.dart';
 import '../../../shell/providers/shell_settings.dart';
 import '../../../shell/settings/shell_color_picker.dart';
 import '../providers/reader_provider.dart';
+import '../services/bg_image_presets.dart';
 import 'bug_log_page.dart';
 import 'reader_page_widget.dart' show PageContentRenderer;
 
@@ -958,6 +959,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   String _preset = '';
   bool _imagePaperTint = true;
   double _tintStrength = 1.0;
+  String _bgImageId = '';
 
   @override
   void initState() {
@@ -972,6 +974,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     _preset = n.bgPreset;
     _imagePaperTint = n.imagePaperTint;
     _tintStrength = n.imagePaperTintStrength;
+    _bgImageId = n.bgImageId;
   }
 
   void _applyPreset(_BgPreset p) {
@@ -1173,6 +1176,45 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 previewDark ? p.dark : p.light,
                 selected: _preset == p.key,
                 onTap: () => _applyPreset(p),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _SectionTitle('风景背景图', scheme,
+            line: ReaderMenuIcons.linePreset, fill: ReaderMenuIcons.fillPreset),
+        const SizedBox(height: 4),
+        Text(
+          '明暗两套自动切换；再点一次可取消',
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 0.72,
+          children: [
+            _BgImageTile(
+              label: '纯色纸',
+              selected: _bgImageId.isEmpty,
+              onTap: () {
+                setState(() => _bgImageId = '');
+                ref.read(readerProvider.notifier).setBgImage('');
+              },
+            ),
+            for (final p in kBgImagePresets)
+              _BgImageTile(
+                label: p.label,
+                asset: p.assetFor(_themeMode == 'dark' ||
+                    (_themeMode == 'auto' && Theme.of(context).brightness == Brightness.dark)),
+                selected: _bgImageId == p.id,
+                onTap: () {
+                  final id = _bgImageId == p.id ? '' : p.id;
+                  setState(() => _bgImageId = id);
+                  ref.read(readerProvider.notifier).setBgImage(id);
+                },
               ),
           ],
         ),
@@ -2551,6 +2593,67 @@ class _BgGridItem extends StatelessWidget {
           ),
         ),
       );
+}
+
+class _BgImageTile extends StatelessWidget {
+  const _BgImageTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.asset,
+  });
+
+  final String label;
+  final String? asset;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? scheme.primary : Colors.grey.withValues(alpha: 0.3),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (asset != null)
+              Image.asset(
+                asset!,
+                fit: BoxFit.cover,
+                cacheWidth: 360,
+                errorBuilder: (_, __, ___) => Container(color: Colors.grey[300]),
+              )
+            else
+              ColoredBox(color: scheme.surfaceContainerHighest),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                color: Colors.black45,
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ThemeChip extends StatelessWidget {

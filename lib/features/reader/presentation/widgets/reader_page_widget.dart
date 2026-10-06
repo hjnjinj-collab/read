@@ -7,6 +7,7 @@ import '../../../../core/models/simple_models.dart';
 import '../../../../core/services/measure_text_service.dart';
 import '../../../../core/services/reader_font.dart';
 import '../services/book_image_store.dart';
+import '../services/bg_image_store.dart';
 import '../services/paper_tint.dart';
 import '../diagnostics/reader_trace.dart';
 
@@ -133,6 +134,22 @@ class PagePainter extends CustomPainter {
       'summary': readerPageSummary(pageInfo.entries),
     });
     canvas.drawRect(Offset.zero & size, Paint()..color = PageContentRenderer.paperColor);
+    // 内置背景图：铺满窗 + 半透明纸色罩（保证正文可读）
+    final bgImg = BgImageStore.instance.image;
+    if (bgImg != null) {
+      paintImage(
+        canvas: canvas,
+        rect: Offset.zero & size,
+        image: bgImg,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.medium,
+      );
+      final scrim = PageContentRenderer.paperColor.withValues(
+        alpha: (0.22 * PageContentRenderer.paperOpacity).clamp(0.08, 0.55),
+      );
+      canvas.drawRect(Offset.zero & size, Paint()..color = scrim);
+    }
     PageContentRenderer.paintPage(
       canvas,
       pageInfo,

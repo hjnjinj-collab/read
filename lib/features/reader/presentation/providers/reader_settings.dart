@@ -143,6 +143,9 @@ class ReaderSettings {
   /// 纸色适配强度 0–1
   final double imagePaperTintStrength;
 
+  /// 内置背景图预设 id（'' = 纯色纸）
+  final String bgImagePreset;
+
   /// 正文文字色（ARGB int；null = 主题默认）
   /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
   final int? lightTextColor;
@@ -202,6 +205,7 @@ class ReaderSettings {
     required this.bgPreset,
     required this.imagePaperTint,
     required this.imagePaperTintStrength,
+    required this.bgImagePreset,
     required this.lightTextColor,
     required this.darkTextColor,
     required this.accentColor,
@@ -253,6 +257,7 @@ class ReaderSettings {
         bgPreset: '',
         imagePaperTint: true,
         imagePaperTintStrength: 1.0,
+        bgImagePreset: '',
         lightTextColor: null,
         darkTextColor: null,
         accentColor: null,
@@ -326,6 +331,9 @@ class ReaderSettings {
           if (v is num) return v.toDouble().clamp(0.0, 1.0);
           return 1.0;
         }(),
+        bgImagePreset: j['bgImagePreset'] is String
+            ? j['bgImagePreset'] as String
+            : '',
         lightTextColor: j['lightTextColor'] is int
             ? j['lightTextColor'] as int
             : (j['textColor'] is int ? j['textColor'] as int : null),
