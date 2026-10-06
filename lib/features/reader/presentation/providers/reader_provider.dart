@@ -287,16 +287,22 @@ class ReaderNotifier extends Notifier<ReadingState> {
   bool _isPdf = false;
   /// PDF 当前是否「原图」模式（对照）；文字/原图进度分开记
   bool _pdfImageMode = false;
+  /// PDF 扫描页模式原始值（0=文字重排 1=原图 2=自动）——必须入指纹。
+  /// Auto 与 Text 在 Dart 侧 `_pdfImageMode` 同为 false，但 Rust 分页结果
+  /// 不同（Auto 无 OCR 时回退整页图），只记 bool 会串缓存。
+  int _pdfScanMode = 2;
 
   /// 设置扫描页显示：0=文字重排 1=原图 2=自动
   void setPdfScanMode(int mode) {
     final wasImage = _pdfImageMode;
+    final wasScan = _pdfScanMode;
+    _pdfScanMode = mode;
     _pdfImageMode = mode == 1;
     unawaited(() async {
       await BookService().setPdfScanMode(mode);
       // 立即生效：清分页缓存 + **作废旧 FrameSet/纹理**（防原图/文字交替）
       // 再按新模式重载当前页（并恢复该模式进度）
-      if (_isPdf && wasImage != _pdfImageMode) {
+      if (_isPdf && (wasImage != _pdfImageMode || wasScan != _pdfScanMode)) {
         _invalidateFrames(reason: 'pdf-scan-mode');
         try {
           await BookService().clearStructuredPaginationCache(state.bookId ?? '');
@@ -1291,6 +1297,12 @@ class ReaderNotifier extends Notifier<ReadingState> {
     _rawPageCache.clear();
     // 立刻清空旧书图片缓存，避免换书首帧画到上一本纹理
     BookImageStore.instance.clear();
+    // 换书必须清格式标志：否则上一本 PDF 的 _isPdf 会污染本本 fingerprint
+    // （openBook 开头 advanceSession 用旧 flags，发布帧用新 flags → 翻页门永 wait）
+    // 扫描模式是全局用户设置，**不**在此重置。
+    _isEpub = false;
+    _isComic = false;
+    _isPdf = false;
     _cachedNotesChapterIndex = null;
     _pageCountForChapter = -1;
     clearSelection();
@@ -1345,6 +1357,13 @@ class ReaderNotifier extends Notifier<ReadingState> {
       _isEpub = format == 'epub';
       _isComic = format == 'comic';
       _isPdf = format == 'pdf';
+      // 格式已知：同步 store.configFingerprint（openBook 开头 advance 时
+      // 尚不知是否 PDF，指纹里的 scanMode 字段是旧值；不重同步则
+      // FrameSet 指纹与 store 永久不一致，翻页门一直 wait）
+      _renderStore.advanceSession(
+        sessionEpoch: _sessionEpoch,
+        configFingerprint: layoutFingerprint(),
+      );
       // 漫画：只动边缘留白；PDF：文档重映射保字迹
       PaperTint.imagesNeedTint = _isComic || _isPdf;
       PaperTint.mode = _isPdf && !_isComic ? TintMode.pdf : TintMode.comic;
@@ -2904,9 +2923,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
         '${_chineseConvert.index}_'
         '${_replaceRulesFingerprint()}_'
         '${_reSegment ? 1 : 0}'
-        // PDF 原图/文字分属不同分页结果，必须入指纹，否则 FrameSet/缓存串页
-        '_${_isPdf ? (_pdfImageMode ? 1 : 0) : 2}'
-        '_${_paraFormatHash}';
+        // PDF 扫描模式 0/1/2 必须入指纹：Auto 与 Text 分页结果不同
+        // （Auto 无 OCR 回退整页图），只记 bool 会串页/串缓存
+        '_${_isPdf ? _pdfScanMode : -1}'
+        '_$_paraFormatHash';
   }
 
   /// 生成页数缓存键（排版参数指纹 + 章节索引）
