@@ -150,50 +150,54 @@ class _PaperColorPickerDialogState
                         color: Colors.white.withValues(alpha: 0.22),
                       ),
                     ),
-                    child: Stack(
-                      children: [
-                        if (bgImg != null)
-                          Positioned.fill(
-                            child: RawImage(
-                              image: bgImg,
-                              fit: BoxFit.cover,
-                              filterQuality: FilterQuality.medium,
+                    // 内层 ClipRRect：风景图/色块不得穿出圆角（层级老问题）
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(13),
+                      child: Stack(
+                        children: [
+                          if (bgImg != null)
+                            Positioned.fill(
+                              child: RawImage(
+                                image: bgImg,
+                                fit: BoxFit.cover,
+                                filterQuality: FilterQuality.medium,
+                              ),
+                            ),
+                          if (bgImg != null)
+                            Positioned.fill(child: ColoredBox(color: scrim)),
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '字有时是会骗人的',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    // 挑背景：字=正文色；挑文字：字=当前选中色
+                                    color: widget.previewBg == null
+                                        ? widget.textColor
+                                        : _color,
+                                    height: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '预览 · 背景与正文色搭配',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: (widget.previewBg == null
+                                            ? widget.textColor
+                                            : _color)
+                                        .withValues(alpha: 0.72),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        if (bgImg != null)
-                          Positioned.fill(child: ColoredBox(color: scrim)),
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '字有时是会骗人的',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  // 挑背景：字=正文色；挑文字：字=当前选中色
-                                  color: widget.previewBg == null
-                                      ? widget.textColor
-                                      : _color,
-                                  height: 1.5,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '预览 · 背景与正文色搭配',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: (widget.previewBg == null
-                                          ? widget.textColor
-                                          : _color)
-                                      .withValues(alpha: 0.72),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   );
                 }),

@@ -1156,6 +1156,14 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
           style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 8),
+        // 风景/自定义背景激活时：纸色取色置灰（只调蒙版/文字），点纸色会清掉背景图
+        Text(
+          _bgImageId.isNotEmpty
+              ? '已使用风景背景：背景色不可用（仅可改文字色）'
+              : '日间 / 夜间独立配色，切换模式自动套用',
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -1163,8 +1171,11 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 '日间背景',
                 _lightPaper ?? const Color(0xFFF5F1E8),
                 showPickIcon: true,
-                onTap: () => _pickColor(context, n,
-                    isDark: false, isText: false),
+                enabled: _bgImageId.isEmpty,
+                onTap: _bgImageId.isEmpty
+                    ? () => _pickColor(context, n,
+                        isDark: false, isText: false)
+                    : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -1187,8 +1198,10 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 '夜间背景',
                 _darkPaper ?? const Color(0xFF1E1E1E),
                 showPickIcon: true,
-                onTap: () =>
-                    _pickColor(context, n, isDark: true, isText: false),
+                enabled: _bgImageId.isEmpty,
+                onTap: _bgImageId.isEmpty
+                    ? () => _pickColor(context, n, isDark: true, isText: false)
+                    : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -2607,7 +2620,7 @@ class _GlassTrackSlider extends StatelessWidget {
 
 class _ColorCard extends StatelessWidget {
   const _ColorCard(this.label, this.color,
-      {this.onTap, this.selected = false, this.showPickIcon = false});
+      {this.onTap, this.selected = false, this.showPickIcon = false, this.enabled = true});
   final String label;
   final Color color;
   final VoidCallback? onTap;
@@ -2616,25 +2629,30 @@ class _ColorCard extends StatelessWidget {
   /// true：右上角显示取色器角标，提示可自定义
   final bool showPickIcon;
 
+  /// false：置灰不可点（如风景背景激活时的纸色）
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 64,
-        width: 88,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected
-                ? scheme.primary
-                : Colors.white.withValues(alpha: 0.3),
-            width: selected ? 2.2 : 1,
+      onTap: enabled ? onTap : null,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.38,
+        child: Container(
+          height: 64,
+          width: 88,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? scheme.primary
+                  : Colors.white.withValues(alpha: 0.3),
+              width: selected ? 2.2 : 1,
+            ),
           ),
-        ),
-        child: Stack(
+          child: Stack(
           children: [
             Center(
               child: Text(
@@ -2667,6 +2685,7 @@ class _ColorCard extends StatelessWidget {
                 ),
               ),
           ],
+          ),
         ),
       ),
     );
