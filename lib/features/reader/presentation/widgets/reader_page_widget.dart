@@ -146,7 +146,10 @@ class PagePainter extends CustomPainter {
         filterQuality: FilterQuality.medium,
       );
       final scrim = PageContentRenderer.paperColor.withValues(
-        alpha: (0.22 * PageContentRenderer.paperOpacity).clamp(0.08, 0.55),
+        alpha: BgImageStore.scrimAlpha(
+          BgImageStore.scrimStrength,
+          PageContentRenderer.paperOpacity,
+        ),
       );
       canvas.drawRect(Offset.zero & size, Paint()..color = scrim);
     }

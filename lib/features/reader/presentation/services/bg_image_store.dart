@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -6,16 +7,31 @@ import 'package:flutter/services.dart';
 import 'bg_image_presets.dart';
 
 /// 内置阅读背景图（明/暗成对）缓存与选中状态。
+/// 另支持用户自定义壁纸（[customId] + [customPath]）。
 class BgImageStore {
   BgImageStore._();
 
   static final BgImageStore instance = BgImageStore._();
 
-  /// 当前选中预设 id；空 = 纯色纸
+  /// 用户自定义壁纸伪 id
+  static const customId = 'custom';
+
+  /// 当前选中预设 id；空 = 纯色纸；[customId] = 用户壁纸
   String selectedId = '';
 
-  /// 是否暗色（决定用 dark/light 资源）
+  /// 自定义壁纸本地路径（空 = 未设置）
+  String customPath = '';
+
+  /// 是否暗色（决定用 dark/light 资源；自定义图共用一张）
   bool isDark = false;
+
+  /// 纸色蒙版强度 0–1（绘制热路径同步读）
+  static double scrimStrength = 0.35;
+
+  /// 蒙版 alpha：strength × paperOpacity，clamp 0.05–0.85
+  static double scrimAlpha(double strength, double paperOpacity) {
+    return (strength.clamp(0.0, 1.0) * paperOpacity).clamp(0.05, 0.85);
+  }
 
   final Map<String, ui.Image> _cache = {};
   final Set<String> _loading = {};
@@ -28,7 +44,11 @@ class BgImageStore {
     return null;
   }
 
+  /// 当前应解码的资源键：asset 路径或 `file:<path>`
   String? get currentAsset {
+    if (selectedId == customId) {
+      return customPath.isEmpty ? null : 'file:$customPath';
+    }
     final p = selected;
     if (p == null) return null;
     return p.assetFor(isDark);
@@ -46,6 +66,18 @@ class BgImageStore {
     selectedId = id;
     _ensureLoaded();
     onImageReady?.call();
+  }
+
+  /// 设置自定义壁纸路径并选中
+  void setCustomPath(String path) {
+    customPath = path;
+    if (path.isNotEmpty) {
+      // 路径可能被覆盖写（同名文件）——丢弃旧解码
+      _cache.remove('file:$path')?.dispose();
+      selectedId = customId;
+      _ensureLoaded();
+      onImageReady?.call();
+    }
   }
 
   void setDark(bool dark) {
@@ -77,7 +109,7 @@ class BgImageStore {
     if (_cache.containsKey(asset) || _loading.contains(asset)) return;
     _loading.add(asset);
     try {
-      final img = await _decodeAsset(asset);
+      final img = await _decode(asset);
       if (img != null) {
         _cache[asset] = img;
         if (_cache.length > 8) {
@@ -92,6 +124,28 @@ class BgImageStore {
       debugPrint('BgImageStore load fail $asset: $e');
     } finally {
       _loading.remove(asset);
+    }
+  }
+
+  Future<ui.Image?> _decode(String key) async {
+    if (key.startsWith('file:')) {
+      return _decodeFile(key.substring(5));
+    }
+    return _decodeAsset(key);
+  }
+
+  Future<ui.Image?> _decodeFile(String path) async {
+    try {
+      final f = File(path);
+      if (!await f.exists()) return null;
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) return null;
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (e) {
+      debugPrint('BgImageStore decode file fail $path: $e');
+      return null;
     }
   }
 

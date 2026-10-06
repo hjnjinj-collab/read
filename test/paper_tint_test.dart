@@ -1,5 +1,6 @@
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:legado_flutter/features/reader/presentation/services/bg_image_store.dart';
 import 'package:legado_flutter/features/reader/presentation/services/paper_tint.dart';
 
 void main() {
@@ -120,6 +121,15 @@ void main() {
       PaperTint.enabled = true;
       PaperTint.imagesNeedTint = false;
       expect(PaperTint.active, isFalse);
+    });
+  });
+
+  group('背景蒙版 alpha', () {
+    test('strength×paperOpacity 并夹取 0.05–0.85', () {
+      expect(BgImageStore.scrimAlpha(0.35, 1.0), closeTo(0.35, 0.001));
+      expect(BgImageStore.scrimAlpha(0, 1.0), 0.05); // 下限
+      expect(BgImageStore.scrimAlpha(1, 1.0), 0.85); // 上限
+      expect(BgImageStore.scrimAlpha(0.5, 0.4), closeTo(0.2, 0.001));
     });
   });
 }

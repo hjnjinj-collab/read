@@ -143,8 +143,14 @@ class ReaderSettings {
   /// 纸色适配强度 0–1
   final double imagePaperTintStrength;
 
-  /// 内置背景图预设 id（'' = 纯色纸）
+  /// 内置背景图预设 id（'' = 纯色纸；'custom' = 用户壁纸）
   final String bgImagePreset;
+
+  /// 用户自定义壁纸路径（空 = 未设）
+  final String bgCustomPath;
+
+  /// 背景图纸色蒙版强度 0–1（默认 0.35）
+  final double bgScrimStrength;
 
   /// 正文文字色（ARGB int；null = 主题默认）
   /// 日/夜独立：light = 日间正文色，dark = 夜间正文色
@@ -206,6 +212,8 @@ class ReaderSettings {
     required this.imagePaperTint,
     required this.imagePaperTintStrength,
     required this.bgImagePreset,
+    this.bgCustomPath = '',
+    this.bgScrimStrength = 0.35,
     required this.lightTextColor,
     required this.darkTextColor,
     required this.accentColor,
@@ -258,6 +266,8 @@ class ReaderSettings {
         imagePaperTint: true,
         imagePaperTintStrength: 1.0,
         bgImagePreset: '',
+        bgCustomPath: '',
+        bgScrimStrength: 0.35,
         lightTextColor: null,
         darkTextColor: null,
         accentColor: null,
@@ -334,6 +344,8 @@ class ReaderSettings {
         bgImagePreset: j['bgImagePreset'] is String
             ? j['bgImagePreset'] as String
             : '',
+        bgCustomPath: _s(j, 'bgCustomPath', ''),
+        bgScrimStrength: _d(j, 'bgScrimStrength', 0.35).clamp(0.0, 1.0),
         lightTextColor: j['lightTextColor'] is int
             ? j['lightTextColor'] as int
             : (j['textColor'] is int ? j['textColor'] as int : null),

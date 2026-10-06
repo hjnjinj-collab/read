@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/ffi/book_service.dart';
 import '../../../../core/services/font_provider.dart';
@@ -17,6 +19,7 @@ import '../../../shell/providers/shell_settings.dart';
 import '../../../shell/settings/shell_color_picker.dart';
 import '../providers/reader_provider.dart';
 import '../services/bg_image_presets.dart';
+import '../services/bg_image_store.dart';
 import 'bug_log_page.dart';
 import 'reader_page_widget.dart' show PageContentRenderer;
 
@@ -960,6 +963,52 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
   bool _imagePaperTint = true;
   double _tintStrength = 1.0;
   String _bgImageId = '';
+  double _bgScrim = 0.35;
+
+  Future<void> _pickCustomBg() async {
+    try {
+      final result = await FilePicker.pickFiles(type: FileType.image);
+      if (result.isEmpty) return;
+      final picked = result.first;
+      // file_picker 12.x：无 bytes 字段，经 path 读
+      if (picked.path == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('选中的文件无路径信息')),
+          );
+        }
+        return;
+      }
+      final bytes = await File(picked.path!).readAsBytes();
+      if (bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('读取图片失败')),
+          );
+        }
+        return;
+      }
+      final dir = await getApplicationDocumentsDirectory();
+      final bgDir = Directory('${dir.path}/backgrounds');
+      if (!await bgDir.exists()) await bgDir.create(recursive: true);
+      final name = picked.name.toLowerCase();
+      final suffix = name.endsWith('.png')
+          ? 'png'
+          : name.endsWith('.webp')
+              ? 'webp'
+              : 'jpg';
+      final dest = File('${bgDir.path}/custom_bg.$suffix');
+      await dest.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      setState(() => _bgImageId = BgImageStore.customId);
+      ref.read(readerProvider.notifier).setBgCustomPath(dest.path);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('设置壁纸失败：$e')),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -975,6 +1024,7 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
     _imagePaperTint = n.imagePaperTint;
     _tintStrength = n.imagePaperTintStrength;
     _bgImageId = n.bgImageId;
+    _bgScrim = n.bgScrimStrength;
   }
 
   void _applyPreset(_BgPreset p) {
@@ -1204,6 +1254,18 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
                 ref.read(readerProvider.notifier).setBgImage('');
               },
             ),
+            _BgImageTile(
+              label: '自定义',
+              selected: _bgImageId == BgImageStore.customId,
+              onTap: () async {
+                if (_bgImageId == BgImageStore.customId) {
+                  setState(() => _bgImageId = '');
+                  ref.read(readerProvider.notifier).setBgImage('');
+                } else {
+                  await _pickCustomBg();
+                }
+              },
+            ),
             for (final p in kBgImagePresets)
               _BgImageTile(
                 label: p.label,
@@ -1218,6 +1280,28 @@ class _BackgroundPageState extends ConsumerState<_BackgroundPage> {
               ),
           ],
         ),
+        const SizedBox(height: 12),
+        if (_bgImageId.isNotEmpty) ...[
+          Text(
+            '蒙版强度 ${(_bgScrim * 100).round()}%',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
+          Slider(
+            value: _bgScrim,
+            onChanged: (v) {
+              setState(() => _bgScrim = v);
+              ref.read(readerProvider.notifier).setBgScrimStrength(v);
+            },
+          ),
+          Text(
+            '越高正文越清晰，背景越淡',
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+        ],
         const SizedBox(height: 16),
         _GlassSwitchRow(
           line: ReaderMenuIcons.linePreset,

@@ -84,6 +84,10 @@ class ReaderNotifier extends Notifier<ReadingState> {
     PaperTint.enabled = _imagePaperTint;
     PaperTint.strength = persisted.imagePaperTintStrength;
     _bgImageId = persisted.bgImagePreset;
+    _bgCustomPath = persisted.bgCustomPath;
+    _bgScrimStrength = persisted.bgScrimStrength;
+    BgImageStore.scrimStrength = _bgScrimStrength;
+    BgImageStore.instance.customPath = _bgCustomPath;
     BgImageStore.instance.selectedId = _bgImageId;
     BgImageStore.instance.isDark = _themeDark;
     BgImageStore.instance.warmUp();
@@ -238,6 +242,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
   String _bgPreset = '';
   bool _imagePaperTint = true;
   String _bgImageId = '';
+  String _bgCustomPath = '';
+  double _bgScrimStrength = 0.35;
 
   /// 内置背景图预设 id（'' = 纯色）
   String get bgImageId => _bgImageId;
@@ -246,6 +252,32 @@ class ReaderNotifier extends Notifier<ReadingState> {
     if (_bgImageId == id) return;
     _bgImageId = id;
     BgImageStore.instance.select(id);
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  String get bgCustomPath => _bgCustomPath;
+  double get bgScrimStrength => _bgScrimStrength;
+
+  /// 设置用户壁纸并选中（路径由设置页拷入应用目录后传入）
+  void setBgCustomPath(String path) {
+    _bgCustomPath = path;
+    BgImageStore.instance.setCustomPath(path);
+    if (path.isNotEmpty) {
+      _bgImageId = BgImageStore.customId;
+    }
+    PageContentRenderer.themeRevision++;
+    _persistSettings();
+    state = state.copyWith();
+  }
+
+  /// 背景图纸色蒙版强度 0–1
+  void setBgScrimStrength(double v) {
+    final x = v.clamp(0.0, 1.0);
+    if ((_bgScrimStrength - x).abs() < 0.005) return;
+    _bgScrimStrength = x;
+    BgImageStore.scrimStrength = x;
     PageContentRenderer.themeRevision++;
     _persistSettings();
     state = state.copyWith();
@@ -651,6 +683,8 @@ class ReaderNotifier extends Notifier<ReadingState> {
         'imagePaperTint': _imagePaperTint,
         'imagePaperTintStrength': PaperTint.strength,
         'bgImagePreset': _bgImageId,
+        'bgCustomPath': _bgCustomPath,
+        'bgScrimStrength': _bgScrimStrength,
         'lightTextColor': _lightTextColor,
         'darkTextColor': _darkTextColor,
         'accentColor': _accentColor,
