@@ -353,20 +353,33 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
   /// 启动预热入口（main 调用）：填充进程级 program 缓存
   static Future<void> preloadShaders() => _ShaderPrograms.preload();
   
+  /// 快照像素尺寸：2×dpr 超采样（边长上限 4096），shader 变换采样不糊。
+  /// 注意：不可把 scale clamp 到 dpr，否则高 dpr 机上等于不超采样。
+  static ({int w, int h}) snapshotPixelSize(Size size, double dpr) {
+    final s = dpr * 2;
+    return (
+      w: (size.width * s).round().clamp(1, 4096),
+      h: (size.height * s).round().clamp(1, 4096),
+    );
+  }
+
   /// 将 PageInfo 转换为 ui.Image（用于 shader 纹理采样）
   /// 2026-09-03 v16.3: 按 devicePixelRatio 生成高分辨率快照——
   /// 修复"新页纹理模糊 + 动画完成后闪烁"（1x 快照被 GPU 放大 → 与矢量渲染对比闪烁）
+  /// 2026-10-01: 2×dpr 超采样，水波/坍塌变换采样仍清晰
   Future<ui.Image?> _pageToImage(PageInfo? page, Size size) async {
     if (page == null) return null;
 
     try {
       final dpr = View.of(context).devicePixelRatio;
-      final pixelWidth = (size.width * dpr).round();
-      final pixelHeight = (size.height * dpr).round();
+      final px = snapshotPixelSize(size, dpr);
+      final pixelWidth = px.w;
+      final pixelHeight = px.h;
 
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
-      canvas.scale(dpr);  // 矢量内容按 dpr 缩放绘制，快照原生清晰
+      final scale = pixelWidth / size.width;
+      canvas.scale(scale); // 2×dpr 超采样
 
       // v16.9.3 核心修复：先画纸色底——paintPage 不含纸色底（调用方自绘），
       // 缺失导致快照透明背景 → 文字笔画间透出下层另一页内容 = 双重文字重影
@@ -1686,6 +1699,10 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         return _buildRippleTransition();
       } else if (widget.mode == PageTurnMode.collapse) {
         return _buildCollapseTransition();
+      } else if (widget.mode == PageTurnMode.cover) {
+        return _buildCoverTransition();
+      } else if (widget.mode == PageTurnMode.cube) {
+        return _buildCubeTransition();
       } else {
         return _buildCurlTransition();
       }
@@ -1874,6 +1891,94 @@ class PageTurnComposerState extends ConsumerState<PageTurnComposer>
         Transform.translate(
           offset: Offset(0, offset),
           child: _buildPage(widget.currentPage),
+        ),
+      ],
+    );
+  }
+
+  /// 覆盖过渡（cover）：新页从方向侧滑入盖住旧页；旧页微缩+暗下
+  Widget _buildCoverTransition() {
+    final progress = _turnController!.progress.clamp(0.0, 1.0);
+    final size = _viewport;
+    final goingNext = _turnDirection == PageDirection.next;
+    final dx = goingNext ? size.width * (1 - progress) : -size.width * (1 - progress);
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 旧页：scale 0.92 + 12% 黑罩
+        Transform.scale(
+          scale: 1.0 - 0.08 * progress,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildPage(widget.currentPage),
+              ColoredBox(
+                color: Colors.black.withValues(alpha: 0.12 * progress),
+              ),
+            ],
+          ),
+        ),
+        // 新页滑入盖上
+        Transform.translate(
+          offset: Offset(dx, 0),
+          child: _buildPage(_targetFrame!.page),
+        ),
+      ],
+    );
+  }
+
+  /// 立方体过渡（cube）：Y 轴透视旋转，旧页转出 / 新页转入
+  Widget _buildCubeTransition() {
+    final progress = _turnController!.progress.clamp(0.0, 1.0);
+    final size = _viewport;
+    final goingNext = _turnDirection == PageDirection.next;
+    // 0 → π/2
+    final angle = progress * math.pi / 2;
+    final eye = 1.0 / (size.width * 1.2);
+
+    Matrix4 faceMatrix(double yAngle, double translateX) {
+      return Matrix4.identity()
+        ..setEntry(3, 2, eye)
+        ..translate(translateX, 0.0, -size.width / 2)
+        ..rotateY(yAngle)
+        ..translate(size.width / 2, 0.0, 0.0);
+    }
+
+    final Widget oldFace = _buildPage(widget.currentPage);
+    final Widget newFace = _buildPage(_targetFrame!.page);
+
+    if (goingNext) {
+      // 旧页从 0 转到 -90°，新页从 +90° 转到 0
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Transform(
+            alignment: Alignment.centerRight,
+            transform: faceMatrix(-angle, size.width / 2),
+            child: oldFace,
+          ),
+          Transform(
+            alignment: Alignment.centerLeft,
+            transform: faceMatrix(math.pi / 2 - angle, -size.width / 2),
+            child: newFace,
+          ),
+        ],
+      );
+    }
+    // prev：镜像
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Transform(
+          alignment: Alignment.centerLeft,
+          transform: faceMatrix(angle, -size.width / 2),
+          child: oldFace,
+        ),
+        Transform(
+          alignment: Alignment.centerRight,
+          transform: faceMatrix(-(math.pi / 2 - angle), size.width / 2),
+          child: newFace,
         ),
       ],
     );

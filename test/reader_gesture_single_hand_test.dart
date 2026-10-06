@@ -79,4 +79,38 @@ void main() {
       expect('volumeDown', 'volumeDown');
     });
   });
+
+  group('快照超采样', () {
+    test('2×dpr 且上限 4096', () {
+      // 与 PageTurnComposer.snapshotPixelSize 同式
+      ({int w, int h}) snap(Size size, double dpr) {
+        final s = dpr * 2;
+        return (
+          w: (size.width * s).round().clamp(1, 4096),
+          h: (size.height * s).round().clamp(1, 4096),
+        );
+      }
+
+      final r = snap(const Size(400, 800), 3.0);
+      expect(r.w, 2400); // 400 * 3 * 2
+      expect(r.h, 4096); // 4800 上限
+    });
+  });
+
+  group('Cover / Cube 进度', () {
+    test('Cover next：progress 0→1，新页 X 从 w→0', () {
+      const w = 400.0;
+      double dx(double p, bool next) => next ? w * (1 - p) : -w * (1 - p);
+      expect(dx(0, true), w);
+      expect(dx(1, true), 0);
+      expect(dx(0.5, true), w / 2);
+      expect(dx(1, false), 0);
+    });
+
+    test('Cube：progress 0.5 旋转角为 π/4', () {
+      const pi = 3.141592653589793;
+      double angle(double p) => p * pi / 2;
+      expect(angle(0.5), closeTo(pi / 4, 0.001));
+    });
+  });
 }

@@ -10,6 +10,7 @@ import 'scroll_turn_controller.dart';
 import 'simulation_turn_controller.dart';
 import 'ripple_turn_controller.dart';
 import 'collapse_turn_controller.dart';
+import 'simple_turn_controller.dart';
 
 /// 翻页方向
 enum PageDirection { none, prev, next }
@@ -20,6 +21,8 @@ enum PageTurnMode {
   verticalScroll,  // 上下滚动
   ripple,          // 水波纹翻页（2026-09-03 新增）
   collapse,        // 方块坍塌溶解翻页（2026-09-04 新增，点击位置为坍塌中心）
+  cover,           // 覆盖：新页滑入盖住旧页，旧页微缩暗下
+  cube,            // 立方体：Y 轴透视旋转翻页
 }
 
 /// 翻页动画速度（2026-09-03 三档：快/中/慢）
@@ -90,5 +93,24 @@ PageTurnAnimationController createTurnController({
         onProgressUpdate: onProgressUpdate,
         durationMs: speed.rippleDurationMs,
       );
+    case PageTurnMode.cover:
+    case PageTurnMode.cube:
+      return SimpleTurnController(
+        vsync: vsync,
+        onProgressUpdate: onProgressUpdate,
+        durationMs: speed.rippleDurationMs,
+      );
   }
+}
+
+/// 模式中文名（设置/菜单共用）
+extension PageTurnModeLabel on PageTurnMode {
+  String get label => switch (this) {
+        PageTurnMode.simulation => '卷曲',
+        PageTurnMode.verticalScroll => '滚动',
+        PageTurnMode.ripple => '水波纹',
+        PageTurnMode.collapse => '坍塌',
+        PageTurnMode.cover => '覆盖',
+        PageTurnMode.cube => '立方体',
+      };
 }

@@ -1010,18 +1010,7 @@ class ReaderBottomChrome extends StatelessWidget {
     );
   }
 
-  static String _pageTurnLabel(PageTurnMode m) {
-    switch (m) {
-      case PageTurnMode.simulation:
-        return '卷曲';
-      case PageTurnMode.verticalScroll:
-        return '滚动';
-      case PageTurnMode.ripple:
-        return '水波纹';
-      case PageTurnMode.collapse:
-        return '坍塌';
-    }
-  }
+  static String _pageTurnLabel(PageTurnMode m) => m.label;
 
   static String _pageSpeedLabel(PageTurnSpeed s) {
     switch (s) {

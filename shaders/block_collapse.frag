@@ -16,7 +16,8 @@
 
 #version 460 core
 
-precision mediump float;
+// highp：UV/几何运算，mediump 在部分 GPU 上会把纹理采样算糊
+precision highp float;
 
 #include <flutter/runtime_effect.glsl>
 
